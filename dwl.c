@@ -179,6 +179,7 @@ typedef struct {
 	Workspace *ws;
 	int isfloating, isurgent, isfullscreen;
 	int held; /* how the focus guard holds it from focus: FgFree, FgWaiting, FgPopup */
+	unsigned long focus_seq; /* when it last had focus, in the guard's count; 0 for never */
 	unsigned long ipc_id; /* the IPC's container id, set on first use */
 	int ipc_announced; /* its "new" event is out, so others may follow */
 } Client;

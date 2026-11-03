@@ -47,6 +47,9 @@ lands with a test.
   three-column and two columns + stack beside tile and monocle, with
   tide's geometry; a layout, mfact and nmaster per workspace part, from
   its monitor's aspect; the `layout` event.
+- **Notification grants** (#23): `grant --or-recent`, which lapsing
+  unused brings up the app's most recent window, and `focus recent`,
+  which does at once.
 - **The focus guard** (#22): `focus_guard enable`, and the `grant` and
   `grant extend` commands. A new window takes focus only through a
   grant, from the app you're in, as a portal's dialog, or as a polkit
@@ -131,6 +134,10 @@ lands with a test.
   `urgent` in the tree and in events, so a restarted shell reads the
   marks there, with no `tide-attention` event or `announce_waiting`.
   Reversible.
+- **Notification grants' names** (#23): `grant --or-recent` and `focus
+  recent APP`, tidewm's own for tide's `grant_or_recent` and
+  `focus_recent`. sway's `[app_id=...] focus` focuses every match rather
+  than the most recent. Reversible before tide's shell uses them.
 - **X11 activation is marked, guard or not** (#22): `_NET_ACTIVE_WINDOW`
   marks the window urgent, as xdg-activation already did, and as sway's
   default `focus_on_window_activation urgent` does, where dwl activated
@@ -146,11 +153,10 @@ lands with a test.
 ## Plan
 
 1. **The focus guard's rest**: the marks' order, most recent first, and
-   the shell's own marks, from notifications; a notification's grant,
-   falling back to the app's most recent window, and that window at once
-   for one whose notification is gone; the last key or click and its
-   window, for the shell's polkit agent; a notice when no shell runs. The
-   guard, grants and activation came with #22.
+   the shell's own marks, from notifications; the last key or click and
+   its window, for the shell's polkit agent; a notice when no shell runs.
+   The guard, grants and activation came with #22, notification grants
+   with #23.
 2. **Window states**: maximize, ending when another window on the
    workspace takes focus; fullscreen on open, applied with the grant.
 3. **Dialogs and floating**: centered on the parent, capped at 80% of the

@@ -21,7 +21,8 @@
  * A grant is one-shot: the first window that matches uses it, and so does
  * an activation of a window the app already had. Anything you do after it
  * cancels it: a key press, a click, or focus moving to another window by
- * any means. It lapses after grant_seconds.
+ * any means. It lapses after grant_seconds. A notification's click makes
+ * one that, lapsing unused, brings up the app's most recent window.
  *
  * Activation, xdg-activation's or X11's _NET_ACTIVE_WINDOW, marks a window
  * urgent rather than focusing it, unless a grant names it, with the guard
@@ -36,6 +37,7 @@ typedef struct {
 	pid_t pid; /* the process that asked, whose descendants may use it; 0 for none */
 	unsigned long key; /* the granting process's pid, for grant extend; 0 for none */
 	char *workspace; /* where its window goes, focus following; NULL for where it opens */
+	int or_recent; /* lapsing unused, it brings up the app's most recent window */
 	uint64_t at; /* when, in monotonic microseconds */
 } FgGrant;
 
@@ -45,6 +47,8 @@ static unsigned long fg_active_ws; /* the current workspace's IPC id as it was f
 static pid_t fg_active_pid;
 static char *fg_active_app; /* its app, normalized */
 static uint64_t fg_last_key; /* when you last pressed a key; 0 for never */
+static unsigned long fg_focus_count; /* focuses so far, for Client.focus_seq */
+static struct wl_event_source *fg_timer; /* for or-recent grants' lapses */
 static int fg_focusing; /* focus that isn't you moving on: the guard's own, or an output change's */
 static Client *fg_mapping; /* the window mapping now: focus moving meanwhile isn't you */
 static Client *fg_granted; /* a new window that used a grant */
@@ -156,14 +160,23 @@ fg_free(FgGrant *g)
 	free(g);
 }
 
-/* Drops the grants that have lapsed */
+/* Whether g has lapsed: one that brings up the app's window waits for
+ * fg_lapse to do it, but no window may use it meanwhile */
+static int
+fg_lapsed(const FgGrant *g, uint64_t now)
+{
+	return now - g->at > fg_grant_us();
+}
+
+/* Drops the grants that have lapsed, but the or-recent ones, which
+ * fg_lapse handles */
 static void
 fg_expire(void)
 {
 	FgGrant *g, *tmp;
-	uint64_t now = fg_now(), us = fg_grant_us();
+	uint64_t now = fg_now();
 	wl_list_for_each_safe(g, tmp, &fg_grants, link)
-		if (now - g->at > us)
+		if (!g->or_recent && fg_lapsed(g, now))
 			fg_free(g);
 }
 
@@ -200,11 +213,13 @@ fg_take(Client *c)
 {
 	FgGrant *g;
 	char *app = fg_normalize(fg_raw_appid(c));
+	uint64_t now = fg_now();
 	int wildcard;
 	fg_expire();
 	for (wildcard = 0; wildcard < 2; wildcard++) {
 		wl_list_for_each(g, &fg_grants, link) {
-			if (fg_wildcard(g) == wildcard && (wildcard || fg_names(g, app))) {
+			if (!fg_lapsed(g, now) && fg_wildcard(g) == wildcard
+					&& (wildcard || fg_names(g, app))) {
 				free(app);
 				wl_list_remove(&g->link);
 				wl_list_init(&g->link);
@@ -348,6 +363,137 @@ fg_focus(Client *c, const char *workspace)
 	fg_defer(c);
 }
 
+/* The window of any of apps focused most recently, or, with none ever
+ * focused, the first of them; NULL for none. A site open in two Chrome
+ * profiles is two apps, and its notification brings up whichever was used
+ * last. */
+static Client *
+fg_most_recent(char **apps, size_t napps)
+{
+	Client *c, *best = NULL;
+	char *app;
+	size_t i;
+	int mine;
+	wl_list_for_each(c, &clients, link) {
+		app = fg_normalize(fg_raw_appid(c));
+		for (i = 0, mine = 0; i < napps && !mine; i++)
+			mine = fg_same_id(apps[i], app);
+		free(app);
+		if (mine && (!best || c->focus_seq > best->focus_seq))
+			best = c;
+	}
+	return best;
+}
+
+/* Brings up the most recent window of apps, as the guard, or says there's
+ * none on stderr, naming them */
+static int
+fg_bring_up(char **apps, size_t napps, const char *why)
+{
+	Client *c = fg_most_recent(apps, napps);
+	size_t i;
+	if (c) {
+		fg_focus(c, NULL);
+		return 1;
+	}
+	fprintf(stderr, "tidewm: %s: no window of", why);
+	for (i = 0; i < napps; i++)
+		fprintf(stderr, " %s", apps[i]);
+	fprintf(stderr, " to bring up\n");
+	return 0;
+}
+
+static int fg_lapse(void *data);
+
+/* Sets the timer for the next or-recent grant to lapse, or stops it */
+static void
+fg_arm(void)
+{
+	FgGrant *g;
+	uint64_t now = fg_now(), next = 0, due;
+	wl_list_for_each(g, &fg_grants, link) {
+		due = g->at + fg_grant_us();
+		if (g->or_recent && (!next || due < next))
+			next = due;
+	}
+	if (!fg_timer && next && !(fg_timer = wl_event_loop_add_timer(event_loop, fg_lapse, NULL))) {
+		/* Without its timer, a notification's grant just lapses */
+		fprintf(stderr, "tidewm: can't make the focus guard's timer\n");
+		return;
+	}
+	if (fg_timer)
+		wl_event_source_timer_update(fg_timer, !next ? 0
+				: next <= now ? 1 : (int)MIN((next - now + 999) / 1000, INT_MAX));
+}
+
+/* A notification's grant ran out unused: the app sent no activation and
+ * opened no window, and you did nothing else meanwhile. Its most recent
+ * window comes up instead, wherever it is. Each that's due, in the order
+ * they were made. */
+static int
+fg_lapse(void *data)
+{
+	FgGrant *g, *due;
+	uint64_t now = fg_now();
+	for (;;) {
+		due = NULL;
+		wl_list_for_each(g, &fg_grants, link) {
+			if (g->or_recent && fg_lapsed(g, now)) {
+				due = g;
+				break;
+			}
+		}
+		if (!due)
+			break;
+		wl_list_remove(&due->link);
+		wl_list_init(&due->link);
+		fg_bring_up(due->apps, due->napps, "a notification's grant lapsed");
+		fg_free(due);
+	}
+	fg_arm();
+	return 0;
+}
+
+/* The focus recent command, for a notification center's entry whose
+ * notification is gone: the most recent window of any of the apps, at
+ * once, which is you moving on from anything else. Fills err and returns
+ * 0 if there's none, or on an error in args, which sets *parse. */
+static int
+fg_focus_recent(char *args, char *err, size_t errsize, int *parse)
+{
+	char *word, **apps = NULL;
+	size_t napps = 0, i;
+	int ok = 0;
+	*parse = 1;
+	while (*args) {
+		if (!(word = settings_arg(&args)) || !(word = fg_normalize(word)) || !strcmp(word, "*")) {
+			free(word);
+			snprintf(err, errsize, "focus recent: expected app ids");
+			goto out;
+		}
+		apps = realloc(apps, (napps + 1) * sizeof(*apps));
+		if (!apps)
+			die("out of memory focusing a window");
+		apps[napps++] = word;
+	}
+	if (!napps) {
+		snprintf(err, errsize, "focus recent needs an app id");
+		goto out;
+	}
+	*parse = 0;
+	if (!fg_most_recent(apps, napps)) {
+		snprintf(err, errsize, "No window of %.64s to bring up", apps[0]);
+		goto out;
+	}
+	fg_cancel();
+	ok = fg_bring_up(apps, napps, "focus recent");
+out:
+	for (i = 0; i < napps; i++)
+		free(apps[i]);
+	free(apps);
+	return ok;
+}
+
 /* A new window, before it maps: whether it may take focus. With the
  * guard, one that may not is held from it, and marked urgent unless it's
  * a status popup. A grant is used either way, so it's one-shot, and its
@@ -431,8 +577,10 @@ fg_focused(Client *c)
 	free(fg_active_app);
 	fg_active_app = c ? fg_normalize(fg_raw_appid(c)) : NULL;
 	fg_active_pid = c ? ipc_client_pid(c) : 0;
-	if (c)
+	if (c) {
 		c->held = FgFree;
+		c->focus_seq = ++fg_focus_count;
+	}
 	returned = (fg_active && fg_active == before)
 			|| (!fg_active && !before && fg_active_ws == before_ws);
 	if (fg_focusing || returned || fg_mapping || deferred)
@@ -512,7 +660,7 @@ fg_command(char *args, char *err, size_t errsize)
 	char *word, *value, *workspace = NULL, **apps = NULL;
 	unsigned long pid = 0, key = 0;
 	size_t napps = 0, i;
-	int extend = 0, r, ok = 0;
+	int extend = 0, or_recent = 0, r, ok = 0;
 	FgGrant *g;
 	if (!strncmp(args, "extend", 6) && (!args[6] || isspace((unsigned char)args[6]))) {
 		extend = 1;
@@ -521,7 +669,11 @@ fg_command(char *args, char *err, size_t errsize)
 			args++;
 	}
 	while (!strncmp(args, "--", 2)) {
-		if ((r = fg_option(&args, "--pid", &value))) {
+		if (!extend && !strncmp(args, "--or-recent", 11)
+				&& (!args[11] || isspace((unsigned char)args[11]))) {
+			or_recent = 1;
+			settings_word(&args);
+		} else if ((r = fg_option(&args, "--pid", &value))) {
 			if (r < 0 || !fg_number(value, 2, &pid)) {
 				snprintf(err, errsize, "grant: --pid takes a process id");
 				goto out;
@@ -541,7 +693,7 @@ fg_command(char *args, char *err, size_t errsize)
 		} else {
 			value = settings_word(&args);
 			snprintf(err, errsize, "grant: %.64s is not an option (--pid, --key%s are)", value,
-					extend ? "" : ", --workspace");
+					extend ? "" : ", --workspace, --or-recent");
 			goto out;
 		}
 	}
@@ -593,6 +745,10 @@ fg_command(char *args, char *err, size_t errsize)
 		snprintf(err, errsize, "grant needs an app id, *, or --pid");
 		goto out;
 	}
+	if (or_recent && (!napps || !strcmp(apps[0], "*") || pid || key || workspace)) {
+		snprintf(err, errsize, "grant --or-recent takes app ids alone, whose window it brings up");
+		goto out;
+	}
 	fg_expire();
 	g = ecalloc(1, sizeof(*g));
 	g->apps = apps;
@@ -600,8 +756,11 @@ fg_command(char *args, char *err, size_t errsize)
 	g->pid = (pid_t)pid;
 	g->key = key;
 	g->workspace = workspace;
+	g->or_recent = or_recent;
 	g->at = fg_now();
 	wl_list_insert(fg_grants.prev, &g->link);
+	if (or_recent)
+		fg_arm();
 	return 1;
 out:
 	for (i = 0; i < napps; i++)
@@ -615,6 +774,9 @@ out:
 static void
 fg_finish(void)
 {
+	if (fg_timer)
+		wl_event_source_remove(fg_timer);
+	fg_timer = NULL;
 	fg_cancel();
 	free(fg_active_app);
 	fg_active_app = NULL;

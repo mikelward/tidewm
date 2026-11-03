@@ -63,6 +63,7 @@ static int settings_output_command(char *args, char *err, size_t errsize, int *p
 static int settings_input_command(char *args, char *err, size_t errsize, int *parse);
 static struct json_object *settings_json_inputs(void);
 static int fg_command(char *args, char *err, size_t errsize);
+static int fg_focus_recent(char *args, char *err, size_t errsize, int *parse);
 /* layout.h, included after this file */
 static const Layout *lt_part_layout(Workspace *ws, Monitor *m);
 
@@ -642,6 +643,16 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			focusclient(focusgo(selmon), NULL, 1);
 			return ipc_json_success(1, NULL);
 		}
+		if (!has_criteria && ipc_take(&cmd, "recent")) {
+			char why[256];
+			int parse;
+			if (fg_focus_recent(cmd, why, sizeof(why), &parse))
+				return ipc_json_success(1, NULL);
+			result = ipc_json_success(0, why);
+			if (parse)
+				json_object_object_add(result, "parse_error", json_object_new_boolean(1));
+			return result;
+		}
 		if (!has_criteria && (!strcasecmp(cmd, "next") || !strcasecmp(cmd, "prev"))) {
 			/* With only windows the focus guard holds, it goes to one */
 			if (!target && !focusgo(selmon))
@@ -650,7 +661,7 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			return ipc_json_success(1, NULL);
 		}
 		if (*cmd || !has_criteria) {
-			error = "Expected [con_id=N] focus, focus next|prev, or focus output ...";
+			error = "Expected [con_id=N] focus, focus next|prev, focus recent APP, or focus output ...";
 			goto parse_error;
 		}
 		ws_view_to(target->ws, target);
