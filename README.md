@@ -56,7 +56,9 @@ version of [wlroots].
 
 To enable XWayland, you should uncomment its flags in `config.mk`.
 
-`make test` also needs python3 (compile-time only).
+`make test` also needs python3, and wtype for the tests that press keys; built
+with XWayland, its X11 tests need Xwayland. A test that lacks one of these
+skips, except in CI, where it fails.
 
 ## Configuration
 
@@ -107,8 +109,8 @@ automatically, you will need to configure it prior to launching `dwl`, e.g.:
 
 ### Status information
 
-Information about selected layouts, current window title, app-id, and
-selected/occupied/urgent tags is written to the stdin of the `-s` command (see
+Information about selected layouts, current window title, app-id, and the
+current workspace is written to the stdin of the `-s` command (see
 the `STATUS INFORMATION` section in `_dwl_(1)`).  This information can be used to
 populate an external status bar with a script that parses the
 information. Failing to read this information will cause dwl to block, so if you

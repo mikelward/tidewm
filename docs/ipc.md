@@ -13,6 +13,20 @@ started from it finds the socket. Without `XDG_RUNTIME_DIR` there is no
 socket: tidewm says so on stderr and runs without one. The socket is
 removed when tidewm exits.
 
+## Workspaces
+
+tidewm's workspaces aren't sway's. A workspace has a name, and spans every
+monitor: each monitor shows its own part of it, the windows whose output it
+is. One workspace is current, on every monitor at once. A workspace is made
+the first time a command names it, and goes once it's empty and not
+current, unless it's persistent. tidewm starts on workspace `1`.
+
+So `GET_WORKSPACES` lists each workspace once, its `output` the focused
+one, and `focused` and `visible` both mean it's current. Every output's
+`current_workspace` is the same.
+
+## Framing
+
 Each message is the six bytes `i3-ipc`, a 32-bit payload length and a 32-bit
 type, both in the machine's byte order, then the payload. A message without
 the magic, or over 4 MiB, closes that connection only.
@@ -22,10 +36,10 @@ the magic, or over 4 MiB, closes that connection only.
 | Type | Name | Reply |
 |---|---|---|
 | 0 | `RUN_COMMAND` | One result per command, as below |
-| 1 | `GET_WORKSPACES` | `[]` until tidewm has workspaces (the pool in `TODO.md`) |
+| 1 | `GET_WORKSPACES` | Each workspace, in the order made: `id`, `name`, `num` (the name as a number, or -1), `focused`, `visible`, `urgent` (a window on it is), `persistent`, `output`, `rect` |
 | 2 | `SUBSCRIBE` | `{"success": true}`, or `false` for anything but a JSON array of the event names below |
-| 3 | `GET_OUTPUTS` | Each output: `id`, `name`, `make`, `model`, `serial`, `active`, `power`, `primary`, `scale`, `transform`, `focused`, `current_workspace` (null for now), `rect`, `current_mode` |
-| 4 | `GET_TREE` | The root, its outputs, and each output's windows in `nodes` (tiled) and `floating_nodes` |
+| 3 | `GET_OUTPUTS` | Each output: `id`, `name`, `make`, `model`, `serial`, `active`, `power`, `primary`, `scale`, `transform`, `focused`, `current_workspace`, `rect`, `current_mode` |
+| 4 | `GET_TREE` | The root, its outputs, every workspace under each output, and in each the windows of that monitor's part, in `nodes` (tiled) and `floating_nodes` |
 | 7 | `GET_VERSION` | `human_readable`, `variant` (`"tidewm"`), `major`, `minor`, `patch`, `loaded_config_file_name` |
 | 10 | `SEND_TICK` | `{"success": true}`, after sending the payload in a `tick` event |
 
@@ -33,14 +47,28 @@ Any other type gets `{"success": false, "error": "unsupported message type"}`.
 
 ### Commands
 
-A `RUN_COMMAND` payload holds commands separated by `;`. Each gets a result,
-`{"success": true}` or `{"success": false, "parse_error": true, "error":
-"Unknown command: ..."}`.
+A `RUN_COMMAND` payload holds commands separated by `;`. Each gets a result:
+`{"success": true}`, `{"success": false, "error": ...}` for one that can't be
+done, or that plus `"parse_error": true` for one tidewm doesn't know.
+
+A command that acts on a window acts on the focused one, unless it starts
+with criteria picking another: `[con_id=N]`, a container's `id`.
 
 | Command | Does |
 |---|---|
 | `nop` | Nothing |
 | `exit` | Sends the `shutdown` event, then exits |
+| `workspace NAME` | Shows that workspace on every monitor, making it if it's new. The rest of the line is the name, spaces and all |
+| `workspace number N` | The same, for the workspace named `N` |
+| `workspace back_and_forth` | Shows the previous workspace |
+| `move [container\|window] [to] workspace NAME` | Moves the window to that workspace's part on its own monitor, making it if it's new. `number N` and `back_and_forth` work here too |
+| `move [container\|window] [to] output OUTPUT` | Moves the window to another monitor's part of its workspace. `OUTPUT` is a name, or `left`, `right`, `up` or `down` of the focused one |
+| `focus output OUTPUT` | Focuses that monitor |
+| `[con_id=N] focus` | Shows the window's workspace and focuses it |
+| `kill` | Asks the window to close |
+| `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD` |
+| `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |
+| `unpersist workspace NAME` | tidewm's own: lets it go once it's empty and not current |
 
 ### Windows
 
@@ -48,7 +76,8 @@ A window in the tree or in an event is a container: `id` (unique for
 tidewm's life), `type` (`con`, or `floating_con`), `name` (the title),
 `app_id`, `pid`, `shell` (`xdg_shell` or `xwayland`), `focused`, `urgent`,
 `visible`, `fullscreen_mode` (0 or 1), `rect` (in layout coordinates, border
-included) and `foreign_toplevel_identifier`, the ext-foreign-toplevel-list
+included), `workspace` and `output` (tidewm's own: where it is) and
+`foreign_toplevel_identifier`, the ext-foreign-toplevel-list
 identifier `grim -T` takes. An X11 window has `app_id` null and its class,
 instance and title in `window_properties`, as in sway, and its X11 window id
 in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
@@ -57,11 +86,10 @@ in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
 
 | Event | Type | Sent when |
 |---|---|---|
+| `workspace` | `0x80000000` | A workspace is made (`init`), goes (`empty`), becomes current (`focus`, with the previous one in `old`), is renamed (`rename`), or a window on it gains or loses urgency (`urgent`): `{"change": ..., "current": ..., "old": ...}` |
 | `output` | `0x80000001` | An output appears or goes: `{"change": "unspecified"}` |
-| `window` | `0x80000003` | A window is `new`, `close`d, gets `focus`, or changes `title`, `fullscreen_mode`, `floating` or `urgent`: `{"change": ..., "container": ...}`. A window's first event is `new`, sent once it has an output and its floating state |
+| `window` | `0x80000003` | A window is `new`, `close`d, gets `focus`, changes `title`, `fullscreen_mode`, `floating` or `urgent`, or moves to another workspace or output, by a command, a key or a drag (`move`): `{"change": ..., "container": ...}`. A window's first event is `new`, sent once it has an output, workspace and floating state |
 | `shutdown` | `0x80000006` | tidewm exits: `{"change": "exit"}` |
 | `tick` | `0x80000007` | Someone sends `SEND_TICK`: `{"first": false, "payload": ...}`. Subscribing sends one at once, with `first` true |
 
-`workspace` (`0x80000000`) can be subscribed to, but sends nothing until
-tidewm has workspaces. A client that stops reading is closed once 16 MiB of
-events wait for it.
+A client that stops reading is closed once 16 MiB of events wait for it.

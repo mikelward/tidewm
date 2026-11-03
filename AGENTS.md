@@ -30,15 +30,17 @@ Run `make` before every commit; it compiles `dwl.c` with warnings enabled.
 To also compile the `#ifdef XWAYLAND` paths, run
 `make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm"`. `make test` runs
 `tests/`: tidewm on wlroots' headless backend, `tests/client` for windows,
-and Python's `unittest` asserting over the IPC (`docs/ipc.md`). A test waits
+`wtype` for keys, and Python's `unittest` asserting over the IPC
+(`docs/ipc.md`). A test waits
 for an event or reply it knows is coming, never a sleep. CI
 (`.github/workflows/ci.yml`) runs both builds in an Arch Linux container
 (job `build`) and in a Debian testing one (job `build-debian`), the two
 places a packaged wlroots 0.20 is available, and the tests on Debian
 testing (job `test`), where tide runs it.
 
-tidewm's own code lives in its own files where it can (`ipc.h`, included
-from `dwl.c` like `client.h`), so merging upstream dwl touches few lines.
+tidewm's own code lives in its own files where it can (`ipc.h`,
+`workspace.h`, included from `dwl.c` like `client.h`), so merging upstream
+dwl touches few lines; replacing dwl's tags with workspaces touched more.
 
 ## Everything below
 

@@ -15,16 +15,13 @@ static const float urgentcolor[]           = COLOR(0xff0000ff);
 /* This conforms to the xdg-protocol. Set the alpha to zero to restore the old behavior */
 static const float fullscreen_bg[]         = {0.0f, 0.0f, 0.0f, 1.0f}; /* You can also use glsl colors */
 
-/* tagging - TAGCOUNT must be no greater than 31 */
-#define TAGCOUNT (9)
-
 /* logging */
 static int log_level = WLR_ERROR;
 
 static const Rule rules[] = {
-	/* app_id             title       tags mask     isfloating   monitor */
-	{ "Gimp_EXAMPLE",     NULL,       0,            1,           -1 }, /* Start on currently visible tags floating, not tiled */
-	{ "firefox_EXAMPLE",  NULL,       1 << 8,       0,           -1 }, /* Start on ONLY tag "9" */
+	/* app_id             title       workspace     isfloating   monitor */
+	{ "Gimp_EXAMPLE",     NULL,       NULL,         1,           -1 }, /* Start on the current workspace, floating, not tiled */
+	{ "firefox_EXAMPLE",  NULL,       "9",          0,           -1 }, /* Start on workspace "9" */
     /* default/example rule: can be changed but cannot be eliminated; at least one rule must exist */
 };
 
@@ -106,11 +103,11 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 /* If you want to use the windows key for MODKEY, use WLR_MODIFIER_LOGO */
 #define MODKEY WLR_MODIFIER_ALT
 
-#define TAGKEYS(KEY,TAG) \
-	{ MODKEY,                    KEY,            view,            {.ui = 1 << TAG} }, \
-	{ MODKEY|WLR_MODIFIER_CTRL,  KEY,            toggleview,      {.ui = 1 << TAG} }, \
-	{ MODKEY|WLR_MODIFIER_SHIFT, KEY,            tag,             {.ui = 1 << TAG} }, \
-	{ MODKEY|WLR_MODIFIER_CTRL|WLR_MODIFIER_SHIFT,KEY,toggletag,  {.ui = 1 << TAG} }
+/* Workspaces have names; these keys show, or move a window to, the
+ * workspaces named "1" to "9" */
+#define WSKEYS(KEY,NAME) \
+	{ MODKEY,                    KEY,            viewws,          {.v = NAME} }, \
+	{ MODKEY|WLR_MODIFIER_SHIFT, KEY,            movews,          {.v = NAME} }
 
 /* helper for spawning shell commands in the pre dwm-5.0 fashion */
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
@@ -130,7 +127,7 @@ static const Key keys[] = {
 	{ MODKEY,                    XKB_KEY_h,           setmfact,         {.f = -0.05f} },
 	{ MODKEY,                    XKB_KEY_l,           setmfact,         {.f = +0.05f} },
 	{ MODKEY,                    XKB_KEY_Return,      zoom,             {0} },
-	{ MODKEY,                    XKB_KEY_Tab,         view,             {0} },
+	{ MODKEY,                    XKB_KEY_Tab,         viewprevws,       {0} },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_c,           killclient,       {0} },
 	{ MODKEY,                    XKB_KEY_t,           setlayout,        {.v = &layouts[0]} },
 	{ MODKEY,                    XKB_KEY_f,           setlayout,        {.v = &layouts[1]} },
@@ -138,21 +135,19 @@ static const Key keys[] = {
 	{ MODKEY,                    XKB_KEY_space,       setlayout,        {0} },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_space,       togglefloating,   {0} },
 	{ MODKEY,                    XKB_KEY_e,           togglefullscreen, {0} },
-	{ MODKEY,                    XKB_KEY_0,           view,             {.ui = ~0} },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_0,           tag,              {.ui = ~0} },
 	{ MODKEY,                    XKB_KEY_comma,       focusmon,         {.i = WLR_DIRECTION_LEFT} },
 	{ MODKEY,                    XKB_KEY_period,      focusmon,         {.i = WLR_DIRECTION_RIGHT} },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_comma,       tagmon,           {.i = WLR_DIRECTION_LEFT} },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_period,      tagmon,           {.i = WLR_DIRECTION_RIGHT} },
-	TAGKEYS(                     XKB_KEY_1,           0),
-	TAGKEYS(                     XKB_KEY_2,           1),
-	TAGKEYS(                     XKB_KEY_3,           2),
-	TAGKEYS(                     XKB_KEY_4,           3),
-	TAGKEYS(                     XKB_KEY_5,           4),
-	TAGKEYS(                     XKB_KEY_6,           5),
-	TAGKEYS(                     XKB_KEY_7,           6),
-	TAGKEYS(                     XKB_KEY_8,           7),
-	TAGKEYS(                     XKB_KEY_9,           8),
+	WSKEYS(                      XKB_KEY_1,           "1"),
+	WSKEYS(                      XKB_KEY_2,           "2"),
+	WSKEYS(                      XKB_KEY_3,           "3"),
+	WSKEYS(                      XKB_KEY_4,           "4"),
+	WSKEYS(                      XKB_KEY_5,           "5"),
+	WSKEYS(                      XKB_KEY_6,           "6"),
+	WSKEYS(                      XKB_KEY_7,           "7"),
+	WSKEYS(                      XKB_KEY_8,           "8"),
+	WSKEYS(                      XKB_KEY_9,           "9"),
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_q,           quit,             {0} },
 
 	/* Ctrl-Alt-Backspace and Ctrl-Alt-Fx used to be handled by X server */

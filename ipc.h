@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <json.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -219,8 +220,8 @@ ipc_json_output(Monitor *m)
 	json_object_object_add(obj, "scale", json_object_new_double(o->scale));
 	json_object_object_add(obj, "transform", json_object_new_string(ipc_transform_name(o->transform)));
 	json_object_object_add(obj, "focused", json_object_new_boolean(m == selmon));
-	/* Workspaces come with tide's shared pool; until then there are none. */
-	json_object_object_add(obj, "current_workspace", NULL);
+	/* A workspace spans every monitor, so each shows the current one. */
+	json_object_object_add(obj, "current_workspace", curws ? json_object_new_string(curws->name) : NULL);
 	json_object_object_add(obj, "rect", ipc_json_box(m->m));
 	mode = json_object_new_object();
 	json_object_object_add(mode, "width", json_object_new_int(o->width));
@@ -274,6 +275,8 @@ ipc_json_window(Client *c)
 	json_object_object_add(obj, "visible", json_object_new_boolean(c->mon && VISIBLEON(c, c->mon)));
 	json_object_object_add(obj, "fullscreen_mode", json_object_new_int(c->isfullscreen));
 	json_object_object_add(obj, "rect", ipc_json_box(c->geom));
+	json_object_object_add(obj, "workspace", c->ws ? json_object_new_string(c->ws->name) : NULL);
+	json_object_object_add(obj, "output", c->mon ? json_object_new_string(c->mon->wlr_output->name) : NULL);
 	json_object_object_add(obj, "foreign_toplevel_identifier", c->foreign_toplevel_handle
 			? json_object_new_string(c->foreign_toplevel_handle->identifier) : NULL);
 	json_object_object_add(obj, "nodes", json_object_new_array());
@@ -281,6 +284,33 @@ ipc_json_window(Client *c)
 	return obj;
 }
 
+/* A workspace, as GET_WORKSPACES and events see it. It spans every
+ * monitor, so its output is the focused one, where it has focus. */
+static struct json_object *
+ipc_json_workspace(Workspace *ws, Monitor *m)
+{
+	struct json_object *obj = json_object_new_object();
+	const char *p = ws->name;
+	int num = -1;
+	while (isdigit((unsigned char)*p))
+		p++;
+	if (!*p && p - ws->name < 10)
+		num = atoi(ws->name);
+	json_object_object_add(obj, "id", json_object_new_uint64(ipc_id(&ws->ipc_id)));
+	json_object_object_add(obj, "type", json_object_new_string("workspace"));
+	json_object_object_add(obj, "name", json_object_new_string(ws->name));
+	json_object_object_add(obj, "num", json_object_new_int(num));
+	json_object_object_add(obj, "focused", json_object_new_boolean(ws == curws));
+	json_object_object_add(obj, "visible", json_object_new_boolean(ws == curws));
+	json_object_object_add(obj, "urgent", json_object_new_boolean(ws_urgent(ws)));
+	json_object_object_add(obj, "persistent", json_object_new_boolean(ws->persistent));
+	json_object_object_add(obj, "output", m ? json_object_new_string(m->wlr_output->name) : NULL);
+	json_object_object_add(obj, "rect", ipc_json_box(m ? m->w : (struct wlr_box){0}));
+	return obj;
+}
+
+/* root > outputs > workspaces > windows. Every workspace is under every
+ * output, holding that monitor's part of it. */
 static struct json_object *
 ipc_json_tree(void)
 {
@@ -290,14 +320,21 @@ ipc_json_tree(void)
 	Client *c;
 
 	wl_list_for_each(m, &mons, link) {
-		struct json_object *out = ipc_json_output(m);
-		struct json_object *tiled = json_object_new_array(), *floating = json_object_new_array();
-		wl_list_for_each(c, &clients, link) {
-			if (c->mon == m)
-				json_object_array_add(c->isfloating ? floating : tiled, ipc_json_window(c));
+		struct json_object *out = ipc_json_output(m), *parts = json_object_new_array();
+		Workspace *ws;
+		wl_list_for_each(ws, &workspaces, link) {
+			struct json_object *part = ipc_json_workspace(ws, m);
+			struct json_object *tiled = json_object_new_array(), *floating = json_object_new_array();
+			wl_list_for_each(c, &clients, link) {
+				if (c->mon == m && c->ws == ws)
+					json_object_array_add(c->isfloating ? floating : tiled, ipc_json_window(c));
+			}
+			json_object_object_add(part, "nodes", tiled);
+			json_object_object_add(part, "floating_nodes", floating);
+			json_object_array_add(parts, part);
 		}
-		json_object_object_add(out, "nodes", tiled);
-		json_object_object_add(out, "floating_nodes", floating);
+		json_object_object_add(out, "nodes", parts);
+		json_object_object_add(out, "floating_nodes", json_object_new_array());
 		json_object_array_add(outputs, out);
 	}
 	wlr_output_layout_get_box(output_layout, NULL, &all);
@@ -341,26 +378,206 @@ ipc_send_shutdown(void)
 	ipc_broadcast(IpcEvShutdown, obj);
 }
 
+/* If *p starts with word, in any case, then a space or the end, moves *p
+ * past them both and returns 1. */
+static int
+ipc_take(char **p, const char *word)
+{
+	size_t n = strlen(word);
+	if (strncasecmp(*p, word, n) || ((*p)[n] && !isspace((unsigned char)(*p)[n])))
+		return 0;
+	*p += n;
+	while (isspace((unsigned char)**p))
+		(*p)++;
+	return 1;
+}
+
+static Client *
+ipc_find_window(unsigned long id)
+{
+	Client *c;
+	wl_list_for_each(c, &clients, link)
+		if (c->ipc_id == id)
+			return c;
+	return NULL;
+}
+
+/* An output named, or left, right, up or down of the focused one. */
+static Monitor *
+ipc_find_output(const char *arg)
+{
+	static const struct { const char *name; enum wlr_direction dir; } dirs[] = {
+		{"left", WLR_DIRECTION_LEFT}, {"right", WLR_DIRECTION_RIGHT},
+		{"up", WLR_DIRECTION_UP}, {"down", WLR_DIRECTION_DOWN},
+	};
+	Monitor *m;
+	size_t i;
+	for (i = 0; i < LENGTH(dirs); i++)
+		if (!strcasecmp(arg, dirs[i].name))
+			return selmon ? dirtomon(dirs[i].dir) : NULL;
+	wl_list_for_each(m, &mons, link)
+		if (!strcmp(m->wlr_output->name, arg) && m->wlr_output->enabled)
+			return m;
+	return NULL;
+}
+
+/* The workspace a command names: "number N", "back_and_forth" or a name,
+ * made if it's new. */
+static Workspace *
+ipc_command_workspace(char *arg, const char **error)
+{
+	Workspace *ws;
+	if (ipc_take(&arg, "back_and_forth")) {
+		if (!prevws)
+			*error = "No previous workspace";
+		return prevws;
+	}
+	ipc_take(&arg, "number");
+	if (!(ws = ws_get(arg)))
+		*error = "Invalid workspace name";
+	return ws;
+}
+
 /* Runs one command, as a RUN_COMMAND payload holds several separated by
- * semicolons. Returns its result object. */
+ * semicolons, and returns its result. Criteria in brackets, [con_id=N],
+ * pick the window a command acts on; without them it's the focused one. */
 static struct json_object *
 ipc_run_command(char *cmd, int *quit_after)
 {
+	const char *error = NULL;
 	struct json_object *result;
-	char *end;
-	char buf[128];
+	Client *target = NULL;
+	Workspace *ws;
+	Monitor *m;
+	char *end, *to, *orig, buf[160];
+	int has_criteria = 0, persist;
+
 	while (isspace((unsigned char)*cmd))
 		cmd++;
 	end = cmd + strlen(cmd);
 	while (end > cmd && isspace((unsigned char)end[-1]))
 		*--end = '\0';
-	if (!strcmp(cmd, "nop") || !strncmp(cmd, "nop ", 4))
+	orig = cmd;
+
+	if (*cmd == '[') {
+		unsigned long id;
+		char *close = strchr(cmd, ']'), *tail;
+		if (!close || sscanf(cmd, "[con_id=%lu", &id) != 1) {
+			error = "Unsupported criteria: only [con_id=N]";
+			goto parse_error;
+		}
+		has_criteria = 1;
+		if (!(target = ipc_find_window(id)))
+			return ipc_json_success(0, "No window matches the criteria");
+		tail = close + 1;
+		while (isspace((unsigned char)*tail))
+			tail++;
+		cmd = tail;
+	} else {
+		target = focustop(selmon);
+	}
+
+	if (!has_criteria && ipc_take(&cmd, "nop"))
 		return ipc_json_success(1, NULL);
-	if (!strcmp(cmd, "exit")) {
+	if (!has_criteria && !strcasecmp(cmd, "exit")) {
 		*quit_after = 1;
 		return ipc_json_success(1, NULL);
 	}
-	snprintf(buf, sizeof(buf), "Unknown command: %.100s", cmd);
+	if (!has_criteria && ipc_take(&cmd, "workspace")) {
+		if (!(ws = ipc_command_workspace(cmd, &error)))
+			return ipc_json_success(0, error);
+		ws_view(ws);
+		return ipc_json_success(1, NULL);
+	}
+	if (ipc_take(&cmd, "move")) {
+		if (!ipc_take(&cmd, "container"))
+			ipc_take(&cmd, "window");
+		ipc_take(&cmd, "to");
+		if (ipc_take(&cmd, "workspace")) {
+			if (!target)
+				return ipc_json_success(0, "No window to move");
+			if (!(ws = ipc_command_workspace(cmd, &error)))
+				return ipc_json_success(0, error);
+			ws_move(target, ws);
+			return ipc_json_success(1, NULL);
+		}
+		if (ipc_take(&cmd, "output")) {
+			if (!target)
+				return ipc_json_success(0, "No window to move");
+			if (!(m = ipc_find_output(cmd)))
+				return ipc_json_success(0, "No such output");
+			setmon(target, m, target->ws); /* which says it moved */
+			return ipc_json_success(1, NULL);
+		}
+		error = "Expected move [container] [to] workspace|output ...";
+		goto parse_error;
+	}
+	if (ipc_take(&cmd, "focus")) {
+		if (!has_criteria && ipc_take(&cmd, "output")) {
+			if (!(m = ipc_find_output(cmd)))
+				return ipc_json_success(0, "No such output");
+			selmon = m;
+			focusclient(focustop(selmon), NULL, 1);
+			return ipc_json_success(1, NULL);
+		}
+		if (*cmd || !has_criteria) {
+			error = "Expected [con_id=N] focus, or focus output ...";
+			goto parse_error;
+		}
+		ws_view(target->ws);
+		selmon = target->mon;
+		focusclient(target, NULL, 1);
+		return ipc_json_success(1, NULL);
+	}
+	if (ipc_take(&cmd, "kill")) {
+		if (*cmd) {
+			error = "kill takes no arguments";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to close");
+		client_send_close(target);
+		return ipc_json_success(1, NULL);
+	}
+	if (!has_criteria && ipc_take(&cmd, "rename") && ipc_take(&cmd, "workspace")) {
+		Workspace *from = curws;
+		if (ipc_take(&cmd, "to")) {
+			to = cmd;
+		} else if ((to = strstr(cmd, " to "))) {
+			*to = '\0';
+			to += 4;
+			while (isspace((unsigned char)*to))
+				to++;
+			if (!(from = ws_find(cmd)))
+				return ipc_json_success(0, "No such workspace");
+		} else {
+			error = "Expected rename workspace [OLD] to NEW";
+			goto parse_error;
+		}
+		if (!ws_name_ok(to))
+			return ipc_json_success(0, "Invalid workspace name");
+		if (ws_find(to))
+			return ipc_json_success(0, "A workspace has that name already");
+		ws_rename(from, to);
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own: a persistent workspace stays when it's empty */
+	persist = has_criteria ? -1 : ipc_take(&cmd, "persist") ? 1
+		: ipc_take(&cmd, "unpersist") ? 0 : -1;
+	if (persist >= 0) {
+		if (!ipc_take(&cmd, "workspace")) {
+			error = "Expected persist|unpersist workspace NAME";
+			goto parse_error;
+		}
+		if (!(ws = persist ? ws_get(cmd) : ws_find(cmd)))
+			return ipc_json_success(0, persist ? "Invalid workspace name" : "No such workspace");
+		ws_set_persistent(ws, persist);
+		return ipc_json_success(1, NULL);
+	}
+	error = NULL;
+parse_error:
+	snprintf(buf, sizeof(buf), "%s%.100s", error ? error : "Unknown command: ",
+			error ? "" : orig);
 	result = ipc_json_success(0, buf);
 	json_object_object_add(result, "parse_error", json_object_new_boolean(1));
 	return result;
@@ -436,9 +653,13 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 	switch (type) {
 	case IpcCommand:
 		return ipc_handle_command(cl, payload);
-	case IpcGetWorkspaces:
-		/* Workspaces come with tide's shared pool; until then there are none. */
-		return ipc_send_json(cl, type, json_object_new_array());
+	case IpcGetWorkspaces: {
+		struct json_object *list = json_object_new_array();
+		Workspace *ws;
+		wl_list_for_each(ws, &workspaces, link)
+			json_object_array_add(list, ipc_json_workspace(ws, selmon));
+		return ipc_send_json(cl, type, list);
+	}
 	case IpcSubscribe:
 		return ipc_handle_subscribe(cl, payload);
 	case IpcGetOutputs: {
@@ -663,8 +884,8 @@ ipc_finish(void)
 	ipc_socket = -1;
 }
 
-/* A window event: new, close, focus, title, fullscreen_mode, floating or
- * urgent. Unmanaged X11 windows (menus, tooltips) have none. */
+/* A window event: new, close, focus, title, fullscreen_mode, floating,
+ * urgent or move. Unmanaged X11 windows (menus, tooltips) have none. */
 static void
 ipc_event_window(Client *c, const char *change)
 {
@@ -685,6 +906,21 @@ ipc_event_window(Client *c, const char *change)
 	json_object_object_add(obj, "change", json_object_new_string(change));
 	json_object_object_add(obj, "container", ipc_json_window(c));
 	ipc_broadcast(IpcEvWindow, obj);
+}
+
+/* A workspace event: init, empty, focus (with the old one), rename or
+ * urgent. */
+static void
+ipc_event_workspace(const char *change, Workspace *cur, Workspace *old)
+{
+	struct json_object *obj;
+	if (!ipc_subscribed(IpcEvWorkspace))
+		return;
+	obj = json_object_new_object();
+	json_object_object_add(obj, "change", json_object_new_string(change));
+	json_object_object_add(obj, "current", cur ? ipc_json_workspace(cur, selmon) : NULL);
+	json_object_object_add(obj, "old", old ? ipc_json_workspace(old, selmon) : NULL);
+	ipc_broadcast(IpcEvWorkspace, obj);
 }
 
 static void

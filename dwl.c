@@ -80,8 +80,7 @@
 
 /* macros */
 #define CLEANMASK(mask)         (mask & ~WLR_MODIFIER_CAPS)
-#define VISIBLEON(C, M)         ((M) && (C)->mon == (M) && ((C)->tags & (M)->tagset[(M)->seltags]))
-#define TAGMASK                 ((1u << TAGCOUNT) - 1)
+#define VISIBLEON(C, M)         ((M) && (C)->mon == (M) && (C)->ws == curws)
 #define LISTEN(E, L, H)         wl_signal_add((E), ((L)->notify = (H), (L)))
 #define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = ecalloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
 
@@ -114,6 +113,16 @@ typedef struct {
 } Button;
 
 typedef struct Monitor Monitor;
+
+/* A workspace spans every monitor; see workspace.h */
+typedef struct {
+	struct wl_list link;
+	char *name;
+	int persistent;
+	int urgent; /* a window on it is urgent, as last announced */
+	unsigned long ipc_id; /* the IPC's workspace id, set on first use */
+} Workspace;
+
 typedef struct {
 	/* Must keep this field first */
 	unsigned int type; /* XDGShell or X11* */
@@ -157,7 +166,7 @@ typedef struct {
 	struct wl_listener set_hints;
 #endif
 	unsigned int bw;
-	uint32_t tags;
+	Workspace *ws;
 	int isfloating, isurgent, isfullscreen;
 	unsigned long ipc_id; /* the IPC's container id, set on first use */
 	int ipc_announced; /* its "new" event is out, so others may follow */
@@ -220,9 +229,7 @@ struct Monitor {
 	struct wlr_box w; /* window area, layout-relative */
 	struct wl_list layers[4]; /* LayerSurface.link */
 	const Layout *lt[2];
-	unsigned int seltags;
 	unsigned int sellt;
-	uint32_t tagset[2];
 	float mfact;
 	int gamma_lut_changed;
 	int nmaster;
@@ -249,7 +256,7 @@ typedef struct {
 typedef struct {
 	const char *id;
 	const char *title;
-	uint32_t tags;
+	const char *workspace; /* NULL: the current one */
 	int isfloating;
 	int monitor;
 } Rule;
@@ -324,6 +331,7 @@ static int keyrepeat(void *data);
 static void killclient(const Arg *arg);
 static void locksession(struct wl_listener *listener, void *data);
 static void mapnotify(struct wl_listener *listener, void *data);
+static Monitor *matchrules(Client *c, const char **wsname);
 static void maximizenotify(struct wl_listener *listener, void *data);
 static void monocle(Monitor *m);
 static void motionabsolute(struct wl_listener *listener, void *data);
@@ -351,26 +359,25 @@ static void setfloating(Client *c, int floating);
 static void setfullscreen(Client *c, int fullscreen);
 static void setlayout(const Arg *arg);
 static void setmfact(const Arg *arg);
-static void setmon(Client *c, Monitor *m, uint32_t newtags);
+static void setmon(Client *c, Monitor *m, Workspace *ws);
 static void setpsel(struct wl_listener *listener, void *data);
 static void setsel(struct wl_listener *listener, void *data);
 static void setup(void);
 static void spawn(const Arg *arg);
 static void startdrag(struct wl_listener *listener, void *data);
-static void tag(const Arg *arg);
 static void tagmon(const Arg *arg);
 static void tile(Monitor *m);
 static void togglefloating(const Arg *arg);
 static void togglefullscreen(const Arg *arg);
-static void toggletag(const Arg *arg);
-static void toggleview(const Arg *arg);
 static void unlocksession(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void unmapnotify(struct wl_listener *listener, void *data);
 static void updatemons(struct wl_listener *listener, void *data);
 static void updatetitle(struct wl_listener *listener, void *data);
 static void urgent(struct wl_listener *listener, void *data);
-static void view(const Arg *arg);
+static void viewws(const Arg *arg);
+static void viewprevws(const Arg *arg);
+static void movews(const Arg *arg);
 static void virtualkeyboard(struct wl_listener *listener, void *data);
 static void virtualpointer(struct wl_listener *listener, void *data);
 static Monitor *xytomon(double x, double y);
@@ -488,6 +495,7 @@ static struct wlr_xwayland *xwayland;
 
 #include "ime.h"
 
+#include "workspace.h"
 #include "ipc.h"
 
 /* function implementations */
@@ -524,31 +532,10 @@ applybounds(Client *c, struct wlr_box *bbox)
 void
 applyrules(Client *c)
 {
-	/* rule matching */
-	const char *appid, *title;
-	uint32_t newtags = 0;
-	int i;
-	const Rule *r;
-	Monitor *mon = selmon, *m;
-
-	appid = client_get_appid(c);
-	title = client_get_title(c);
-
-	for (r = rules; r < END(rules); r++) {
-		if ((!r->title || strstr(title, r->title))
-				&& (!r->id || strstr(appid, r->id))) {
-			c->isfloating = r->isfloating;
-			newtags |= r->tags;
-			i = 0;
-			wl_list_for_each(m, &mons, link) {
-				if (r->monitor == i++)
-					mon = m;
-			}
-		}
-	}
-
-	c->isfloating |= client_is_float_type(c);
-	setmon(c, mon, newtags);
+	const char *wsname;
+	Monitor *mon = matchrules(c, &wsname);
+	/* Only the last rule's workspace is made: an earlier one would be left empty */
+	setmon(c, mon, wsname ? ws_get(wsname) : NULL);
 }
 
 void
@@ -914,7 +901,7 @@ closemon(Monitor *m)
 			resize(c, (struct wlr_box){.x = c->geom.x - m->w.width, .y = c->geom.y,
 					.width = c->geom.width, .height = c->geom.height}, 0);
 		if (c->mon == m)
-			setmon(c, selmon, c->tags);
+			setmon(c, selmon, c->ws);
 	}
 	focusclient(focustop(selmon), NULL, 1);
 	printstatus();
@@ -973,15 +960,18 @@ void
 commitnotify(struct wl_listener *listener, void *data)
 {
 	Client *c = wl_container_of(listener, c, commit);
+	const char *wsname;
 
 	if (c->surface.xdg->initial_commit) {
 		/*
 		 * Get the monitor this client will be rendered on
 		 * Note that if the user set a rule in which the client is placed on
 		 * a different monitor based on its title, this will likely select
-		 * a wrong monitor.
+		 * a wrong monitor. Its workspace waits for mapnotify(), which
+		 * matches the rules again: one made now would be left empty if
+		 * the window changes its app ID or title first.
 		 */
-		applyrules(c);
+		setmon(c, matchrules(c, &wsname), NULL);
 		if (c->mon) {
 			client_set_scale(client_surface(c), c->mon->wlr_output->scale);
 		}
@@ -1174,7 +1164,6 @@ createmon(struct wl_listener *listener, void *data)
 
 	wlr_output_state_init(&state);
 	/* Initialize monitor state using configured rules */
-	m->tagset[0] = m->tagset[1] = 1;
 	for (r = monrules; r < END(monrules); r++) {
 		if (!r->name || strstr(wlr_output->name, r->name)) {
 			m->m.x = r->x;
@@ -1554,7 +1543,10 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		wl_list_remove(&c->flink);
 		wl_list_insert(&fstack, &c->flink);
 		selmon = c->mon;
-		c->isurgent = 0;
+		if (c->isurgent) {
+			c->isurgent = 0;
+			ws_update_urgency(c->ws);
+		}
 
 		/* Don't change border color if there is an exclusive focus or we are
 		 * handling a drag operation */
@@ -1954,18 +1946,18 @@ mapnotify(struct wl_listener *listener, void *data)
 #endif
 
 
-	/* Set initial monitor, tags, floating status, and focus:
+	/* Set initial monitor, workspace, floating status, and focus:
 	 * we always consider floating, clients that have parent and thus
-	 * we set the same tags and monitor as its parent.
+	 * we set the same workspace and monitor as its parent.
 	 * If there is no parent, apply rules */
 	if ((p = client_get_parent(c))) {
 		c->isfloating = 1;
-		setmon(c, p->mon, p->tags);
+		setmon(c, p->mon, p->ws);
 	} else {
 		applyrules(c);
 	}
 	printstatus();
-	/* Now it has a monitor and its floating state; its focus waited for this */
+	/* Now it has a monitor, workspace and floating state; its focus waited for this */
 	ipc_event_window(c, "new");
 	if (c == focused_client)
 		ipc_event_window(c, "focus");
@@ -1973,9 +1965,42 @@ mapnotify(struct wl_listener *listener, void *data)
 unset_fullscreen:
 	m = c->mon ? c->mon : xytomon(c->geom.x, c->geom.y);
 	wl_list_for_each(w, &clients, link) {
-		if (w != c && w != p && w->isfullscreen && m == w->mon && (w->tags & c->tags))
+		if (w != c && w != p && w->isfullscreen && m == w->mon && w->ws == c->ws)
 			setfullscreen(w, 0);
 	}
+}
+
+/* Matches c against the rules: sets whether it floats, and returns the
+ * monitor they give it, with the name of its workspace in *wsname, or
+ * NULL for the current one. */
+Monitor *
+matchrules(Client *c, const char **wsname)
+{
+	const char *appid, *title;
+	int i;
+	const Rule *r;
+	Monitor *mon = selmon, *m;
+
+	*wsname = NULL;
+	appid = client_get_appid(c);
+	title = client_get_title(c);
+
+	for (r = rules; r < END(rules); r++) {
+		if ((!r->title || strstr(title, r->title))
+				&& (!r->id || strstr(appid, r->id))) {
+			c->isfloating = r->isfloating;
+			if (r->workspace)
+				*wsname = r->workspace;
+			i = 0;
+			wl_list_for_each(m, &mons, link) {
+				if (r->monitor == i++)
+					mon = m;
+			}
+		}
+	}
+
+	c->isfloating |= client_is_float_type(c);
+	return mon;
 }
 
 void
@@ -2293,34 +2318,22 @@ printstatus(void)
 {
 	Monitor *m = NULL;
 	Client *c;
-	uint32_t occ, urg, sel;
 
 	wl_list_for_each(m, &mons, link) {
-		occ = urg = 0;
-		wl_list_for_each(c, &clients, link) {
-			if (c->mon != m)
-				continue;
-			occ |= c->tags;
-			if (c->isurgent)
-				urg |= c->tags;
-		}
 		if ((c = focustop(m))) {
 			printf("%s title %s\n", m->wlr_output->name, client_get_title(c));
 			printf("%s appid %s\n", m->wlr_output->name, client_get_appid(c));
 			printf("%s fullscreen %d\n", m->wlr_output->name, c->isfullscreen);
 			printf("%s floating %d\n", m->wlr_output->name, c->isfloating);
-			sel = c->tags;
 		} else {
 			printf("%s title \n", m->wlr_output->name);
 			printf("%s appid \n", m->wlr_output->name);
 			printf("%s fullscreen \n", m->wlr_output->name);
 			printf("%s floating \n", m->wlr_output->name);
-			sel = 0;
 		}
 
 		printf("%s selmon %u\n", m->wlr_output->name, m == selmon);
-		printf("%s tags %"PRIu32" %"PRIu32" %"PRIu32" %"PRIu32"\n",
-			m->wlr_output->name, occ, m->tagset[m->seltags], sel, urg);
+		printf("%s workspace %s\n", m->wlr_output->name, curws ? curws->name : "");
 		printf("%s layout %s\n", m->wlr_output->name, m->ltsymbol);
 	}
 	fflush(stdout);
@@ -2597,7 +2610,7 @@ setmfact(const Arg *arg)
 }
 
 void
-setmon(Client *c, Monitor *m, uint32_t newtags)
+setmon(Client *c, Monitor *m, Workspace *ws)
 {
 	Monitor *oldmon = c->mon;
 
@@ -2612,10 +2625,15 @@ setmon(Client *c, Monitor *m, uint32_t newtags)
 	if (m) {
 		/* Make sure window actually overlaps with the monitor */
 		resize(c, c->geom, 0);
-		c->tags = newtags ? newtags : m->tagset[m->seltags]; /* assign tags of target monitor */
+		c->ws = ws ? ws : curws; /* the current workspace, unless told */
 		setfullscreen(c, c->isfullscreen); /* This will call arrange(c->mon) */
 		setfloating(c, c->isfloating);
+		/* An X11 window can be urgent before it maps */
+		ws_update_urgency(c->ws);
 	}
+	/* Not for a window's first placement, nor its unmapping */
+	if (oldmon && m)
+		ipc_event_window(c, "move");
 	focusclient(focustop(selmon), NULL, 1);
 }
 
@@ -2755,6 +2773,7 @@ setup(void)
 	 * https://drewdevault.com/2018/07/29/Wayland-shells.html
 	 */
 	wl_list_init(&clients);
+	curws = ws_get("1");
 	wl_list_init(&fstack);
 
 	xdg_shell = wlr_xdg_shell_create(dpy, 6);
@@ -2901,24 +2920,11 @@ startdrag(struct wl_listener *listener, void *data)
 }
 
 void
-tag(const Arg *arg)
-{
-	Client *sel = focustop(selmon);
-	if (!sel || (arg->ui & TAGMASK) == 0)
-		return;
-
-	sel->tags = arg->ui & TAGMASK;
-	focusclient(focustop(selmon), NULL, 1);
-	arrange(selmon);
-	printstatus();
-}
-
-void
 tagmon(const Arg *arg)
 {
 	Client *sel = focustop(selmon);
 	if (sel)
-		setmon(sel, dirtomon(arg->i), 0);
+		setmon(sel, dirtomon(arg->i), sel->ws);
 }
 
 void
@@ -2973,33 +2979,6 @@ togglefullscreen(const Arg *arg)
 }
 
 void
-toggletag(const Arg *arg)
-{
-	uint32_t newtags;
-	Client *sel = focustop(selmon);
-	if (!sel || !(newtags = sel->tags ^ (arg->ui & TAGMASK)))
-		return;
-
-	sel->tags = newtags;
-	focusclient(focustop(selmon), NULL, 1);
-	arrange(selmon);
-	printstatus();
-}
-
-void
-toggleview(const Arg *arg)
-{
-	uint32_t newtagset;
-	if (!(newtagset = selmon ? selmon->tagset[selmon->seltags] ^ (arg->ui & TAGMASK) : 0))
-		return;
-
-	selmon->tagset[selmon->seltags] = newtagset;
-	focusclient(focustop(selmon), NULL, 1);
-	arrange(selmon);
-	printstatus();
-}
-
-void
 unlocksession(struct wl_listener *listener, void *data)
 {
 	SessionLock *lock = wl_container_of(listener, lock, unlock);
@@ -3025,6 +3004,7 @@ unmapnotify(struct wl_listener *listener, void *data)
 {
 	/* Called when the surface is unmapped, and should no longer be shown. */
 	Client *c = wl_container_of(listener, c, unmap);
+	Workspace *ws;
 	if (c == grabc) {
 		cursor_mode = CurNormal;
 		grabc = NULL;
@@ -3035,8 +3015,13 @@ unmapnotify(struct wl_listener *listener, void *data)
 
 	if (!client_is_unmanaged(c)) {
 		wl_list_remove(&c->link);
-		setmon(c, NULL, 0);
+		setmon(c, NULL, NULL);
 		wl_list_remove(&c->flink);
+		/* The workspace may go, and the window gets a new one if it maps again */
+		ws = c->ws;
+		c->ws = NULL;
+		if (!ws_prune(ws))
+			ws_update_urgency(ws);
 	} else if (client_wants_focus(c)) {
 		focusclient(focustop(selmon), NULL, 1);
 	}
@@ -3150,7 +3135,7 @@ updatemons(struct wl_listener *listener, void *data)
 	if (selmon && selmon->wlr_output->enabled) {
 		wl_list_for_each(c, &clients, link) {
 			if (!c->mon && client_surface(c)->mapped)
-				setmon(c, selmon, c->tags);
+				setmon(c, selmon, c->ws);
 		}
 		focusclient(focustop(selmon), NULL, 1);
 		if (selmon->lock_surface) {
@@ -3205,20 +3190,8 @@ urgent(struct wl_listener *listener, void *data)
 	if (client_surface(c)->mapped) {
 		client_set_border_color(c, urgentcolor);
 		ipc_event_window(c, "urgent");
+		ws_update_urgency(c->ws);
 	}
-}
-
-void
-view(const Arg *arg)
-{
-	if (!selmon || (arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
-		return;
-	selmon->seltags ^= 1; /* toggle sel tagset */
-	if (arg->ui & TAGMASK)
-		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
-	focusclient(focustop(selmon), NULL, 1);
-	arrange(selmon);
-	printstatus();
 }
 
 void
@@ -3407,8 +3380,10 @@ sethints(struct wl_listener *listener, void *data)
 	c->isurgent = xcb_icccm_wm_hints_get_urgency(c->surface.xwayland->hints);
 	printstatus();
 
-	if (surface && surface->mapped)
+	if (surface && surface->mapped) {
 		ipc_event_window(c, "urgent");
+		ws_update_urgency(c->ws);
+	}
 	if (c->isurgent && surface && surface->mapped)
 		client_set_border_color(c, urgentcolor);
 }
