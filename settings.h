@@ -42,11 +42,25 @@ typedef struct {
 	char *command;
 } WindowRule;
 
+/* An output line: what to set on the outputs it names, "*" for all */
+typedef struct {
+	char *name;
+	int has_mode, width, height, refresh; /* refresh in mHz; 0 for the best */
+	int has_scale;
+	float scale;
+	int has_position, x, y;
+	int has_transform;
+	enum wl_output_transform transform;
+	int enabled; /* 1 or 0, or -1 to leave it */
+} OutputConfig;
+
 typedef struct {
 	Mode *modes; /* modes[0] is "default", the file's top level */
 	size_t nmodes;
 	WindowRule *rules;
 	size_t nrules;
+	OutputConfig *outputs;
+	size_t noutputs;
 	char *text; /* the file, as read, for GET_CONFIG */
 } Settings;
 
@@ -59,6 +73,7 @@ static char settings_path[PATH_MAX];
 static Settings *settings; /* NULL: config.h's keys */
 static struct json_object *settings_errors; /* the last load's, as strings */
 static size_t settings_mode; /* the current mode, in settings->modes */
+static int settings_apply_outputs(const OutputConfig *only);
 /* A release binding's key, while it's down and no other key has been */
 static struct {
 	int armed;
@@ -88,6 +103,9 @@ settings_free(Settings *s)
 		free(s->rules[i].command);
 	}
 	free(s->rules);
+	for (i = 0; i < s->noutputs; i++)
+		free(s->outputs[i].name);
+	free(s->outputs);
 	free(s->text);
 	free(s);
 }
@@ -304,6 +322,147 @@ settings_escaped(const char *s, size_t i)
 	return n % 2;
 }
 
+/* Parses an output line's rest, "NAME SETTING...", into oc, as the config
+ * file and the output command share it. On failure, err says why. */
+static int
+settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
+{
+	static const struct { const char *name; enum wl_output_transform t; } transforms[] = {
+		{"normal", WL_OUTPUT_TRANSFORM_NORMAL}, {"90", WL_OUTPUT_TRANSFORM_90},
+		{"180", WL_OUTPUT_TRANSFORM_180}, {"270", WL_OUTPUT_TRANSFORM_270},
+		{"flipped", WL_OUTPUT_TRANSFORM_FLIPPED},
+		{"flipped-90", WL_OUTPUT_TRANSFORM_FLIPPED_90},
+		{"flipped-180", WL_OUTPUT_TRANSFORM_FLIPPED_180},
+		{"flipped-270", WL_OUTPUT_TRANSFORM_FLIPPED_270},
+	};
+	char *word, *arg, *end, extra;
+	size_t i, len;
+	float hz;
+	int used, good;
+
+	memset(oc, 0, sizeof(*oc));
+	oc->enabled = -1;
+	if (!*(word = settings_word(&rest))) {
+		snprintf(err, errsize, "output needs a name, or *, then settings");
+		return 0;
+	}
+	oc->name = word;
+	if (!*rest) {
+		snprintf(err, errsize, "output %s needs a setting", oc->name);
+		return 0;
+	}
+	while (*(word = settings_word(&rest))) {
+		if (!strcmp(word, "mode") || !strcmp(word, "resolution") || !strcmp(word, "res")) {
+			/* WIDTHxHEIGHT, then @HZ, Hz or not, if it's given */
+			arg = settings_word(&rest);
+			len = strlen(arg);
+			if (len > 2 && !strcasecmp(arg + len - 2, "hz"))
+				arg[len - 2] = '\0';
+			hz = 0;
+			used = 0;
+			good = sscanf(arg, "%dx%d%n", &oc->width, &oc->height, &used) == 2
+				&& oc->width > 0 && oc->height > 0;
+			if (good && arg[used] == '@') {
+				hz = strtof(arg + used + 1, &end);
+				good = end != arg + used + 1 && !*end && isfinite(hz) && hz > 0 && hz <= 1000;
+			} else if (good && arg[used]) {
+				good = 0;
+			}
+			if (!good) {
+				snprintf(err, errsize, "output %s: mode %s isn't WIDTHxHEIGHT[@HZ]", oc->name, arg);
+				return 0;
+			}
+			oc->refresh = (int)roundf(hz * 1000);
+			oc->has_mode = 1;
+		} else if (!strcmp(word, "scale")) {
+			arg = settings_word(&rest);
+			oc->scale = strtof(arg, &end);
+			if (end == arg || *end || !isfinite(oc->scale) || oc->scale <= 0 || oc->scale > 10) {
+				snprintf(err, errsize, "output %s: scale %s isn't a number from above 0 to 10", oc->name, arg);
+				return 0;
+			}
+			oc->has_scale = 1;
+		} else if (!strcmp(word, "position") || !strcmp(word, "pos")) {
+			arg = settings_word(&rest);
+			if (strchr(arg, ',') ? sscanf(arg, "%d,%d%c", &oc->x, &oc->y, &extra) != 2
+					: (sscanf(arg, "%d%c", &oc->x, &extra) != 1
+					|| sscanf(settings_word(&rest), "%d%c", &oc->y, &extra) != 1)) {
+				snprintf(err, errsize, "output %s: position needs X Y", oc->name);
+				return 0;
+			}
+			oc->has_position = 1;
+		} else if (!strcmp(word, "transform")) {
+			arg = settings_word(&rest);
+			for (i = 0; i < LENGTH(transforms) && strcmp(arg, transforms[i].name); i++)
+				;
+			if (i == LENGTH(transforms)) {
+				snprintf(err, errsize, "output %s: no transform is called %s", oc->name, arg);
+				return 0;
+			}
+			oc->transform = transforms[i].t;
+			oc->has_transform = 1;
+		} else if (!strcmp(word, "enable") || !strcmp(word, "disable")) {
+			oc->enabled = word[0] == 'e';
+		} else {
+			snprintf(err, errsize, "output %s: no setting is called %s", oc->name, word);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* Puts what from sets into into, as a later output line for the same
+ * name adds to and overrides an earlier one. */
+static void
+settings_merge_output(OutputConfig *into, const OutputConfig *from)
+{
+	if (from->has_mode) {
+		into->has_mode = 1;
+		into->width = from->width;
+		into->height = from->height;
+		into->refresh = from->refresh;
+	}
+	if (from->has_scale) {
+		into->has_scale = 1;
+		into->scale = from->scale;
+	}
+	if (from->has_position) {
+		into->has_position = 1;
+		into->x = from->x;
+		into->y = from->y;
+	}
+	if (from->has_transform) {
+		into->has_transform = 1;
+		into->transform = from->transform;
+	}
+	if (from->enabled >= 0)
+		into->enabled = from->enabled;
+}
+
+static int
+settings_add_output(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	OutputConfig oc, *grown;
+	char err[256];
+	size_t i;
+	if (!settings_parse_output(&oc, rest, err, sizeof(err))) {
+		settings_error(errors, line, "%s", err);
+		return 0;
+	}
+	for (i = 0; i < s->noutputs; i++) {
+		if (!strcmp(s->outputs[i].name, oc.name)) {
+			settings_merge_output(&s->outputs[i], &oc);
+			return 1;
+		}
+	}
+	if (!(grown = realloc(s->outputs, (s->noutputs + 1) * sizeof(*grown))))
+		die("out of memory reading the config");
+	s->outputs = grown;
+	oc.name = settings_strdup(oc.name, strlen(oc.name));
+	s->outputs[s->noutputs++] = oc;
+	return 1;
+}
+
 /* Reads for_window's criteria, [key=value ...], and its commands into a
  * new rule. A value is a word or text in double quotes, where \" is a
  * quote, and is a POSIX extended regular expression. */
@@ -486,6 +645,13 @@ settings_parse(char *text, struct json_object *errors)
 		word = settings_word(&p);
 		if (!strcasecmp(word, "bindsym")) {
 			ok &= settings_add_binding(&s->modes[mode], p, line, errors);
+		} else if (!strcasecmp(word, "output")) {
+			if (mode) {
+				settings_error(errors, line, "output can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_add_output(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "for_window")) {
 			if (mode) {
 				settings_error(errors, line, "for_window can't be in a mode");
@@ -569,14 +735,15 @@ settings_read(const char *path, char **text, struct json_object *errors)
 
 /* Loads the file at settings_path in place of the current settings, or
  * keeps those and returns 0 if it has errors. No file means config.h's
- * keys. settings_errors gets this load's errors. */
+ * keys. It returns -1 if it loaded, but an output refused its settings.
+ * settings_errors gets this load's errors. */
 static int
 settings_load(void)
 {
 	struct json_object *errors = json_object_new_array();
 	Settings *loaded = NULL;
 	char *text;
-	int r = settings_read(settings_path, &text, errors);
+	int refused, r = settings_read(settings_path, &text, errors);
 	if (r > 0)
 		loaded = settings_parse(text, errors);
 	json_object_put(settings_errors);
@@ -585,12 +752,15 @@ settings_load(void)
 		return 0;
 	settings_free(settings);
 	settings = loaded;
+	/* Outputs take the new lines at once; at startup, there are none yet.
+	 * One that refuses them is an error, but the rest of the file stands */
+	refused = settings_apply_outputs(NULL) < 0;
 	/* As sway does, a load starts at the top level */
 	if (settings_mode) {
 		settings_mode = 0;
 		ipc_event_mode("default");
 	}
-	return 1;
+	return refused ? -1 : 1;
 }
 
 /* Finds the file: the -c argument, or $XDG_CONFIG_HOME/tidewm/config, or
@@ -620,13 +790,14 @@ settings_init(const char *arg)
 }
 
 /* The reload command: rereads the file. On errors, keeps what was loaded,
- * and puts the first few in buf. */
+ * and puts the first few in buf. An output that refused its settings
+ * fails it too, though the rest of the file is loaded. */
 static int
 settings_reload(char *buf, size_t size)
 {
 	size_t i, n, len = 0;
-	int w;
-	if (settings_load())
+	int w, r;
+	if ((r = settings_load()) > 0)
 		return 1;
 	n = json_object_array_length(settings_errors);
 	buf[0] = '\0';
@@ -637,8 +808,12 @@ settings_reload(char *buf, size_t size)
 			break;
 		len += (size_t)w;
 	}
-	if (n > 3)
-		snprintf(buf + len, size - len, "; and %zu more", n - 3);
+	if (n > 3) {
+		w = snprintf(buf + len, size - len, "; and %zu more", n - 3);
+		len += w > 0 && (size_t)w < size - len ? (size_t)w : 0;
+	}
+	if (r < 0)
+		snprintf(buf + len, size - len, "; the rest of the file is loaded");
 	return 0;
 }
 
@@ -763,6 +938,203 @@ settings_apply_rules(Client *c)
 		snprintf(what, sizeof(what), "for_window rule %zu", i + 1);
 		settings_run(r->command, what, c);
 	}
+}
+
+/* The file's settings for the output called name: its "*" line, then its
+ * own, which overrides it. Returns 0 if neither is there. */
+static int
+settings_output_config(const char *name, OutputConfig *out)
+{
+	size_t i;
+	int pass, found = 0;
+	memset(out, 0, sizeof(*out));
+	out->enabled = -1;
+	for (pass = 0; settings && pass < 2; pass++) {
+		for (i = 0; i < settings->noutputs; i++) {
+			if (strcmp(settings->outputs[i].name, pass ? name : "*"))
+				continue;
+			settings_merge_output(out, &settings->outputs[i]);
+			found = 1;
+		}
+	}
+	return found;
+}
+
+/* Gives oc o's preferred mode, unless it has a mode. */
+static void
+settings_preferred_mode(struct wlr_output *o, OutputConfig *oc)
+{
+	struct wlr_output_mode *preferred = wlr_output_preferred_mode(o);
+	if (oc->has_mode || !preferred)
+		return;
+	oc->has_mode = 1;
+	oc->width = preferred->width;
+	oc->height = preferred->height;
+	oc->refresh = preferred->refresh;
+}
+
+/* Puts oc's mode, scale, transform and enabling in state, for monitor m.
+ * A mode its output lists is used if there is one: with a rate, the
+ * closest within 1 Hz, so 59.94 Hz stays apart from 60; without, the
+ * fastest. Otherwise it's a custom mode. wlroots won't give an output
+ * that's off a mode, so settings_output_set() keeps one for when it's
+ * enabled; one enabled without a mode takes that, or keeps the one it
+ * had, which wlroots remembers, or, if it never had one, its preferred. */
+static void
+settings_output_state(Monitor *m, const OutputConfig *oc, struct wlr_output_state *state)
+{
+	struct wlr_output *o = m->wlr_output;
+	struct wlr_output_mode *mode, *best = NULL;
+	OutputConfig want = *oc;
+	if (!(oc->enabled >= 0 ? oc->enabled : o->enabled)) {
+		want.has_mode = 0;
+	} else if (!want.has_mode && !o->enabled) {
+		if ((want.has_mode = m->want_mode)) {
+			want.width = m->want_width;
+			want.height = m->want_height;
+			want.refresh = m->want_refresh;
+		} else if (!o->width || !o->height) {
+			settings_preferred_mode(o, &want);
+		}
+	}
+	if (want.has_mode) {
+		wl_list_for_each(mode, &o->modes, link) {
+			if (mode->width != want.width || mode->height != want.height
+					|| (want.refresh && abs(mode->refresh - want.refresh) > 1000))
+				continue;
+			if (!best || (want.refresh
+					? abs(mode->refresh - want.refresh) < abs(best->refresh - want.refresh)
+					: mode->refresh > best->refresh))
+				best = mode;
+		}
+		if (best)
+			wlr_output_state_set_mode(state, best);
+		else
+			wlr_output_state_set_custom_mode(state, want.width, want.height, want.refresh);
+	}
+	if (oc->has_scale)
+		wlr_output_state_set_scale(state, oc->scale);
+	if (oc->has_transform)
+		wlr_output_state_set_transform(state, oc->transform);
+	if (oc->enabled >= 0)
+		wlr_output_state_set_enabled(state, oc->enabled);
+}
+
+/* Once m's output has taken oc's settings: keeps the mode and position oc
+ * gives for when it's enabled, if it's off, and where it goes in the
+ * layout. With reset, as on reload, one oc doesn't give is forgotten. An
+ * output enabled or disabled as asked is no longer asleep, as an idle
+ * daemon's power management leaves it, so updatemons() treats it as off. */
+static void
+settings_output_set(Monitor *m, const OutputConfig *oc, int reset)
+{
+	if (oc->enabled >= 0)
+		m->asleep = 0;
+	if (m->wlr_output->enabled) {
+		m->want_mode = 0;
+	} else if (oc->has_mode || reset) {
+		m->want_mode = oc->has_mode;
+		m->want_width = oc->width;
+		m->want_height = oc->height;
+		m->want_refresh = oc->refresh;
+	}
+	if (oc->has_position) {
+		m->want_pos = 1;
+		m->want_x = oc->x;
+		m->want_y = oc->y;
+	} else if (reset) {
+		m->want_pos = 0;
+	}
+}
+
+/* An output's settings before the file's: config.h's monitor rule's scale,
+ * transform and position, and enabled. */
+static void
+settings_output_defaults(Monitor *m, OutputConfig *oc)
+{
+	const MonitorRule *r;
+	memset(oc, 0, sizeof(*oc));
+	oc->enabled = 1;
+	for (r = monrules; r < END(monrules); r++) {
+		if (!r->name || strstr(m->wlr_output->name, r->name)) {
+			oc->has_scale = oc->has_transform = 1;
+			oc->scale = r->scale;
+			oc->transform = r->rr;
+			if ((oc->has_position = r->x != -1 || r->y != -1)) {
+				oc->x = r->x;
+				oc->y = r->y;
+			}
+			break;
+		}
+	}
+}
+
+/* Sets only on the outputs it names, as the output command does. Without
+ * it, as on reload, each output starts again from its defaults and its
+ * preferred mode, then takes the file's lines, so nothing the command set
+ * outlives a reload. An output enabled goes where it was last placed, if
+ * it was. Returns how many outputs took their settings, or -1 if any
+ * refused them, which it says on stderr, and, on reload, in
+ * settings_errors. */
+static int
+settings_apply_outputs(const OutputConfig *only)
+{
+	struct wlr_output_state state;
+	OutputConfig oc, file;
+	Monitor *m;
+	int set = 0, refused = 0;
+	wl_list_for_each(m, &mons, link) {
+		if (only) {
+			if (strcmp(only->name, "*") && strcmp(only->name, m->wlr_output->name))
+				continue;
+			oc = *only;
+		} else {
+			settings_output_defaults(m, &oc);
+			if (settings_output_config(m->wlr_output->name, &file))
+				settings_merge_output(&oc, &file);
+			settings_preferred_mode(m->wlr_output, &oc);
+		}
+		wlr_output_state_init(&state);
+		settings_output_state(m, &oc, &state);
+		if (wlr_output_commit_state(m->wlr_output, &state)) {
+			set++;
+			settings_output_set(m, &oc, !only);
+			if (m->wlr_output->enabled && m->want_pos)
+				wlr_output_layout_add(output_layout, m->wlr_output, m->want_x, m->want_y);
+			else if (m->wlr_output->enabled && !only)
+				wlr_output_layout_add_auto(output_layout, m->wlr_output);
+		} else {
+			fprintf(stderr, "tidewm: output %s refused its settings\n", m->wlr_output->name);
+			if (!only)
+				settings_error(settings_errors, 0, "output %s refused its settings, "
+						"so it keeps what it had", m->wlr_output->name);
+			refused = 1;
+		}
+		wlr_output_state_finish(&state);
+	}
+	if (set) {
+		updatemons(NULL, NULL);
+		ipc_event_output();
+	}
+	return refused ? -1 : set;
+}
+
+/* The output command, "NAME SETTING...": sets them now, on the outputs
+ * NAME names, "*" for all, without keeping them past a reload. Returns
+ * 1, or 0 with err saying why; *parse says it didn't parse. */
+static int
+settings_output_command(char *args, char *err, size_t errsize, int *parse)
+{
+	OutputConfig oc;
+	int set;
+	*parse = !settings_parse_output(&oc, args, err, errsize);
+	if (*parse)
+		return 0;
+	if ((set = settings_apply_outputs(&oc)) > 0)
+		return 1;
+	snprintf(err, errsize, set < 0 ? "An output refused those settings"
+			: "No output is called %s", oc.name);
+	return 0;
 }
 
 /* A key went down, with these modifiers and keysyms. Another key's press

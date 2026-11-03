@@ -117,7 +117,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
           build-essential pkgconf libwlroots-0.20-dev libwayland-dev
           wayland-protocols libinput-dev libxkbcommon-dev libjson-c-dev python3
-          libxcb1-dev libxcb-icccm4-dev xwayland wtype
+          libxcb1-dev libxcb-icccm4-dev xwayland wtype wlr-randr
       - uses: actions/checkout@v5
         with:
           persist-credentials: false

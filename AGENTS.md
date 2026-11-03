@@ -30,7 +30,8 @@ Run `make` before every commit; it compiles `dwl.c` with warnings enabled.
 To also compile the `#ifdef XWAYLAND` paths, run
 `make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm"`. `make test` runs
 `tests/`: tidewm on wlroots' headless backend, `tests/client` for windows,
-`wtype` for keys, and Python's `unittest` asserting over the IPC
+`wtype` for keys, `wlr-randr` for output management, and Python's
+`unittest` asserting over the IPC
 (`docs/ipc.md`). A test waits
 for an event or reply it knows is coming, never a sleep. CI
 (`.github/workflows/ci.yml`) runs both builds in an Arch Linux container

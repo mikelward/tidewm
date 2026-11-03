@@ -37,6 +37,9 @@ lands with a test.
   `GET_BINDING_STATE`.
 - **Release and locked bindings** (#14): `--release` runs on a tap,
   `--locked` on the lock screen too.
+- **Outputs** (#16): sway's `output NAME|* mode|scale|position|transform|
+  enable|disable` lines and command, applied when an output appears and
+  on reload.
 - **Window rules** (#15): `for_window [criteria] commands`, matching
   `app_id`, `class`, `instance`, `title` and `shell` by regular
   expression, in place of `config.h`'s rules once a file is loaded.
@@ -64,6 +67,10 @@ lands with a test.
   bindings are all the keys there are, as in sway, and its `for_window`
   lines all the rules (#15). The alternative was the file adding to and
   overriding `config.h`'s. Reversible: tide writes the whole file.
+- **config.h's monitor rules stay** (#16): a file's output lines override
+  them only where they say something, since the file can't yet set a
+  monitor's layout, mfact or nmaster. Unlike keys and rules, which a file
+  replaces whole. Reversible, once the layouts item gives the file those.
 - **Rules run once** (#15): when a window appears, not again when its
   title changes, as sway's can. tide's rules match app IDs, which don't
   change; a title rule that needs it can come later.
@@ -73,9 +80,7 @@ lands with a test.
 
 ## Plan
 
-1. **The rest of the runtime config**, in steps:
-   1. outputs;
-   2. per-device input and XKB.
+1. **The rest of the runtime config**: per-device input and XKB.
 2. **Layouts**: new windows join the end of the stack; three-column, two
    columns + stack and monocle beside tile, set per workspace; the layout
    messages and a layout event.
@@ -94,8 +99,8 @@ lands with a test.
 7. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
    a pointer button also ends the tap; per-device settings and scroll
    factor.
-8. **Outputs**: runtime rules (mode, scale, position, single-window
-    width), reapplied on hotplug; the lid switch.
+8. **Outputs**: a single-window width; the lid switch. Mode, scale,
+    position and hotplug came with the runtime config (#16).
 9. **Lock and keyboard**: a command that drops a dead lock, no pointer
     events while locked; on-demand layers keep the keyboard.
 10. **Capture**: window identifiers over the IPC; capture start and stop
