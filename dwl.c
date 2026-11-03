@@ -1,5 +1,5 @@
 /*
- * See LICENSE file for copyright and license details.
+ * See LICENSE and NOTICE for copyright and license details.
  */
 #include <getopt.h>
 #include <libinput.h>

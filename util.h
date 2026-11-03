@@ -1,4 +1,4 @@
-/* See LICENSE.dwm file for copyright and license details. */
+/* See NOTICE for this file's copyright and license, dwm's. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
