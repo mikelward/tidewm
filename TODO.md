@@ -12,6 +12,8 @@ lands with a test.
   i3-ipc framing and JSON, the subset tide needs, plus tide's own fields and
   commands, so Quickshell's I3 module, `swaymsg` and waybar's sway modules
   work against it.
+- **Config** (maintainer, 2026-11-03): sway's syntax, so a binding's action
+  is an IPC command and one parser serves both.
 
 ## Done
 
@@ -24,6 +26,9 @@ lands with a test.
   commands.
 - **ext-workspace** (#9): one group on every output, holding every
   workspace, current one active, urgency shown; a client may activate one.
+- **Commands for every default key** (#11): `exec`, `focus next|prev`,
+  `floating`, `fullscreen`, `layout`, `nmaster`, `mfact`, `zoom` and
+  `chvt`, so a binding can do whatever a key in `config.h` does.
 
 ## Decisions needing review
 
@@ -36,13 +41,25 @@ lands with a test.
 - **Keeping a workspace** (#8): tidewm's own `persist workspace NAME` and
   `unpersist workspace NAME` commands, for tide's home workspace, since
   sway has none. It could move to the runtime config instead.
+- **Layout commands' names** (#11): sway has no master layouts, so
+  `layout tile|floating|monocle|toggle`, `nmaster`, `mfact` and `zoom` take
+  dwl's names. The layouts item may rename them, before tide's shell uses
+  them.
+- **exec takes the rest of the line** (#11): `;` included, so it comes
+  last, where sway ends it at an unquoted `;`. Finding that `;` means
+  reading a shell's quoting, `$(...)` and escapes; this way the shell does
+  it. Reversible, if a sway config that chains after `exec` turns up.
 
 ## Plan
 
-1. **Runtime config with reload**: bindings (locked and release ones too,
-   and submaps), window rules, outputs, per-device input and XKB, from a
-   file reread by a `reload` command. With rules a test can set, test that
-   two matching rules make only the last one's workspace (#8).
+1. **Runtime config with reload**, from a file reread by a `reload`
+   command, in steps:
+   1. `bindsym` and `set`, the file, and `reload`;
+   2. locked and release bindings, and submaps;
+   3. window rules, testing that two matching rules make only the last
+      one's workspace (#8);
+   4. outputs;
+   5. per-device input and XKB.
 2. **Layouts**: new windows join the end of the stack; three-column, two
    columns + stack and monocle beside tile, set per workspace; the layout
    messages and a layout event.

@@ -47,7 +47,11 @@ Any other type gets `{"success": false, "error": "unsupported message type"}`.
 
 ### Commands
 
-A `RUN_COMMAND` payload holds commands separated by `;`. Each gets a result:
+A `RUN_COMMAND` payload holds commands separated by `;`, quotes and all, so
+a workspace can be named `Bob's tasks`. An `exec` command is different: it
+takes the rest of the payload, `;` included, and its shell gets it as
+written, so put `exec` last. Empty commands are skipped. Each gets a
+result:
 `{"success": true}`, `{"success": false, "error": ...}` for one that can't be
 done, or that plus `"parse_error": true` for one tidewm doesn't know.
 
@@ -65,7 +69,16 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `move [container\|window] [to] output OUTPUT` | Moves the window to another monitor's part of its workspace. `OUTPUT` is a name, or `left`, `right`, `up` or `down` of the focused one |
 | `focus output OUTPUT` | Focuses that monitor |
 | `[con_id=N] focus` | Shows the window's workspace and focuses it |
+| `focus next\|prev` | Focuses the next or previous window on the focused monitor, in stack order, going round |
 | `kill` | Asks the window to close |
+| `exec COMMAND` | Runs the rest of the payload, `;` and all, with `/bin/sh -c`, in a session of its own. sway ends it at an unquoted `;`; tidewm leaves the shell to read its own quotes |
+| `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails |
+| `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles |
+| `layout tile\|floating\|monocle\|toggle` | tidewm's own: the focused monitor's layout, from `config.h`'s `layouts`, or back to the previous one |
+| `nmaster N\|+N\|-N` | tidewm's own: how many windows the master area holds on the focused monitor |
+| `mfact F\|+F\|-F` | tidewm's own: the master area's share of the focused monitor's width, from 0.1 to 0.9. Only a finite number will do |
+| `zoom` | tidewm's own: swaps the focused window with the master, or with the next window if it's the master |
+| `chvt N` | tidewm's own: switches to virtual terminal `N`; fails without a session, as on the headless backend |
 | `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD` |
 | `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |
 | `unpersist workspace NAME` | tidewm's own: lets it go once it's empty and not current |
