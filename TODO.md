@@ -107,7 +107,11 @@ lands with a test.
     events; tide's launcher and notifications hidden from capture.
 11. **Outside clicks**: a focus-grab protocol or click event for the
     notification center.
-12. **Sharp X11 at fractional scale**: unscaled Xwayland.
+12. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+    client starts Xwayland, and a window it maps before wlroots' window
+    manager watches the root is never managed (the tests' client waits
+    for it): start Xwayland ahead of clients, or take on windows already
+    there.
 13. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.
