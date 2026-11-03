@@ -43,9 +43,18 @@ supported yet.
   whether it's typed shifted or not, so `Mod1+Shift+period` and
   `Mod1+Shift+greater` both work on a US keyboard.
 
-A later binding of the same keys replaces an earlier one. `--release` and
-`--locked` come in a later step, and are errors until then. Holding a
-key repeats its binding, as dwl's keys do.
+A later binding of the same keys replaces an earlier one, though a
+`--release` binding is apart from the press one. Holding a key repeats its
+press binding, as dwl's keys do. Flags, before the keys:
+
+- **`--release`:** runs when the key comes up, if no other key went down
+  meanwhile: a tap. The modifiers are as they were before the key, so
+  `bindsym --release Super_L ...` is Super tapped alone. The window still
+  gets the key, down and up, as in sway.
+- **`--locked`:** runs on the lock screen too. Other bindings, and all of
+  `config.h`'s keys, don't.
+
+Any other flag is an error.
 
 ```
 set $mod Mod4
@@ -54,6 +63,8 @@ bindsym $mod+1 workspace 1
 bindsym $mod+Shift+1 move container to workspace 1
 bindsym $mod+Shift+r reload
 bindsym Control+Mod1+F2 chvt 2
+bindsym --release Super_L exec launcher
+bindsym --locked XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
 ```
 
 ## Modes

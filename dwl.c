@@ -1777,9 +1777,11 @@ keypress(struct wl_listener *listener, void *data)
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 
-	/* On _press_ if there is no active screen locker,
-	 * attempt to process a compositor keybinding. */
-	if (!locked && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+	/* On _press_, attempt to process a compositor keybinding: on the lock
+	 * screen, only the config file's --locked ones. A release binding runs
+	 * when its key comes up, and the client sees both, as in sway. */
+	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		settings_key_pressed(event->keycode, group->mods, group->keysyms);
 		for (int i = 0; i < 2; i++) {
 			if (runbinding(group->mods, group->keysyms[i])) {
 				consumed[event->keycode] = 1;
@@ -1787,6 +1789,8 @@ keypress(struct wl_listener *listener, void *data)
 				break;
 			}
 		}
+	} else {
+		settings_key_released(event->keycode);
 	}
 
 	if (handled && group->wlr_group->keyboard.repeat_info.delay > 0)
@@ -1829,7 +1833,8 @@ int
 keyrepeat(void *data)
 {
 	KeyboardGroup *group = data;
-	if (locked || group->wlr_group->keyboard.repeat_info.rate <= 0)
+	/* runbinding() knows which bindings run on the lock screen */
+	if (group->wlr_group->keyboard.repeat_info.rate <= 0)
 		return 0;
 
 	wl_event_source_timer_update(group->key_repeat_source,
@@ -2511,8 +2516,9 @@ runbinding(uint32_t mods, xkb_keysym_t sym)
 {
 	const Key *key;
 	if (settings)
-		return settings_run_binding(mods, sym);
-	if (!(key = keybinding(mods, sym)))
+		return settings_run_binding(mods, sym, 0);
+	/* config.h's keys are all off on the lock screen */
+	if (locked || !(key = keybinding(mods, sym)))
 		return 0;
 	key->func(&key->arg);
 	return 1;

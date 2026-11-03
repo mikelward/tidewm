@@ -86,11 +86,21 @@ tests/workspaces: tests/workspaces.c tests/ext-workspace-v1-client-protocol.h te
 	$(CC) tests/workspaces.c tests/ext-workspace-v1-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
-test: dwl tests/client tests/workspaces $(XWAYLAND:-DXWAYLAND=tests/x11client)
+tests/ext-session-lock-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		$(WAYLAND_PROTOCOLS)/staging/ext-session-lock/ext-session-lock-v1.xml $@
+tests/ext-session-lock-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/staging/ext-session-lock/ext-session-lock-v1.xml $@
+tests/locker: tests/locker.c tests/ext-session-lock-v1-client-protocol.h tests/ext-session-lock-v1-protocol.c
+	$(CC) tests/locker.c tests/ext-session-lock-v1-protocol.c -Itests \
+		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+test: dwl tests/client tests/workspaces tests/locker $(XWAYLAND:-DXWAYLAND=tests/x11client)
 	python3 -m unittest discover -s tests -v
 
 clean:
-	rm -f dwl *.o *-protocol.h tests/client tests/workspaces tests/x11client \
+	rm -f dwl *.o *-protocol.h tests/client tests/workspaces tests/locker tests/x11client \
 		tests/*-protocol.h tests/*-protocol.c
 
 dist: clean
