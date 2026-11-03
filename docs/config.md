@@ -3,8 +3,7 @@
 tidewm reads a config file in sway's syntax at startup, and again when it
 gets the `reload` command. A binding's action is a list of the IPC
 commands in [`ipc.md`](ipc.md), so anything `swaymsg` can do, a key can.
-This is the start of tidewm's runtime config. Window rules, outputs and
-input follow (see `TODO.md`).
+Outputs and input follow (see `TODO.md`).
 
 ## Where it is
 
@@ -14,9 +13,10 @@ The first of these that's given:
 2. `$XDG_CONFIG_HOME/tidewm/config`;
 3. `~/.config/tidewm/config`.
 
-Without the file, `config.h`'s keys work, as in dwl. Once a file is loaded,
-its bindings are all the keys there are, and `config.h`'s are left out, so
-a file wanting dwl's defaults binds them itself.
+Without the file, `config.h`'s keys and rules work, as in dwl. Once a file
+is loaded, its bindings are all the keys there are, and its `for_window`
+lines all the rules, and `config.h`'s are left out, so a file wanting dwl's
+defaults says them itself.
 
 ## Lines
 
@@ -29,6 +29,7 @@ supported yet.
 |---|---|
 | `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
+| `for_window [CRITERIA] COMMANDS` | Runs `COMMANDS` on each new window `CRITERIA` match, as below |
 | `mode NAME {` … `}` | A submap: the `bindsym` lines inside are in force while `NAME` is the mode, and the top level's aren't. `NAME` is a word, or text in `"`, without `;`, which ends a command; opening a mode again adds to it |
 
 `KEYS` is modifiers and a key, joined by `+`, as `Mod4+Shift+Return`:
@@ -82,6 +83,36 @@ mode "resize" {
     bindsym Escape mode default
 }
 ```
+
+## Window rules
+
+As in sway, `for_window [CRITERIA] COMMANDS` runs `COMMANDS` on each new
+window that every criterion in `CRITERIA` matches, before its `new` event,
+so that says where the rules put it. Each rule that matches runs, in the
+file's order, and every window command, such as `floating`, `move` or
+`zoom`, acts on the new window, not the focused one. A monitor's commands,
+such as `layout` or `mfact`, act on the focused monitor, as ever. A rule
+runs once, when the window appears; a title that changes later isn't
+matched again.
+
+`CRITERIA` is `key=value` pairs, as in `[app_id="^firefox$" title=Private]`.
+A value is a word or text in `"`, where `\"` is a quote, and is a POSIX
+extended regular expression, matching anywhere unless anchored:
+
+| Key | Matches |
+|---|---|
+| `app_id` | A Wayland window's app ID; an X11 window has none |
+| `class`, `instance` | An X11 window's `WM_CLASS`; a Wayland window has neither |
+| `title` | The title |
+| `shell` | `xdg_shell` or `xwayland` |
+
+```
+for_window [app_id="^pavucontrol$"] floating enable
+for_window [class="^Steam$"] move to workspace games
+for_window [title="Picture-in-Picture"] floating enable; move to output right
+```
+
+`for_window` can't be in a mode.
 
 ## Errors
 

@@ -9,6 +9,7 @@
  * docs/config.md says what a file can hold. dwl.c includes this file,
  * after ipc.h.
  */
+#include <regex.h>
 
 #define SETTINGS_MAX_SIZE (1u << 20)
 
@@ -28,9 +29,24 @@ typedef struct {
 	size_t nbindings;
 } Mode;
 
+/* What a for_window rule's criteria can match, as sway names them */
+enum { CritAppId, CritClass, CritInstance, CritTitle, CritShell, CritLast };
+static const char *const settings_crit_names[CritLast] = {
+	"app_id", "class", "instance", "title", "shell",
+};
+
+/* A for_window rule: commands run on each new window its criteria match */
+typedef struct {
+	regex_t re[CritLast];
+	int has[CritLast];
+	char *command;
+} WindowRule;
+
 typedef struct {
 	Mode *modes; /* modes[0] is "default", the file's top level */
 	size_t nmodes;
+	WindowRule *rules;
+	size_t nrules;
 	char *text; /* the file, as read, for GET_CONFIG */
 } Settings;
 
@@ -65,6 +81,13 @@ settings_free(Settings *s)
 		free(s->modes[i].name);
 	}
 	free(s->modes);
+	for (i = 0; i < s->nrules; i++) {
+		for (j = 0; j < CritLast; j++)
+			if (s->rules[i].has[j])
+				regfree(&s->rules[i].re[j]);
+		free(s->rules[i].command);
+	}
+	free(s->rules);
 	free(s->text);
 	free(s);
 }
@@ -281,6 +304,108 @@ settings_escaped(const char *s, size_t i)
 	return n % 2;
 }
 
+/* Reads for_window's criteria, [key=value ...], and its commands into a
+ * new rule. A value is a word or text in double quotes, where \" is a
+ * quote, and is a POSIX extended regular expression. */
+static int
+settings_add_rule(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	WindowRule rule = {0}, *grown;
+	char *p = rest, *key, *value, *out, msg[160];
+	size_t i, n;
+	int err, ok = 1, any = 0;
+
+	if (*p++ != '[') {
+		settings_error(errors, line, "for_window needs [criteria], then commands");
+		return 0;
+	}
+	for (;;) {
+		while (isspace((unsigned char)*p))
+			p++;
+		if (*p == ']' || !*p)
+			break;
+		key = p;
+		while (isalnum((unsigned char)*p) || *p == '_')
+			p++;
+		n = (size_t)(p - key);
+		if (*p != '=' || !n) {
+			settings_error(errors, line, "for_window's criteria are key=value, in [ ]");
+			ok = 0;
+			break;
+		}
+		*p++ = '\0';
+		for (i = 0; i < CritLast && strcmp(key, settings_crit_names[i]); i++)
+			;
+		/* The value, unquoted in place */
+		value = out = p;
+		if (*p == '"') {
+			for (value = out = ++p; *p && *p != '"'; p++) {
+				if (*p == '\\' && p[1] == '"')
+					p++;
+				*out++ = *p;
+			}
+			if (*p != '"') {
+				settings_error(errors, line, "for_window: %s's value has no closing \"", key);
+				ok = 0;
+				break;
+			}
+			p++;
+		} else {
+			while (*p && *p != ']' && !isspace((unsigned char)*p))
+				p++;
+			out = p;
+		}
+		if (i == CritLast) {
+			settings_error(errors, line, "for_window: no criterion is called %s", key);
+			ok = 0;
+			break;
+		}
+		if (rule.has[i]) {
+			settings_error(errors, line, "for_window: %s is there twice", key);
+			ok = 0;
+			break;
+		}
+		{
+			char saved = *out;
+			*out = '\0';
+			err = regcomp(&rule.re[i], value, REG_EXTENDED | REG_NOSUB);
+			if (err) {
+				regerror(err, &rule.re[i], msg, sizeof(msg));
+				settings_error(errors, line, "for_window: %s=%s: %s", key, value, msg);
+				*out = saved;
+				ok = 0;
+				break;
+			}
+			*out = saved;
+		}
+		rule.has[i] = any = 1;
+	}
+	if (ok && *p != ']') {
+		settings_error(errors, line, "for_window's criteria have no ]");
+		ok = 0;
+	}
+	if (ok) {
+		for (p++; isspace((unsigned char)*p); p++)
+			;
+		if (!any || !*p) {
+			settings_error(errors, line, "for_window needs [criteria], then commands");
+			ok = 0;
+		}
+	}
+	if (!ok) {
+		for (i = 0; i < CritLast; i++)
+			if (rule.has[i])
+				regfree(&rule.re[i]);
+		return 0;
+	}
+	rule.command = settings_strdup(p, strlen(p));
+	if (!(grown = realloc(s->rules, (s->nrules + 1) * sizeof(*grown))))
+		die("out of memory reading the config");
+	s->rules = grown;
+	s->rules[s->nrules++] = rule;
+	return 1;
+}
+
 /* A mode's name: a word, or text in double quotes, as sway takes it.
  * Moves *p past it. Returns NULL for an empty name or an unclosed quote. */
 static char *
@@ -361,6 +486,13 @@ settings_parse(char *text, struct json_object *errors)
 		word = settings_word(&p);
 		if (!strcasecmp(word, "bindsym")) {
 			ok &= settings_add_binding(&s->modes[mode], p, line, errors);
+		} else if (!strcasecmp(word, "for_window")) {
+			if (mode) {
+				settings_error(errors, line, "for_window can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_add_rule(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "mode")) {
 			if (mode) {
 				settings_error(errors, line, "mode %s is still open: modes don't nest",
@@ -548,34 +680,89 @@ settings_find(uint32_t mods, xkb_keysym_t sym, int release)
 	return NULL;
 }
 
+/* Runs a binding's or a rule's commands, on window if it's given, and
+ * writes each that fails to stderr, saying what it was for. The commands
+ * may reload the settings, so they run from a copy. */
+static void
+settings_run(const char *commands, const char *what, Client *window)
+{
+	struct json_object *results, *result, *error;
+	char *copy = settings_strdup(commands, strlen(commands));
+	size_t i;
+	int quit = 0;
+	results = ipc_run_commands(copy, &quit, window);
+	for (i = 0; i < json_object_array_length(results); i++) {
+		result = json_object_array_get_idx(results, i);
+		if (!json_object_get_boolean(json_object_object_get(result, "success"))
+				&& json_object_object_get_ex(result, "error", &error))
+			fprintf(stderr, "tidewm: %s: %s\n", what, json_object_get_string(error));
+	}
+	json_object_put(results);
+	free(copy);
+	if (quit)
+		ipc_quit();
+}
+
 /* Runs the loaded file's press or release binding for these keys.
  * Returns whether it has one. */
 static int
 settings_run_binding(uint32_t mods, xkb_keysym_t sym, int release)
 {
-	struct json_object *results, *result, *error;
 	const Binding *b = settings_find(mods, sym, release);
-	char *command, *combo;
-	size_t i;
-	int quit = 0;
+	char what[300];
 	if (!b)
 		return 0;
-	/* Copies, since the commands may reload the settings or change mode */
-	command = settings_strdup(b->command, strlen(b->command));
-	combo = settings_strdup(b->keys, strlen(b->keys));
-	results = ipc_run_commands(command, &quit);
-	for (i = 0; i < json_object_array_length(results); i++) {
-		result = json_object_array_get_idx(results, i);
-		if (!json_object_get_boolean(json_object_object_get(result, "success"))
-				&& json_object_object_get_ex(result, "error", &error))
-			fprintf(stderr, "tidewm: binding %s: %s\n", combo, json_object_get_string(error));
-	}
-	json_object_put(results);
-	free(command);
-	free(combo);
-	if (quit)
-		ipc_quit();
+	snprintf(what, sizeof(what), "binding %s", b->keys);
+	settings_run(b->command, what, NULL);
 	return 1;
+}
+
+/* A window's value for a criterion, or NULL where it has none, which no
+ * pattern matches: an X11 window has no app_id, a Wayland one no class. */
+static const char *
+settings_crit_value(Client *c, int crit)
+{
+#ifdef XWAYLAND
+	if (client_is_x11(c)) {
+		switch (crit) {
+		case CritClass: return c->surface.xwayland->class;
+		case CritInstance: return c->surface.xwayland->instance;
+		case CritTitle: return c->surface.xwayland->title;
+		case CritShell: return "xwayland";
+		default: return NULL;
+		}
+	}
+#endif
+	switch (crit) {
+	case CritAppId: return c->surface.xdg->toplevel->app_id;
+	case CritTitle: return c->surface.xdg->toplevel->title;
+	case CritShell: return "xdg_shell";
+	default: return NULL;
+	}
+}
+
+/* Runs each for_window rule whose criteria all match the new window c, in
+ * the file's order, its commands acting on c. Before c's new event, so
+ * that says where the rules put it. */
+static void
+settings_apply_rules(Client *c)
+{
+	const Settings *loaded = settings;
+	const char *value;
+	char what[64];
+	size_t i;
+	int crit;
+	for (i = 0; settings && settings == loaded && i < settings->nrules; i++) {
+		const WindowRule *r = &settings->rules[i];
+		for (crit = 0; crit < CritLast; crit++)
+			if (r->has[crit] && (!(value = settings_crit_value(c, crit))
+					|| regexec(&r->re[crit], value, 0, NULL, 0)))
+				break;
+		if (crit < CritLast)
+			continue;
+		snprintf(what, sizeof(what), "for_window rule %zu", i + 1);
+		settings_run(r->command, what, c);
+	}
 }
 
 /* A key went down, with these modifiers and keysyms. Another key's press
