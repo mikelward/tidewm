@@ -1963,6 +1963,8 @@ mapnotify(struct wl_listener *listener, void *data)
 	} else {
 		applyrules(c);
 	}
+	/* The config file's for_window rules, whose events wait for the new one */
+	settings_apply_rules(c);
 	printstatus();
 	/* Now it has a monitor, workspace and floating state; its focus waited for this */
 	ipc_event_window(c, "new");
@@ -1992,7 +1994,8 @@ matchrules(Client *c, const char **wsname)
 	appid = client_get_appid(c);
 	title = client_get_title(c);
 
-	for (r = rules; r < END(rules); r++) {
+	/* Once a config file is loaded, its for_window rules replace these */
+	for (r = rules; !settings && r < END(rules); r++) {
 		if ((!r->title || strstr(title, r->title))
 				&& (!r->id || strstr(appid, r->id))) {
 			c->isfloating = r->isfloating;

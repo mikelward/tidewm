@@ -466,6 +466,35 @@ ipc_exec(const char *cmd)
 	return 0;
 }
 
+/* dwl's zoom(), for sel rather than the focused window, as a for_window
+ * rule's zoom acts on its new window: makes sel its monitor's master, or,
+ * if it's the master, the next tiled window. A hidden or floating sel, or
+ * a floating layout, is left as it is. */
+static void
+ipc_zoom(Client *sel)
+{
+	Client *c;
+	Monitor *m = sel ? sel->mon : NULL;
+	if (!m || !VISIBLEON(sel, m) || !m->lt[m->sellt]->arrange || sel->isfloating)
+		return;
+	/* The first tiled window that isn't sel, sel going NULL if it's passed */
+	wl_list_for_each(c, &clients, link) {
+		if (VISIBLEON(c, m) && !c->isfloating) {
+			if (c != sel)
+				break;
+			sel = NULL;
+		}
+	}
+	if (&c->link == &clients)
+		return; /* sel is the only tiled window */
+	if (!sel)
+		sel = c;
+	wl_list_remove(&sel->link);
+	wl_list_insert(&clients, &sel->link);
+	focusclient(sel, NULL, 1);
+	arrange(m);
+}
+
 /* "enable", "disable" or "toggle" (or nothing, if empty_toggles) against
  * the current value: the new value, or -1 for anything else. */
 static int
@@ -504,9 +533,10 @@ ipc_is_exec(const char *cmd)
 
 /* Runs one command, as a RUN_COMMAND payload holds several separated by
  * semicolons, and returns its result. Criteria in brackets, [con_id=N],
- * pick the window a command acts on; without them it's the focused one. */
+ * pick the window a command acts on; without them it's window, for a
+ * for_window rule, or else the focused one. */
 static struct json_object *
-ipc_run_command(char *cmd, int *quit_after)
+ipc_run_command(char *cmd, int *quit_after, Client *window)
 {
 	const char *error = NULL;
 	struct json_object *result;
@@ -539,7 +569,7 @@ ipc_run_command(char *cmd, int *quit_after)
 			tail++;
 		cmd = tail;
 	} else {
-		target = focustop(selmon);
+		target = window ? window : focustop(selmon);
 	}
 
 	if (!has_criteria && ipc_take(&cmd, "nop"))
@@ -741,7 +771,7 @@ ipc_run_command(char *cmd, int *quit_after)
 		return ipc_json_success(1, NULL);
 	}
 	if (!has_criteria && !strcasecmp(cmd, "zoom")) {
-		zoom(NULL);
+		ipc_zoom(target);
 		return ipc_json_success(1, NULL);
 	}
 	if (!has_criteria && ipc_take(&cmd, "chvt")) {
@@ -796,20 +826,21 @@ ipc_next_command(char **p)
 	return cmd;
 }
 
-/* Runs payload's commands, separated by semicolons outside quotes, as a
- * RUN_COMMAND or a binding holds them, and returns their results.
+/* Runs payload's commands, separated by semicolons, exec taking the rest,
+ * as a RUN_COMMAND, a binding or a for_window rule holds them, and returns
+ * their results. Each acts on window, if it's given, as a rule's do.
  * *quit_after says one was exit, which the caller does once it has
  * replied. */
 static struct json_object *
-ipc_run_commands(char *payload, int *quit_after)
+ipc_run_commands(char *payload, int *quit_after, Client *window)
 {
 	struct json_object *results = json_object_new_array();
 	char *rest = payload, *cmd;
 	while ((cmd = ipc_next_command(&rest)))
 		if (cmd[strspn(cmd, " \t\n")]) /* as strtok did, skip empty ones */
-			json_object_array_add(results, ipc_run_command(cmd, quit_after));
+			json_object_array_add(results, ipc_run_command(cmd, quit_after, window));
 	if (!json_object_array_length(results))
-		json_object_array_add(results, ipc_run_command(payload, quit_after));
+		json_object_array_add(results, ipc_run_command(payload, quit_after, window));
 	return results;
 }
 
@@ -825,7 +856,7 @@ static int
 ipc_handle_command(IpcClient *cl, char *payload)
 {
 	int quit_after = 0, r;
-	r = ipc_send_json(cl, IpcCommand, ipc_run_commands(payload, &quit_after));
+	r = ipc_send_json(cl, IpcCommand, ipc_run_commands(payload, &quit_after, NULL));
 	if (quit_after)
 		ipc_quit();
 	return r;

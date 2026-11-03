@@ -37,6 +37,9 @@ lands with a test.
   `GET_BINDING_STATE`.
 - **Release and locked bindings** (#14): `--release` runs on a tap,
   `--locked` on the lock screen too.
+- **Window rules** (#15): `for_window [criteria] commands`, matching
+  `app_id`, `class`, `instance`, `title` and `shell` by regular
+  expression, in place of `config.h`'s rules once a file is loaded.
 
 ## Decisions needing review
 
@@ -58,9 +61,12 @@ lands with a test.
   reading a shell's quoting, `$(...)` and escapes; this way the shell does
   it. Reversible, if a sway config that chains after `exec` turns up.
 - **A file's keys replace config.h's** (#12): once a file is loaded, its
-  bindings are all the keys there are, as in sway. The alternative was
-  the file adding to and overriding `config.h`'s. Reversible: tide writes
-  the whole file.
+  bindings are all the keys there are, as in sway, and its `for_window`
+  lines all the rules (#15). The alternative was the file adding to and
+  overriding `config.h`'s. Reversible: tide writes the whole file.
+- **Rules run once** (#15): when a window appears, not again when its
+  title changes, as sway's can. tide's rules match app IDs, which don't
+  change; a title rule that needs it can come later.
 - **A bad file at startup** (#12): tidewm says why on stderr and in
   `GET_CONFIG`, and starts with `config.h`'s keys, rather than refusing to
   start, so a typo can't lock anyone out. Reversible.
@@ -68,10 +74,8 @@ lands with a test.
 ## Plan
 
 1. **The rest of the runtime config**, in steps:
-   1. window rules, testing that two matching rules make only the last
-      one's workspace (#8);
-   2. outputs;
-   3. per-device input and XKB.
+   1. outputs;
+   2. per-device input and XKB.
 2. **Layouts**: new windows join the end of the stack; three-column, two
    columns + stack and monocle beside tile, set per workspace; the layout
    messages and a layout event.
