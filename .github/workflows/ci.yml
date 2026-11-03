@@ -65,7 +65,7 @@ jobs:
       - run: >-
           pacman -Syu --noconfirm --needed
           wlroots0.20 wayland wayland-protocols libinput libxkbcommon
-          libxcb xcb-util-wm pkgconf
+          libxcb xcb-util-wm json-c pkgconf
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
@@ -94,7 +94,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
           build-essential pkgconf libwlroots-0.20-dev libwayland-dev
           wayland-protocols libinput-dev libxkbcommon-dev libxcb1-dev
-          libxcb-icccm4-dev
+          libxcb-icccm4-dev libjson-c-dev
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
@@ -103,11 +103,32 @@ jobs:
       - if: ${{ matrix.xwayland }}
         run: make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm"
 
+  # tidewm on wlroots' headless backend, asserted over its IPC (tests/).
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    container:
+      image: debian:testing
+    steps:
+      - run: apt-get update
+      - run: >-
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+          build-essential pkgconf libwlroots-0.20-dev libwayland-dev
+          wayland-protocols libinput-dev libxkbcommon-dev libjson-c-dev python3
+          libxcb1-dev libxcb-icccm4-dev xwayland
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # With XWayland, so the X11 tests run too
+      - run: make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm" test
+
   lanes:
     name: lanes
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [classify, build, build-debian]
+    needs: [classify, build, build-debian, test]
     if: always()
     steps:
       - uses: actions/checkout@v5
@@ -119,4 +140,4 @@ jobs:
           pr: ${{ github.event.pull_request.number }}
           classify-result: ${{ needs.classify.result }}
           base-sha: ${{ needs.classify.outputs.base_sha }}
-          results: build=${{ needs.build.result }} build-debian=${{ needs.build-debian.result }}
+          results: build=${{ needs.build.result }} build-debian=${{ needs.build-debian.result }} test=${{ needs.test.result }}
