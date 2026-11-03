@@ -123,6 +123,11 @@ jobs:
           persist-credentials: false
       # With XWayland, so the X11 tests run too
       - run: make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm" test
+      # Built with XWayland but with no Xwayland to run, tidewm still exits
+      # cleanly. wlroots checks for the binary only at its built-in path.
+      - run: |
+          mv /usr/bin/Xwayland /usr/bin/Xwayland.hidden
+          cd tests && python3 -m unittest -v test_ipc.IpcTest.test_exit_says_so_then_stops
 
   lanes:
     name: lanes

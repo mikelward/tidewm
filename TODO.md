@@ -19,13 +19,6 @@ lands with a test.
   (`docs/ipc.md`), and `make test`, which runs tidewm headless and asserts
   over it.
 
-## Bugs
-
-- **Exit crashes without Xwayland** (from dwl): built with `XWAYLAND` but
-  with no `Xwayland` binary, `wlr_xwayland_create` fails, and exit still
-  removes the two XWayland listeners it never added. Guard those removals
-  with `if (xwayland)`.
-
 ## Plan
 
 1. **A shared workspace pool** in place of dwl's per-monitor tags:

@@ -883,8 +883,11 @@ cleanuplisteners(void)
 	wl_list_remove(&new_session_lock.link);
 	wl_list_remove(&new_foreign_toplevel_capture_request.link);
 #ifdef XWAYLAND
-	wl_list_remove(&new_xwayland_surface.link);
-	wl_list_remove(&xwayland_ready.link);
+	/* Added only if XWayland started: it can't without an Xwayland binary */
+	if (xwayland) {
+		wl_list_remove(&new_xwayland_surface.link);
+		wl_list_remove(&xwayland_ready.link);
+	}
 #endif
 }
 
