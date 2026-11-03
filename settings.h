@@ -114,6 +114,8 @@ typedef struct {
 	size_t noutputs;
 	InputConfig *inputs;
 	size_t ninputs;
+	int focus_guard; /* focus_guard enable|disable; -1: not given */
+	double grant_seconds, prompt_seconds; /* 0: not given */
 	char *text; /* the file, as read, for GET_CONFIG */
 } Settings;
 
@@ -809,6 +811,38 @@ settings_add_rule(Settings *s, char *rest, unsigned int line, struct json_object
 	return 1;
 }
 
+/* A focus_guard line: enable or disable, or grant_seconds or
+ * prompt_seconds and a number of seconds */
+static int
+settings_focus_guard(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *word = settings_arg(&rest), *end;
+	double *seconds = NULL, v;
+	if (word && (!strcmp(word, "enable") || !strcmp(word, "disable")) && !*rest) {
+		s->focus_guard = !strcmp(word, "enable");
+		return 1;
+	}
+	if (word && !strcmp(word, "grant_seconds"))
+		seconds = &s->grant_seconds;
+	else if (word && !strcmp(word, "prompt_seconds"))
+		seconds = &s->prompt_seconds;
+	if (!seconds) {
+		settings_error(errors, line, "focus_guard takes enable, disable, grant_seconds "
+				"or prompt_seconds");
+		return 0;
+	}
+	errno = 0;
+	v = strtod(rest, &end);
+	/* NaN fails v > 0, and an infinite or huge one would never lapse */
+	if (!*rest || *end || errno || !(v > 0 && v <= 86400)) {
+		settings_error(errors, line, "focus_guard %s takes a number of seconds, "
+				"more than 0 and at most a day", word);
+		return 0;
+	}
+	*seconds = v;
+	return 1;
+}
+
 /* A mode's or input selector's name: a word, or text in double quotes,
  * as sway takes it. Moves *p past it. Returns NULL for an empty name or an
  * unclosed quote. */
@@ -936,6 +970,7 @@ settings_parse(char *text, struct json_object *errors)
 	int ok = 1;
 
 	s->text = text;
+	s->focus_guard = -1;
 	settings_add_mode(s, "default");
 	for (start = text; *start; start = *end ? end + 1 : end) {
 		line++;
@@ -1007,6 +1042,13 @@ settings_parse(char *text, struct json_object *errors)
 				ok = 0;
 			} else {
 				ok &= settings_add_input(s, name, p, line, errors);
+			}
+		} else if (!strcasecmp(word, "focus_guard")) {
+			if (mode) {
+				settings_error(errors, line, "focus_guard can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_focus_guard(s, p, line, errors);
 			}
 		} else if (!strcasecmp(word, "for_window")) {
 			if (mode) {

@@ -18,6 +18,25 @@ static const float fullscreen_bg[]         = {0.0f, 0.0f, 0.0f, 1.0f}; /* You ca
 /* logging */
 static int log_level = WLR_ERROR;
 
+/* The focus guard, tide's SPEC §14: with it, a new window takes focus only
+ * when you asked for it, through a grant, or it's from the app you're in */
+static const int focus_guard               = 0;
+static const double grant_seconds          = 10; /* how long a grant holds */
+static const double prompt_seconds         = 2;  /* how soon after a key press a polkit prompt may take focus */
+/* Polkit agents, whose prompt takes focus right after a key press */
+static const char *const prompt_classes[] = {
+	"hyprpolkitagent",
+	"polkit-gnome-authentication-agent-1",
+	"org.kde.polkit-kde-authentication-agent-1",
+};
+/* Portal backends, whose dialogs, such as the file chooser, are for the
+ * app you're in */
+static const char *const portal_classes[] = {
+	"xdg-desktop-portal-gtk",
+	"xdg-desktop-portal-kde",
+	"xdg-desktop-portal-gnome",
+};
+
 static const Rule rules[] = {
 	/* app_id             title       workspace     isfloating   monitor */
 	{ "Gimp_EXAMPLE",     NULL,       NULL,         1,           -1 }, /* Start on the current workspace, floating, not tiled */

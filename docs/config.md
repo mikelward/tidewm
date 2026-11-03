@@ -33,6 +33,8 @@ supported yet. In an `input` or `output` line, a name or value may be in
 | `output NAME SETTINGS` | Sets up the output called `NAME`, or every output for `*`, as below |
 | `input NAME SETTING VALUE` | Sets up the input devices `NAME` names, as below; `input NAME {` … `}` takes a setting a line |
 | `mode NAME {` … `}` | A submap: the `bindsym` lines inside are in force while `NAME` is the mode, and the top level's aren't. `NAME` is a word, or text in `"`, without `;`, which ends a command; opening a mode again adds to it |
+| `focus_guard enable\|disable` | tidewm's own: turns the focus guard on or off, as below |
+| `focus_guard grant_seconds S`, `focus_guard prompt_seconds S` | How long a grant holds, 10 by default, and how soon after a key press a polkit prompt may take focus, 2 by default, in seconds, more than 0 and at most a day |
 
 `KEYS` is modifiers and a key, joined by `+`, as `Mod4+Shift+Return`:
 
@@ -207,6 +209,50 @@ not one that layout lacks. The `input` command takes one setting, as a
 line does, and sets it at once, until a reload; it fails for a name no
 device has, or settings XKB can't make a keymap of, leaving the keymap as
 it was.
+
+## The focus guard
+
+tidewm's own, from tide's SPEC §14: nothing takes the keyboard unless you
+asked for it. `config.h`'s `focus_guard` says whether it's on without the
+file. With it on, a new window takes focus when:
+
+- **A grant names its app**, from the IPC's `grant` command
+  ([`ipc.md`](ipc.md)), as `tide launch`, a notification's click or a
+  terminal's shell makes one. Or the grant names a process, and the
+  window's descends from it.
+- **It's from the app you're in:** the same app ID, or the same process.
+- **It's a portal's dialog,** such as a file chooser, while a window has
+  focus, since it isn't the app's own process. `config.h`'s
+  `portal_classes` lists them.
+- **It's a polkit agent's prompt,** within `prompt_seconds` of a key
+  press. `config.h`'s `prompt_classes` lists them.
+
+`exec` grants nothing, so a key binding that starts an app grants it
+first, as `tide launch` does: `bindsym Mod4+Return grant foot; exec foot`.
+
+Any other new window opens where it would, held from focus and marked
+urgent. Going to it takes it out of that: the pointer, a click,
+`focus next`, its workspace, or `[con_id=N] focus`. A window with neither
+an app ID nor a title, such as Chrome's own notification, is a status
+popup: it's held too, but never marked, and only the pointer or a click
+focuses it.
+
+- **A grant is used once:** by the first window that matches, or by an
+  activation of a window its app already had. One that names an app is
+  used before a wildcard.
+- **A grant is canceled** by a key press, a click (even in the window
+  you're in), or focus moving to another window by any means, including a
+  new window taking it with no grant, as one from the app you're in does,
+  or any with the guard off. These aren't moving on: focus
+  coming back to the window you were in, as when a launcher closes; focus
+  a grant gave, even once a launcher that held the keyboard closes; and
+  focus moving as an output goes.
+- **A grant lapses** after `grant_seconds`.
+
+An activation, xdg-activation's or X11's `_NET_ACTIVE_WINDOW`, marks the
+window urgent rather than focusing it, unless a grant names its app, with
+the guard on or off. With it off, a new window still uses its grant, and
+goes to the grant's workspace, though every window takes focus.
 
 ## Errors
 

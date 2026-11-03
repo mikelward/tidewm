@@ -62,6 +62,7 @@ static struct json_object *settings_json_modes(void);
 static int settings_output_command(char *args, char *err, size_t errsize, int *parse);
 static int settings_input_command(char *args, char *err, size_t errsize, int *parse);
 static struct json_object *settings_json_inputs(void);
+static int fg_command(char *args, char *err, size_t errsize);
 /* layout.h, included after this file */
 static const Layout *lt_part_layout(Workspace *ws, Monitor *m);
 
@@ -502,9 +503,10 @@ ipc_zoom(Client *sel)
 	Monitor *m = sel ? sel->mon : NULL;
 	if (!m || !VISIBLEON(sel, m) || !m->lt[m->sellt]->arrange || sel->isfloating)
 		return;
-	/* The first tiled window that isn't sel, sel going NULL if it's passed */
+	/* The first tiled window that isn't sel, sel going NULL if it's
+	 * passed; never a status popup, which only the pointer focuses */
 	wl_list_for_each(c, &clients, link) {
-		if (VISIBLEON(c, m) && !c->isfloating) {
+		if (VISIBLEON(c, m) && !c->isfloating && c->held != FgPopup) {
 			if (c != sel)
 				break;
 			sel = NULL;
@@ -637,11 +639,12 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			if (!(m = ipc_find_output(cmd)))
 				return ipc_json_success(0, "No such output");
 			selmon = m;
-			focusclient(focustop(selmon), NULL, 1);
+			focusclient(focusgo(selmon), NULL, 1);
 			return ipc_json_success(1, NULL);
 		}
 		if (!has_criteria && (!strcasecmp(cmd, "next") || !strcasecmp(cmd, "prev"))) {
-			if (!target)
+			/* With only windows the focus guard holds, it goes to one */
+			if (!target && !focusgo(selmon))
 				return ipc_json_success(0, "No window to focus from");
 			focusstack(&(const Arg){.i = tolower((unsigned char)*cmd) == 'n' ? +1 : -1});
 			return ipc_json_success(1, NULL);
@@ -650,7 +653,7 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			error = "Expected [con_id=N] focus, focus next|prev, or focus output ...";
 			goto parse_error;
 		}
-		ws_view(target->ws);
+		ws_view_to(target->ws, target);
 		selmon = target->mon;
 		focusclient(target, NULL, 1);
 		return ipc_json_success(1, NULL);
@@ -695,6 +698,14 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		result = ipc_json_success(0, why);
 		if (parse)
 			json_object_object_add(result, "parse_error", json_object_new_boolean(1));
+		return result;
+	}
+	if (!has_criteria && ipc_take(&cmd, "grant")) {
+		char why[256];
+		if (fg_command(cmd, why, sizeof(why)))
+			return ipc_json_success(1, NULL);
+		result = ipc_json_success(0, why);
+		json_object_object_add(result, "parse_error", json_object_new_boolean(1));
 		return result;
 	}
 	if (!has_criteria && ipc_take(&cmd, "input")) {

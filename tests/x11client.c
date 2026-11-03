@@ -11,11 +11,16 @@
  * there before it watched the root, so a window made in between would
  * never be managed.
  *
+ * A line "activate" on stdin asks for the window to be activated, with a
+ * _NET_ACTIVE_WINDOW message to the root, as an application does.
+ *
  * Usage: x11client CLASS TITLE
  */
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_icccm.h>
 
@@ -64,6 +69,29 @@ wait_for_wm(xcb_connection_t *conn, xcb_window_t root)
 	xcb_change_window_attributes(conn, root, XCB_CW_EVENT_MASK, &mask);
 }
 
+/* Asks the window manager to activate win, as an application does: source
+ * 1, at no particular time */
+static void
+activate(xcb_connection_t *conn, xcb_window_t root, xcb_window_t win)
+{
+	static const char name[] = "_NET_ACTIVE_WINDOW";
+	xcb_intern_atom_reply_t *atom;
+	xcb_client_message_event_t msg = {0};
+	if (!(atom = xcb_intern_atom_reply(conn,
+			xcb_intern_atom(conn, 0, sizeof(name) - 1, name), NULL)))
+		die("can't intern _NET_ACTIVE_WINDOW");
+	msg.response_type = XCB_CLIENT_MESSAGE;
+	msg.format = 32;
+	msg.window = win;
+	msg.type = atom->atom;
+	msg.data.data32[0] = 1;
+	msg.data.data32[1] = XCB_CURRENT_TIME;
+	free(atom);
+	xcb_send_event(conn, 0, root, XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT
+			| XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, (const char *)&msg);
+	xcb_flush(conn);
+}
+
 /* Waits until the X server has handled every request so far. */
 static void
 sync_server(xcb_connection_t *conn)
@@ -80,6 +108,9 @@ main(int argc, char *argv[])
 	char class[256];
 	size_t len;
 	xcb_generic_event_t *event;
+	struct pollfd fds[2];
+	char line[64];
+	ssize_t n;
 
 	if (argc != 3)
 		die("usage: x11client CLASS TITLE");
@@ -103,7 +134,24 @@ main(int argc, char *argv[])
 	sync_server(conn);
 	xcb_map_window(conn, win);
 	xcb_flush(conn);
-	while ((event = xcb_wait_for_event(conn)))
-		free(event);
-	return 0;
+	fds[0] = (struct pollfd){.fd = xcb_get_file_descriptor(conn), .events = POLLIN};
+	fds[1] = (struct pollfd){.fd = STDIN_FILENO, .events = POLLIN};
+	for (;;) {
+		if (poll(fds, 2, -1) < 0)
+			die("can't poll");
+		while ((event = xcb_poll_for_event(conn)))
+			free(event);
+		if (xcb_connection_has_error(conn))
+			return 0;
+		if (fds[1].revents) {
+			/* At the end of stdin, only the X server is left to read */
+			if ((n = read(STDIN_FILENO, line, sizeof(line) - 1)) <= 0) {
+				fds[1].fd = -1;
+				continue;
+			}
+			line[n] = '\0';
+			if (!strcmp(line, "activate\n"))
+				activate(conn, screen->root, win);
+		}
+	}
 }
