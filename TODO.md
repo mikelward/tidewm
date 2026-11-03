@@ -60,10 +60,15 @@ lands with a test.
 - **Keeping a workspace** (#8): tidewm's own `persist workspace NAME` and
   `unpersist workspace NAME` commands, for tide's home workspace, since
   sway has none. It could move to the runtime config instead.
-- **Layout commands' names** (#11): sway has no master layouts, so
-  `layout tile|floating|monocle|toggle`, `nmaster`, `mfact` and `zoom` take
-  dwl's names. The layouts item may rename them, before tide's shell uses
-  them.
+- **Layout commands' names** (#11, #20): sway has no master layouts, so
+  `nmaster`, `mfact` and `zoom` take dwl's names, and `layout` takes
+  tide's modes (`tile`, `threecol`, `twocol`, `monocle`) plus dwl's
+  `floating`. Reversible before tide's shell uses them.
+- **Each layout's own mfact and nmaster** (#20): `threecol` starts at 0.5
+  with one master and `twocol` at 0.72 with two, as tide's do; the rest
+  start from `config.h`'s monitor rule. A monitor keeps each layout's, so
+  switching back finds it as it was. Reversible; the next step keeps them
+  per workspace instead.
 - **exec takes the rest of the line** (#11): `;` included, so it comes
   last, where sway ends it at an unquoted `;`. Finding that `;` means
   reading a shell's quoting, `$(...)` and escapes; this way the shell does
@@ -92,9 +97,9 @@ lands with a test.
 
 ## Plan
 
-1. **Layouts**: three-column, two columns + stack and monocle beside tile,
-   set per workspace; the layout messages and a layout event. New windows
-   join the end of the stack (#19).
+1. **Layouts**: set per workspace; the layout messages and a layout event.
+   New windows join the end of the stack (#19); three-column and two
+   columns + stack came beside tile and monocle (#20).
 2. **The focus guard**: no window takes focus on map without a grant;
    grants over the IPC, lapsing on input elsewhere and on a timer; refused
    windows marked urgent, with an attention list and a cycle; activation,

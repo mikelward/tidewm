@@ -31,6 +31,8 @@ static const Layout layouts[] = {
 	{ "[]=",      tile },
 	{ "><>",      NULL },    /* no layout function means floating behavior */
 	{ "[M]",      monocle },
+	{ "|M|",      threecol }, /* tidewm's: the master centered */
+	{ "||=",      twocol },   /* tidewm's: two masters, then a stack */
 };
 
 /* monitors */

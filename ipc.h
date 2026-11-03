@@ -739,7 +739,8 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 	/* tidewm's own, after dwl's functions: the focused monitor's layout */
 	if (!has_criteria && ipc_take(&cmd, "layout")) {
 		static const struct { const char *name; void (*arrange)(Monitor *); } names[] = {
-			{"tile", tile}, {"floating", NULL}, {"monocle", monocle},
+			{"tile", tile}, {"threecol", threecol}, {"twocol", twocol},
+			{"monocle", monocle}, {"floating", NULL},
 		};
 		size_t i, j;
 		if (!selmon)
@@ -759,7 +760,7 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			}
 			return ipc_json_success(0, "That layout isn't in config.h's layouts");
 		}
-		error = "Expected layout tile|floating|monocle|toggle";
+		error = "Expected layout tile|threecol|twocol|monocle|floating|toggle";
 		goto parse_error;
 	}
 	if (!has_criteria && ipc_take(&cmd, "nmaster")) {
