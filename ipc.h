@@ -27,7 +27,8 @@ enum { IpcCommand = 0, IpcGetWorkspaces = 1, IpcSubscribe = 2,
 	IpcGetConfig = 9, IpcSendTick = 10, IpcGetBindingState = 12, IpcGetInputs = 100 };
 /* Event numbers, as sway sends them with IPC_EVENT_BIT set */
 enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvMode = 2, IpcEvWindow = 3,
-	IpcEvShutdown = 6, IpcEvTick = 7, IpcEvInput = 21 };
+	IpcEvShutdown = 6, IpcEvTick = 7, IpcEvInput = 21,
+	IpcEvLayout = 30 /* tidewm's own */ };
 
 typedef struct {
 	struct wl_list link;
@@ -61,6 +62,25 @@ static struct json_object *settings_json_modes(void);
 static int settings_output_command(char *args, char *err, size_t errsize, int *parse);
 static int settings_input_command(char *args, char *err, size_t errsize, int *parse);
 static struct json_object *settings_json_inputs(void);
+/* layout.h, included after this file */
+static const Layout *lt_part_layout(Workspace *ws, Monitor *m);
+
+/* config.h's layouts' names over the IPC: tide's modes, and dwl's floating */
+static const struct { const char *name; void (*arrange)(Monitor *); } ipc_layouts[] = {
+	{"tile", tile}, {"threecol", threecol}, {"twocol", twocol},
+	{"monocle", monocle}, {"floating", NULL},
+};
+
+/* lt's name, or NULL for one config.h added that has none */
+static const char *
+ipc_layout_name(const Layout *lt)
+{
+	size_t i;
+	for (i = 0; lt && i < LENGTH(ipc_layouts); i++)
+		if (lt->arrange == ipc_layouts[i].arrange)
+			return ipc_layouts[i].name;
+	return NULL;
+}
 
 static unsigned long
 ipc_id(unsigned long *id)
@@ -301,7 +321,7 @@ static struct json_object *
 ipc_json_workspace(Workspace *ws, Monitor *m)
 {
 	struct json_object *obj = json_object_new_object();
-	const char *p = ws->name;
+	const char *p = ws->name, *name;
 	int num = -1;
 	while (isdigit((unsigned char)*p))
 		p++;
@@ -317,6 +337,8 @@ ipc_json_workspace(Workspace *ws, Monitor *m)
 	json_object_object_add(obj, "persistent", json_object_new_boolean(ws->persistent));
 	json_object_object_add(obj, "output", m ? json_object_new_string(m->wlr_output->name) : NULL);
 	json_object_object_add(obj, "rect", ipc_json_box(m ? m->w : (struct wlr_box){0}));
+	name = ipc_layout_name(lt_part_layout(ws, m));
+	json_object_object_add(obj, "layout", name ? json_object_new_string(name) : NULL);
 	return obj;
 }
 
@@ -738,10 +760,6 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 	}
 	/* tidewm's own, after dwl's functions: the focused monitor's layout */
 	if (!has_criteria && ipc_take(&cmd, "layout")) {
-		static const struct { const char *name; void (*arrange)(Monitor *); } names[] = {
-			{"tile", tile}, {"threecol", threecol}, {"twocol", twocol},
-			{"monocle", monocle}, {"floating", NULL},
-		};
 		size_t i, j;
 		if (!selmon)
 			return ipc_json_success(0, "No output");
@@ -749,11 +767,11 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			setlayout(&(const Arg){0}); /* back to the previous one */
 			return ipc_json_success(1, NULL);
 		}
-		for (i = 0; i < LENGTH(names); i++) {
-			if (strcasecmp(cmd, names[i].name))
+		for (i = 0; i < LENGTH(ipc_layouts); i++) {
+			if (strcasecmp(cmd, ipc_layouts[i].name))
 				continue;
 			for (j = 0; j < LENGTH(layouts); j++) {
-				if (layouts[j].arrange == names[i].arrange) {
+				if (layouts[j].arrange == ipc_layouts[i].arrange) {
 					setlayout(&(const Arg){.v = &layouts[j]});
 					return ipc_json_success(1, NULL);
 				}
@@ -892,7 +910,7 @@ ipc_handle_subscribe(IpcClient *cl, const char *payload)
 	static const struct { const char *name; int event; } names[] = {
 		{"workspace", IpcEvWorkspace}, {"output", IpcEvOutput}, {"mode", IpcEvMode},
 		{"window", IpcEvWindow}, {"shutdown", IpcEvShutdown}, {"tick", IpcEvTick},
-		{"input", IpcEvInput},
+		{"input", IpcEvInput}, {"layout", IpcEvLayout},
 	};
 	struct json_object *req = json_tokener_parse(payload), *tick;
 	uint32_t events = 0;
@@ -1230,6 +1248,25 @@ ipc_event_mode(const char *name)
 	json_object_object_add(obj, "change", json_object_new_string(name));
 	json_object_object_add(obj, "pango_markup", json_object_new_boolean(0));
 	ipc_broadcast(IpcEvMode, obj);
+}
+
+/* tidewm's own layout event: the layout of the current workspace's part
+ * on m, when it changes or the workspace does */
+static void
+ipc_event_layout(Monitor *m)
+{
+	struct json_object *obj;
+	const char *name;
+	if (!ipc_subscribed(IpcEvLayout) || !curws)
+		return;
+	obj = json_object_new_object();
+	name = ipc_layout_name(m->lt[m->sellt]);
+	json_object_object_add(obj, "change", json_object_new_string("layout"));
+	json_object_object_add(obj, "workspace", json_object_new_string(curws->name));
+	json_object_object_add(obj, "output", json_object_new_string(m->wlr_output->name));
+	json_object_object_add(obj, "layout", name ? json_object_new_string(name) : NULL);
+	json_object_object_add(obj, "symbol", json_object_new_string(m->ltsymbol));
+	ipc_broadcast(IpcEvLayout, obj);
 }
 
 static void

@@ -43,6 +43,10 @@ lands with a test.
 - **Window rules** (#15): `for_window [criteria] commands`, matching
   `app_id`, `class`, `instance`, `title` and `shell` by regular
   expression, in place of `config.h`'s rules once a file is loaded.
+- **Layouts** (#19, #20, #21): new windows join the end of the stack;
+  three-column and two columns + stack beside tile and monocle, with
+  tide's geometry; a layout, mfact and nmaster per workspace part, from
+  its monitor's aspect; the `layout` event.
 - **Input devices** (#17): sway's `input NAME SETTING VALUE` lines and
   `input NAME { ... }` blocks, for `*`, a type or a device's identifier:
   XKB and repeat for keyboards, grouped as sway's smart grouping does,
@@ -64,11 +68,19 @@ lands with a test.
   `nmaster`, `mfact` and `zoom` take dwl's names, and `layout` takes
   tide's modes (`tile`, `threecol`, `twocol`, `monocle`) plus dwl's
   `floating`. Reversible before tide's shell uses them.
-- **Each layout's own mfact and nmaster** (#20): `threecol` starts at 0.5
-  with one master and `twocol` at 0.72 with two, as tide's do; the rest
-  start from `config.h`'s monitor rule. A monitor keeps each layout's, so
-  switching back finds it as it was. Reversible; the next step keeps them
-  per workspace instead.
+- **Each layout's own mfact and nmaster** (#20, #21): `threecol` starts at
+  0.5 with one master and `twocol` at 0.72 with two, as tide's do; the
+  rest start from `config.h`'s monitor rule. Each workspace's part on a
+  monitor keeps each layout's, so switching back finds it as it was.
+  Reversible.
+- **A part's first layout** (#21): `threecol` from an aspect of 2.1, else
+  the monitor rule's, built in. tide's SPEC makes the modes and where
+  ultrawide begins settings; they can come to the config file with the
+  layouts' `mfact` and `nmaster`. Reversible.
+- **The layout event** (#21): tidewm's own event, `0x8000001e`, as sway
+  has none, giving the part's layout by tide's name and its symbol; and a
+  `layout` field in `GET_WORKSPACES` and the tree. Reversible before
+  tide's shell reads them.
 - **exec takes the rest of the line** (#11): `;` included, so it comes
   last, where sway ends it at an unquoted `;`. Finding that `;` means
   reading a shell's quoting, `$(...)` and escapes; this way the shell does
@@ -97,38 +109,35 @@ lands with a test.
 
 ## Plan
 
-1. **Layouts**: set per workspace; the layout messages and a layout event.
-   New windows join the end of the stack (#19); three-column and two
-   columns + stack came beside tile and monocle (#20).
-2. **The focus guard**: no window takes focus on map without a grant;
+1. **The focus guard**: no window takes focus on map without a grant;
    grants over the IPC, lapsing on input elsewhere and on a timer; refused
    windows marked urgent, with an attention list and a cycle; activation,
    Wayland and X11, onto the urgent path; the last input and pids for the
    polkit check.
-3. **Window states**: maximize, ending when another window on the
+2. **Window states**: maximize, ending when another window on the
    workspace takes focus; fullscreen on open, applied with the grant.
-4. **Dialogs and floating**: centered on the parent, capped at 80% of the
+3. **Dialogs and floating**: centered on the parent, capped at 80% of the
    monitor, following it; modal; a picture-in-picture rule; a hand-floated
    window's size remembered.
-5. **Dimming** of every window but the focused one, with tide's
+4. **Dimming** of every window but the focused one, with tide's
    exceptions.
-6. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
+5. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
    a pointer button also ends the tap; `scroll_factor`; the `input`
    event's `xkb_layout`, when the active layout switches, for a layout
    indicator. Per-device settings came with the runtime config (#17).
-7. **Outputs**: a single-window width; the lid switch. Mode, scale,
+6. **Outputs**: a single-window width; the lid switch. Mode, scale,
    position and hotplug came with the runtime config (#16).
-8. **Lock and keyboard**: a command that drops a dead lock, no pointer
+7. **Lock and keyboard**: a command that drops a dead lock, no pointer
    events while locked; on-demand layers keep the keyboard.
-9. **Capture**: window identifiers over the IPC; capture start and stop
+8. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
-10. **Outside clicks**: a focus-grab protocol or click event for the
+9. **Outside clicks**: a focus-grab protocol or click event for the
     notification center.
-11. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+10. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
     client starts Xwayland, and a window it maps before wlroots' window
     manager watches the root is never managed (the tests' client waits
     for it): start Xwayland ahead of clients, or take on windows already
     there.
-12. **Session**: the entry and wrapper tide starts it with.
+11. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

@@ -222,3 +222,219 @@ lt_switch(Monitor *m, const Layout *old, const Layout *lt)
 		m->nmaster = m->rule_nmaster;
 	}
 }
+
+/* A workspace's part on a monitor, while another workspace is current:
+ * its layouts, mfact and nmaster, each layout's own as well. It's kept by
+ * output name, so a monitor plugged in again finds it. The current
+ * workspace's parts are the monitors' own fields, once they've settled. */
+typedef struct {
+	struct wl_list link;
+	Workspace *ws;
+	char *output;
+	const Layout *lt[2];
+	unsigned int sellt;
+	float mfact;
+	int nmaster;
+	LayoutMode modes[LENGTH(((Monitor *)0)->modes)];
+} LtPart;
+
+static struct wl_list lt_parts = {&lt_parts, &lt_parts};
+
+/* Where an ultrawide monitor begins, as tide's SPEC §6.1 has it */
+#define LT_ULTRAWIDE 2.1
+
+static LtPart *
+lt_part(Workspace *ws, Monitor *m, int make)
+{
+	LtPart *p;
+	wl_list_for_each(p, &lt_parts, link)
+		if (p->ws == ws && !strcmp(p->output, m->wlr_output->name))
+			return p;
+	if (!make)
+		return NULL;
+	p = ecalloc(1, sizeof(*p));
+	p->ws = ws;
+	p->output = strdup(m->wlr_output->name);
+	wl_list_insert(&lt_parts, &p->link);
+	return p;
+}
+
+/* A new part's layouts: three-column on an ultrawide monitor, if it's in
+ * config.h's layouts, else the monitor rule's, as dwl's, with the other
+ * layout to toggle to; each with its own mfact and nmaster. */
+static void
+lt_defaults_for(Monitor *m)
+{
+	const Layout *lt = m->rule_lt ? m->rule_lt : &layouts[0];
+	size_t i;
+	if (m->m.height > 0 && m->m.width >= LT_ULTRAWIDE * m->m.height)
+		for (i = 0; i < LENGTH(layouts); i++)
+			if (layouts[i].arrange == threecol)
+				lt = &layouts[i];
+	memset(m->modes, 0, sizeof(m->modes));
+	m->lt[0] = lt;
+	m->lt[1] = &layouts[LENGTH(layouts) > 1 && lt != &layouts[1]];
+	m->sellt = 0;
+	/* Not the layout before it, which lt_switch would keep: fresh values */
+	m->mfact = m->rule_mfact;
+	m->nmaster = m->rule_nmaster;
+	for (i = 0; i < LENGTH(lt_defaults); i++) {
+		if (lt->arrange == lt_defaults[i].arrange) {
+			m->mfact = lt_defaults[i].mfact;
+			m->nmaster = lt_defaults[i].nmaster;
+		}
+	}
+	strncpy(m->ltsymbol, lt->symbol, LENGTH(m->ltsymbol));
+}
+
+/* Keeps m's layouts as ws's part there */
+static void
+lt_store(Monitor *m, Workspace *ws)
+{
+	LtPart *p = lt_part(ws, m, 1);
+	memcpy(p->lt, m->lt, sizeof(p->lt));
+	p->sellt = m->sellt;
+	p->mfact = m->mfact;
+	p->nmaster = m->nmaster;
+	memcpy(p->modes, m->modes, sizeof(p->modes));
+}
+
+/* Gives m ws's part there, or a new one from the defaults */
+static void
+lt_restore(Monitor *m, Workspace *ws)
+{
+	LtPart *p = lt_part(ws, m, 0);
+	if (!p) {
+		lt_defaults_for(m);
+		lt_store(m, ws);
+		return;
+	}
+	memcpy(m->lt, p->lt, sizeof(m->lt));
+	m->sellt = p->sellt;
+	m->mfact = p->mfact;
+	m->nmaster = p->nmaster;
+	memcpy(m->modes, p->modes, sizeof(m->modes));
+	strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
+}
+
+/* The current workspace goes from old to ws: each monitor keeps its part
+ * of old, if its fields hold it, and takes its part of ws once it has
+ * geometry to choose defaults by: lt_settle gives a monitor without any,
+ * a disabled one, its part when it's enabled. lt_announce says which
+ * layouts they are, once the monitors are arranged. */
+static void
+lt_view(Workspace *old, Workspace *ws)
+{
+	Monitor *m;
+	wl_list_for_each(m, &mons, link) {
+		if (old && m->lt_settled)
+			lt_store(m, old);
+		m->lt_settled = 0;
+		if (m->m.width > 0 && m->m.height > 0) {
+			lt_restore(m, ws);
+			m->lt_settled = 1;
+		}
+	}
+}
+
+/* m's layout event, once it's arranged, which sets monocle's [n] symbol.
+ * A monitor asleep, powered off with its geometry kept, can't be arranged,
+ * so its event waits for lt_flush, once it wakes. */
+static void
+lt_event(Monitor *m)
+{
+	if (m->wlr_output->enabled)
+		ipc_event_layout(m);
+	else
+		m->lt_pending = 1;
+}
+
+/* The layout event for each monitor holding its part of the current
+ * workspace, after a switch has arranged them */
+static void
+lt_announce(void)
+{
+	Monitor *m;
+	wl_list_for_each(m, &mons, link)
+		if (m->lt_settled)
+			lt_event(m);
+}
+
+/* Once m has its geometry, its part of the current workspace, if its
+ * fields don't hold it yet: the one kept by its output's name, for a
+ * monitor plugged in again, or the defaults, by its aspect. Its layout
+ * event waits for lt_flush, once updatemons has placed every window. */
+static void
+lt_settle(Monitor *m)
+{
+	if (m->lt_settled || !curws)
+		return;
+	lt_restore(m, curws);
+	m->lt_settled = m->lt_pending = 1;
+}
+
+/* The layout events held back, by lt_settle or for a monitor asleep:
+ * after updatemons has arranged the monitors and given windows left
+ * without one a monitor, so monocle's symbol counts them. One still off
+ * keeps its event until it's on. */
+static void
+lt_flush(void)
+{
+	Monitor *m;
+	wl_list_for_each(m, &mons, link) {
+		if (!m->wlr_output->enabled)
+			continue;
+		if (m->lt_pending && m->lt_settled)
+			ipc_event_layout(m);
+		m->lt_pending = 0;
+	}
+}
+
+/* Keeps m's part of the current workspace, as m goes */
+static void
+lt_unplug(Monitor *m)
+{
+	if (m->lt_settled && curws)
+		lt_store(m, curws);
+	m->lt_settled = 0;
+}
+
+/* Drops a workspace's parts, as it goes */
+static void
+lt_forget(Workspace *ws)
+{
+	LtPart *p, *tmp;
+	wl_list_for_each_safe(p, tmp, &lt_parts, link) {
+		if (p->ws != ws)
+			continue;
+		wl_list_remove(&p->link);
+		free(p->output);
+		free(p);
+	}
+}
+
+/* The layout ws's part on m is in, for the IPC: m's own for the current
+ * workspace, if its fields hold it, else the kept one's, or NULL for a
+ * part not made yet */
+static const Layout *
+lt_part_layout(Workspace *ws, Monitor *m)
+{
+	LtPart *p;
+	if (!m)
+		return NULL;
+	if (ws == curws && m->lt_settled)
+		return m->lt[m->sellt];
+	return (p = lt_part(ws, m, 0)) ? p->lt[p->sellt] : NULL;
+}
+
+/* Drops every part, at exit */
+static void
+lt_finish(void)
+{
+	LtPart *p, *tmp;
+	wl_list_for_each_safe(p, tmp, &lt_parts, link) {
+		wl_list_remove(&p->link);
+		free(p->output);
+		free(p);
+	}
+}

@@ -17,6 +17,10 @@ static struct wl_list workspaces = {&workspaces, &workspaces}; /* in the order m
 static Workspace *curws;
 static Workspace *prevws; /* for back_and_forth */
 static void ws_view(Workspace *ws);
+/* layout.h, included after this file */
+static void lt_view(Workspace *old, Workspace *ws);
+static void lt_announce(void);
+static void lt_forget(Workspace *ws);
 
 /* ext-workspace: one group, on every output, as a workspace spans them,
  * holding every workspace. A client may ask to activate one. */
@@ -152,6 +156,8 @@ ws_prune(Workspace *ws)
 		prevws = NULL;
 	if (ws->ext)
 		wlr_ext_workspace_handle_v1_destroy(ws->ext);
+	/* Its layouts go with it: one made again starts from the defaults */
+	lt_forget(ws);
 	wl_list_remove(&ws->link);
 	free(ws->name);
 	free(ws);
@@ -177,7 +183,10 @@ ws_view(Workspace *ws)
 	curws = ws;
 	ws_set_active(old, 0);
 	ws_set_active(ws, 1);
+	/* Each monitor keeps old's layout and takes ws's */
+	lt_view(old, ws);
 	ws_arrange_all();
+	lt_announce();
 	focusclient(focustop(selmon), NULL, 1);
 	printstatus();
 	ipc_event_workspace("focus", ws, old);

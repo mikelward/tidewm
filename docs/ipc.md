@@ -36,7 +36,7 @@ the magic, or over 4 MiB, closes that connection only.
 | Type | Name | Reply |
 |---|---|---|
 | 0 | `RUN_COMMAND` | One result per command, as below |
-| 1 | `GET_WORKSPACES` | Each workspace, in the order made: `id`, `name`, `num` (the name as a number, or -1), `focused`, `visible`, `urgent` (a window on it is), `persistent`, `output`, `rect` |
+| 1 | `GET_WORKSPACES` | Each workspace, in the order made: `id`, `name`, `num` (the name as a number, or -1), `focused`, `visible`, `urgent` (a window on it is), `persistent`, `output`, `rect`, and tidewm's own `layout`, its part's on the focused monitor (`null` for one it hasn't had yet) |
 | 2 | `SUBSCRIBE` | `{"success": true}`, or `false` for anything but a JSON array of the event names below |
 | 3 | `GET_OUTPUTS` | Each output: `id`, `name`, `make`, `model`, `serial`, `active`, `power`, `primary`, `scale`, `transform`, `focused`, `current_workspace`, `rect`, `current_mode` |
 | 4 | `GET_TREE` | The root, its outputs, every workspace under each output, and in each the windows of that monitor's part, in `nodes` (tiled) and `floating_nodes` |
@@ -82,7 +82,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `input NAME SETTING VALUE` | Sets one setting, such as `xkb_layout` or `tap`, on the input devices `NAME` names, as the config file's input lines do ([`config.md`](config.md)), until a reload. It fails for a name no device has |
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails |
 | `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles |
-| `layout tile\|threecol\|twocol\|monocle\|floating\|toggle` | tidewm's own: the focused monitor's layout, from `config.h`'s `layouts`, or back to the previous one. The names are tide's: `threecol` centers the master with a stack either side, and `twocol` puts the masters side by side with the rest stacked on the right. Each layout keeps its own `mfact` and `nmaster` |
+| `layout tile\|threecol\|twocol\|monocle\|floating\|toggle` | tidewm's own: the layout of the current workspace's part on the focused monitor, from `config.h`'s `layouts`, or back to the previous one. The names are tide's: `threecol` centers the master with a stack either side, and `twocol` puts the masters side by side with the rest stacked on the right. Each part keeps its own layouts, and each layout its own `mfact` and `nmaster` (below) |
 | `nmaster N\|+N\|-N` | tidewm's own: how many windows the master area holds on the focused monitor |
 | `mfact F\|+F\|-F` | tidewm's own: the master area's share of the focused monitor's width, from 0.1 to 0.9. Only a finite number will do |
 | `zoom` | tidewm's own: swaps the focused window with the master, or with the next window if it's the master |
@@ -90,6 +90,19 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD` |
 | `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |
 | `unpersist workspace NAME` | tidewm's own: lets it go once it's empty and not current |
+
+### Layouts
+
+Each workspace's part on each monitor has its own layout, and each layout
+there its own `mfact` and `nmaster`, as in tide (its SPEC §6.1). The
+`layout`, `mfact` and `nmaster` commands set them for the current
+workspace's part on the focused monitor, and a workspace switch gives each
+monitor its part of the new one; a disabled monitor takes its part once
+it's enabled. A part starts from its monitor's aspect: `threecol` from 2.1
+wide (21:9 and wider), otherwise the layout of `config.h`'s monitor rule.
+A part is kept by output name, so a monitor plugged in again finds it, and
+a workspace that goes takes its parts with it: one made again starts
+afresh.
 
 ### Windows
 
@@ -118,6 +131,7 @@ in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
 | `window` | `0x80000003` | A window is `new`, `close`d, gets `focus`, changes `title`, `fullscreen_mode`, `floating` or `urgent`, or moves to another workspace or output, by a command, a key or a drag (`move`): `{"change": ..., "container": ...}`. A window's first event is `new`, sent once it has an output, workspace and floating state |
 | `shutdown` | `0x80000006` | tidewm exits: `{"change": "exit"}` |
 | `tick` | `0x80000007` | Someone sends `SEND_TICK`: `{"first": false, "payload": ...}`. Subscribing sends one at once, with `first` true |
+| `layout` | `0x8000001e` | tidewm's own: the current workspace's part on a monitor changes layout, or the current workspace changes, or a monitor takes its part of it, as it appears, or is enabled after the workspace changed; a monitor powered off says so once it's on again: `{"change": "layout", "workspace": ..., "output": ..., "layout": ..., "symbol": ...}`, `symbol` as `config.h` gives it, or monocle's `[n]` |
 | `input` | `0x80000015` | An input device is `added` or `removed`, a keyboard's keymap changes (`xkb_keymap`), or a libinput device's settings are set (`libinput_config`): `{"change": ..., "input": ...}`, the device as `GET_INPUTS` has it. A switch of the active layout doesn't send one yet |
 
 A client that stops reading is closed once 16 MiB of events wait for it.
