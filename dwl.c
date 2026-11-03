@@ -238,6 +238,8 @@ struct Monitor {
 	char ltsymbol[16];
 	int asleep;
 	unsigned long ipc_id; /* the IPC's output id, set on first use */
+	int want_pos, want_x, want_y; /* where it goes in the layout when enabled, if anywhere */
+	int want_mode, want_width, want_height, want_refresh; /* its mode once enabled, if given while off */
 };
 
 typedef struct {
@@ -1159,6 +1161,8 @@ createmon(struct wl_listener *listener, void *data)
 	size_t i;
 	struct wlr_output_state state;
 	Monitor *m;
+	OutputConfig oc, file;
+	int configured;
 
 	if (!wlr_output_init_render(wlr_output, alloc, drw))
 		return;
@@ -1186,20 +1190,36 @@ createmon(struct wl_listener *listener, void *data)
 		}
 	}
 
-	/* The mode is a tuple of (width, height, refresh rate), and each
-	 * monitor supports only a specific set of modes. We just pick the
-	 * monitor's preferred mode; a more sophisticated compositor would let
-	 * the user configure it. */
-	wlr_output_state_set_mode(&state, wlr_output_preferred_mode(wlr_output));
-
 	/* Set up event listeners */
 	LISTEN(&wlr_output->events.frame, &m->frame, rendermon);
 	LISTEN(&wlr_output->events.destroy, &m->destroy, cleanupmon);
 	LISTEN(&wlr_output->events.request_state, &m->request_state, requestmonstate);
 
-	wlr_output_state_set_enabled(&state, 1);
-	wlr_output_commit_state(wlr_output, &state);
+	/* config.h's monitor rule, then the config file's output lines over
+	 * it, and the preferred mode unless they give one, as on reload */
+	settings_output_defaults(m, &oc);
+	if ((configured = settings_output_config(wlr_output->name, &file)))
+		settings_merge_output(&oc, &file);
+	settings_preferred_mode(wlr_output, &oc);
+	settings_output_state(m, &oc, &state);
+	if (oc.has_position) {
+		m->m.x = oc.x;
+		m->m.y = oc.y;
+	}
+	if (!wlr_output_commit_state(wlr_output, &state) && configured) {
+		/* A mode it can't show, say: rather than a dark screen, its own */
+		fprintf(stderr, "tidewm: output %s refused its settings; using its preferred mode\n",
+				wlr_output->name);
+		settings_error(settings_errors, 0, "output %s refused its settings, "
+				"so it has its preferred mode", wlr_output->name);
+		wlr_output_state_finish(&state);
+		wlr_output_state_init(&state);
+		wlr_output_state_set_mode(&state, wlr_output_preferred_mode(wlr_output));
+		wlr_output_state_set_enabled(&state, 1);
+		wlr_output_commit_state(wlr_output, &state);
+	}
 	wlr_output_state_finish(&state);
+	settings_output_set(m, &oc, 1);
 
 	wl_list_insert(&mons, &m->link);
 	printstatus();
@@ -1224,7 +1244,11 @@ createmon(struct wl_listener *listener, void *data)
 	 */
 	m->scene_output = wlr_scene_output_create(scene, wlr_output);
 	wlr_ext_workspace_group_handle_v1_output_enter(ws_group, wlr_output);
-	if (m->m.x == -1 && m->m.y == -1)
+	if (!wlr_output->enabled)
+		/* Disabled by its config, it changes no layout, so nothing else
+		 * would tell the output manager it's there to be enabled */
+		updatemons(NULL, NULL);
+	else if (m->m.x == -1 && m->m.y == -1)
 		wlr_output_layout_add_auto(output_layout, wlr_output);
 	else
 		wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);

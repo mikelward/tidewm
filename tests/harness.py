@@ -274,3 +274,20 @@ def ext_workspaces(wm, *args):
                          timeout=TIMEOUT, check=True).stdout
     return [(name, state, int(outputs))
             for name, state, outputs in (line.rsplit(" ", 2) for line in out.splitlines())]
+
+
+def power(wm, output, state):
+    """Turns an output on or off with tests/power, as an idle daemon would,
+    over wlr-output-power-management."""
+    out = subprocess.run([os.path.join(ROOT, "tests", "power"), output, state],
+                         env=wm.env, capture_output=True, text=True,
+                         timeout=TIMEOUT, check=True).stdout
+    assert out == f"{state}\n", out
+
+
+def randr(test, *args):
+    """What wlr-randr says, over wlr-output-management, as display settings
+    tools see the outputs."""
+    test.need(shutil.which("wlr-randr"), "output management needs wlr-randr")
+    return subprocess.run(["wlr-randr", *args], env=test.wm.env, capture_output=True,
+                          text=True, timeout=TIMEOUT, check=True).stdout

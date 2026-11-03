@@ -58,6 +58,7 @@ static const char *settings_loaded_path(void);
 static int settings_enter_mode(char *name);
 static const char *settings_mode_now(void);
 static struct json_object *settings_json_modes(void);
+static int settings_output_command(char *args, char *err, size_t errsize, int *parse);
 
 static unsigned long
 ipc_id(unsigned long *id)
@@ -661,6 +662,16 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			return ipc_json_success(0, "A workspace has that name already");
 		ws_rename(from, to);
 		return ipc_json_success(1, NULL);
+	}
+	if (!has_criteria && ipc_take(&cmd, "output")) {
+		char why[256];
+		int parse;
+		if (settings_output_command(cmd, why, sizeof(why), &parse))
+			return ipc_json_success(1, NULL);
+		result = ipc_json_success(0, why);
+		if (parse)
+			json_object_object_add(result, "parse_error", json_object_new_boolean(1));
+		return result;
 	}
 	if (!has_criteria && ipc_take(&cmd, "mode")) {
 		if (!*cmd) {

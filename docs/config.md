@@ -3,7 +3,7 @@
 tidewm reads a config file in sway's syntax at startup, and again when it
 gets the `reload` command. A binding's action is a list of the IPC
 commands in [`ipc.md`](ipc.md), so anything `swaymsg` can do, a key can.
-Outputs and input follow (see `TODO.md`).
+Input follows (see `TODO.md`).
 
 ## Where it is
 
@@ -30,6 +30,7 @@ supported yet.
 | `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
 | `for_window [CRITERIA] COMMANDS` | Runs `COMMANDS` on each new window `CRITERIA` match, as below |
+| `output NAME SETTINGS` | Sets up the output called `NAME`, or every output for `*`, as below |
 | `mode NAME {` … `}` | A submap: the `bindsym` lines inside are in force while `NAME` is the mode, and the top level's aren't. `NAME` is a word, or text in `"`, without `;`, which ends a command; opening a mode again adds to it |
 
 `KEYS` is modifiers and a key, joined by `+`, as `Mod4+Shift+Return`:
@@ -114,6 +115,40 @@ for_window [title="Picture-in-Picture"] floating enable; move to output right
 
 `for_window` can't be in a mode.
 
+## Outputs
+
+As in sway, `output NAME SETTINGS` sets up the output called `NAME`, as
+`GET_OUTPUTS` names it, or every output for `*`. An output's own lines
+override `*`'s, and a later line for a name adds to an earlier one.
+`config.h`'s monitor rules still apply first, for what the file doesn't
+say, such as the layout.
+
+| Setting | Does |
+|---|---|
+| `mode WIDTHxHEIGHT[@HZ]` | The mode, `Hz` or not after the rate, as `2560x1440@144Hz`. It's one the output lists, the fastest at that size if no rate is given, or else a custom mode. `resolution` and `res` say the same |
+| `scale S` | The scale, above 0 and up to 10 |
+| `position X Y` | Where it is in the layout, in logical pixels; `pos` and `X,Y` work too |
+| `transform T` | `normal`, `90`, `180`, `270`, `flipped`, or `flipped-` one of those |
+| `enable`, `disable` | Turns it on or off; a disabled output's windows move to the focused one |
+
+The lines apply when an output appears, at startup or when it's plugged
+in, and again on `reload`, when each output starts over from `config.h`'s
+monitor rule and its preferred mode, so a setting taken out of the file
+goes. An output that refuses its settings at startup, as a mode it can't
+show, gets its preferred mode instead, and stderr says so. The `output`
+command takes the same settings, and sets them at once, until a reload; it
+fails for a name no output has. An output enabled again keeps the mode
+it had and goes back to the position it was last given; a mode or
+position given while it's disabled, by the command or its line, is used
+once it's enabled. Enabling or disabling an output wakes it from the power
+saving an idle daemon may have put it in.
+
+```
+output eDP-1 scale 1.5
+output DP-1 mode 2560x1440@144Hz position 1707 0
+output HDMI-A-1 disable
+```
+
 ## Errors
 
 A file with any error is left out whole, and what was loaded before stays:
@@ -125,6 +160,12 @@ bindcode`.
   `config.h`'s keys, so the file can be fixed and reloaded.
 - **On `reload`**, the command fails with the first three errors.
 - **Either way**, `GET_CONFIG` lists them all, until a load works.
+
+An output that refuses its settings, as a mode it can't show, is an error
+too, though not one in the file, so the rest of the file still loads. On
+`reload`, the output keeps what it had, and the command fails, naming it;
+at startup, or when it's plugged in, it gets its preferred mode. Either
+way, `GET_CONFIG` lists it.
 
 A binding's commands are only checked when the key is pressed. One that
 fails is written to stderr, with the binding's keys.

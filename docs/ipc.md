@@ -77,6 +77,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `exec COMMAND` | Runs the rest of the payload, `;` and all, with `/bin/sh -c`, in a session of its own. sway ends it at an unquoted `;`; tidewm leaves the shell to read its own quotes |
 | `reload` | Reads the config file again ([`config.md`](config.md)); fails with its errors, keeping what was loaded |
 | `mode NAME` | Makes the config file's mode `NAME`'s bindings the ones in force; `mode default` goes back to the top level. `NAME` may be in `"` |
+| `output NAME SETTINGS` | Sets the output `NAME`'s, or every output's for `*`, mode, scale, position, transform, or `enable` or `disable`, as the config file's output lines do ([`config.md`](config.md)), until a reload |
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails |
 | `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles |
 | `layout tile\|floating\|monocle\|toggle` | tidewm's own: the focused monitor's layout, from `config.h`'s `layouts`, or back to the previous one |
