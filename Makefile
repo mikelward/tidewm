@@ -17,7 +17,7 @@ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEV
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 all: dwl
-dwl: dwl.c client.h config.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
+dwl: dwl.c client.h config.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
 	ext-image-copy-capture-v1-protocol.h \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
 	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h
@@ -118,18 +118,43 @@ tests/ime: tests/ime.c tests/input-method-unstable-v2-client-protocol.h \
 	$(CC) tests/ime.c tests/input-method-unstable-v2-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
-test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime \
+tests/wlr-virtual-pointer-unstable-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		protocols/wlr-virtual-pointer-unstable-v1.xml $@
+tests/wlr-virtual-pointer-unstable-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		protocols/wlr-virtual-pointer-unstable-v1.xml $@
+tests/pointer: tests/pointer.c tests/wlr-virtual-pointer-unstable-v1-client-protocol.h \
+		tests/wlr-virtual-pointer-unstable-v1-protocol.c
+	$(CC) tests/pointer.c tests/wlr-virtual-pointer-unstable-v1-protocol.c -Itests \
+		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+tests/wlr-layer-shell-unstable-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		protocols/wlr-layer-shell-unstable-v1.xml $@
+tests/wlr-layer-shell-unstable-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		protocols/wlr-layer-shell-unstable-v1.xml $@
+tests/launcher: tests/launcher.c tests/wlr-layer-shell-unstable-v1-client-protocol.h \
+		tests/wlr-layer-shell-unstable-v1-protocol.c tests/xdg-shell-client-protocol.h \
+		tests/xdg-shell-protocol.c
+	$(CC) tests/launcher.c tests/wlr-layer-shell-unstable-v1-protocol.c tests/xdg-shell-protocol.c \
+		-Itests `$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime tests/pointer tests/launcher \
 		$(XWAYLAND:-DXWAYLAND=tests/x11client)
 	python3 -m unittest discover -s tests -v
 
 clean:
 	rm -f dwl *.o *-protocol.h tests/client tests/workspaces tests/locker tests/power \
-		tests/ime tests/x11client tests/*-protocol.h tests/*-protocol.c
+		tests/ime tests/pointer tests/launcher tests/x11client tests/*-protocol.h \
+		tests/*-protocol.c
 
 dist: clean
 	mkdir -p dwl-$(VERSION)
 	cp -R LICENSE NOTICE Makefile CHANGELOG.md README.md client.h config.def.h \
-		config.mk protocols dwl.1 dwl.c ime.h ipc.h layout.h settings.h util.h workspace.h dwl.desktop docs tests \
+		config.mk protocols dwl.1 dwl.c focus.h ime.h ipc.h layout.h settings.h util.h workspace.h \
+		dwl.desktop docs tests \
 		dwl-$(VERSION)
 	tar -caf dwl-$(VERSION).tar.gz dwl-$(VERSION)
 	rm -rf dwl-$(VERSION)

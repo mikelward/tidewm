@@ -90,6 +90,8 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD` |
 | `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |
 | `unpersist workspace NAME` | tidewm's own: lets it go once it's empty and not current |
+| `grant [--pid PID] [--key KEY] [--workspace NAME] [APP ...]` | tidewm's own: a one-shot grant for the focus guard ([`config.md`](config.md)). The first new window of one of the `APP`s takes focus, or of any app for `*`, which stands alone; `APP`s match ignoring case and a `.desktop`, and a bare name matches a qualified ID's last part, as `files` matches `org.example.Files`. With `--pid`, a window whose process descends from `PID` takes it too, and `APP` may be left out. `--workspace` takes the window to that workspace, made if it's new, with focus. `--key` names the grant for `grant extend`. Options take `--opt VALUE` or `--opt=VALUE` |
+| `grant extend --key KEY [--pid PID] APP ID ...` | tidewm's own: adds `ID`s to the grant made with that `KEY`, `PID` and first `APP`, if it still holds, for the app IDs a slow lookup finds; nothing, if it's gone |
 
 ### Layouts
 
@@ -110,6 +112,12 @@ A new window joins the end of its monitor's stack, so the master stays
 put, as in tide. A window moved in from another workspace or monitor, or
 tiled again after floating, counts as new. `zoom` makes a window the
 master.
+
+With the focus guard ([`config.md`](config.md)), a new window no grant
+let in opens unfocused, with `urgent` true and an `urgent` event. A
+window's activation marks it urgent, with or without the guard, unless a
+grant names its app. With only windows the guard holds on the focused
+monitor, `focus next|prev` goes to one.
 
 A window in the tree or in an event is a container: `id` (unique for
 tidewm's life), `type` (`con`, or `floating_con`), `name` (the title),

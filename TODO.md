@@ -47,6 +47,12 @@ lands with a test.
   three-column and two columns + stack beside tile and monocle, with
   tide's geometry; a layout, mfact and nmaster per workspace part, from
   its monitor's aspect; the `layout` event.
+- **The focus guard** (#22): `focus_guard enable`, and the `grant` and
+  `grant extend` commands. A new window takes focus only through a
+  grant, from the app you're in, as a portal's dialog, or as a polkit
+  prompt after a key press; the rest open held and urgent. A key press,
+  a click or a focus move cancels a grant, and it lapses. Activation,
+  Wayland's and X11's, is marked unless a grant names the app.
 - **Input devices** (#17): sway's `input NAME SETTING VALUE` lines and
   `input NAME { ... }` blocks, for `*`, a type or a device's identifier:
   XKB and repeat for keyboards, grouped as sway's smart grouping does,
@@ -106,14 +112,45 @@ lands with a test.
 - **A bad file at startup** (#12): tidewm says why on stderr and in
   `GET_CONFIG`, and starts with `config.h`'s keys, rather than refusing to
   start, so a typo can't lock anyone out. Reversible.
+- **The guard is off by default** (#22): `config.h`'s `focus_guard` is 0,
+  and tide's file turns it on with `focus_guard enable`, so dwl's
+  behavior stands without it. Reversible.
+- **The guard's commands are tidewm's own** (#22): `grant` and `grant
+  extend` over the IPC, and the file's `focus_guard` lines, since sway
+  has no focus guard, and its `no_focus` has no grants. Reversible
+  before `tide launch` uses them.
+- **exec grants nothing** (#22): a binding grants its app first
+  (`grant foot; exec foot`), as `tide launch` does. `exec` could grant
+  its own process instead. Reversible.
+- **A held window waits for you** (#22): it's never handed focus by
+  another window closing, an output change or a window mapping, only by
+  going to it: the pointer, a click, `focus next`, its workspace, or
+  `[con_id=N] focus`. Hyprland would focus the window under the pointer
+  when one closes. Reversible.
+- **Marks are the urgent flag** (#22): a window the guard holds is
+  `urgent` in the tree and in events, so a restarted shell reads the
+  marks there, with no `tide-attention` event or `announce_waiting`.
+  Reversible.
+- **X11 activation is marked, guard or not** (#22): `_NET_ACTIVE_WINDOW`
+  marks the window urgent, as xdg-activation already did, and as sway's
+  default `focus_on_window_activation urgent` does, where dwl activated
+  the X11 surface without focusing it.
+
+## Known bugs
+
+- **A leak in dwl's output management**: LeakSanitizer finds 136 bytes
+  from `wlr_output_swapchain_manager_prepare()` in
+  `outputmgrapplyortest()` after wlr-randr applies a configuration. It's
+  dwl's own code.
 
 ## Plan
 
-1. **The focus guard**: no window takes focus on map without a grant;
-   grants over the IPC, lapsing on input elsewhere and on a timer; refused
-   windows marked urgent, with an attention list and a cycle; activation,
-   Wayland and X11, onto the urgent path; the last input and pids for the
-   polkit check.
+1. **The focus guard's rest**: the marks' order, most recent first, and
+   the shell's own marks, from notifications; a notification's grant,
+   falling back to the app's most recent window, and that window at once
+   for one whose notification is gone; the last key or click and its
+   window, for the shell's polkit agent; a notice when no shell runs. The
+   guard, grants and activation came with #22.
 2. **Window states**: maximize, ending when another window on the
    workspace takes focus; fullscreen on open, applied with the grant.
 3. **Dialogs and floating**: centered on the parent, capped at 80% of the

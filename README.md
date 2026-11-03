@@ -134,6 +134,15 @@ window rules, outputs and input devices. Once it's loaded, its bindings
 replace `config.h`'s keys and its rules `config.h`'s rules.
 [`docs/config.md`](docs/config.md) says what it takes.
 
+### Focus guard
+
+With `focus_guard enable` in the config file, or `focus_guard` in
+`config.h`, a new window takes focus only when you asked for it: a grant
+over the IPC names its app, or it's from the app you're in. The rest open
+unfocused and urgent, as tide's SPEC §14 has it. An app's activation
+marks its window urgent, unless a grant names it.
+[`docs/config.md`](docs/config.md) says how.
+
 ### IPC
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so

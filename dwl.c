@@ -91,6 +91,7 @@ enum { XDGShell, LayerShell, X11 }; /* client types */
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrUnmanaged, LyrOverlay,
 	LyrIMPopup, LyrBlock, NUM_LAYERS }; /* scene layers */
 enum { AxisUp, AxisRight, AxisDown, AxisLeft };
+enum { FgFree, FgWaiting, FgPopup }; /* how the focus guard holds a window (focus.h) */
 
 typedef union {
 	int i;
@@ -177,6 +178,7 @@ typedef struct {
 	unsigned int bw;
 	Workspace *ws;
 	int isfloating, isurgent, isfullscreen;
+	int held; /* how the focus guard holds it from focus: FgFree, FgWaiting, FgPopup */
 	unsigned long ipc_id; /* the IPC's container id, set on first use */
 	int ipc_announced; /* its "new" event is out, so others may follow */
 } Client;
@@ -336,6 +338,7 @@ static void focusclient(Client *c, LayerSurface *l, int lift);
 static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
 static Client *focustop(Monitor *m);
+static Client *focusgo(Monitor *m);
 static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);
 static void handlesig(int signo);
@@ -395,6 +398,7 @@ static void unmapnotify(struct wl_listener *listener, void *data);
 static void updatemons(struct wl_listener *listener, void *data);
 static void updatetitle(struct wl_listener *listener, void *data);
 static void urgent(struct wl_listener *listener, void *data);
+static void requestactivate(Client *c);
 static void viewws(const Arg *arg);
 static void viewprevws(const Arg *arg);
 static void movews(const Arg *arg);
@@ -519,6 +523,7 @@ static struct wlr_xwayland *xwayland;
 #include "ipc.h"
 #include "settings.h"
 #include "layout.h"
+#include "focus.h"
 
 /* function implementations */
 void
@@ -710,6 +715,8 @@ buttonpress(struct wl_listener *listener, void *data)
 
 	switch (event->state) {
 	case WL_POINTER_BUTTON_STATE_PRESSED:
+		/* A click is you moving on, from whatever a grant was for */
+		fg_click();
 		cursor_mode = CurPressed;
 		selmon = xytomon(cursor->x, cursor->y);
 		if (locked)
@@ -803,6 +810,7 @@ void
 cleanup(void)
 {
 	ipc_finish();
+	fg_finish();
 	settings_finish();
 	lt_finish();
 	ws_protocol_finish();
@@ -925,7 +933,9 @@ closemon(Monitor *m)
 	}
 
 	/* setmon() moves each window to the end of the list, as a new one, so
-	 * go safely, and stop after the one that was last */
+	 * go safely, and stop after the one that was last. The focus moving
+	 * with them isn't you moving on, for the focus guard. */
+	fg_focusing++;
 	wl_list_for_each_safe(c, tmp, &clients, link) {
 		if (c->isfloating && c->geom.x > m->m.width)
 			resize(c, (struct wlr_box){.x = c->geom.x - m->w.width, .y = c->geom.y,
@@ -936,6 +946,7 @@ closemon(Monitor *m)
 			break;
 	}
 	focusclient(focustop(selmon), NULL, 1);
+	fg_focusing--;
 	printstatus();
 }
 
@@ -1560,6 +1571,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		wl_list_remove(&c->flink);
 		wl_list_insert(&fstack, &c->flink);
 		selmon = c->mon;
+		c->held = FgFree;
 		if (c->isurgent) {
 			c->isurgent = 0;
 			ws_update_urgency(c->ws);
@@ -1597,6 +1609,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		/* With no client, all we have left is to clear focus */
 		input_method_relay_set_focus(input_method_relay, NULL);
 		wlr_seat_keyboard_notify_clear_focus(seat);
+		fg_focused(NULL);
 		return;
 	}
 
@@ -1613,6 +1626,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 	if (!client_is_unmanaged(c)) {
 		focused_client = c;
 		ipc_event_window(c, "focus");
+		fg_focused(c);
 	}
 }
 
@@ -1625,7 +1639,7 @@ focusmon(const Arg *arg)
 			selmon = dirtomon(arg->i);
 		while (!selmon->wlr_output->enabled && i++ < nmons);
 	}
-	focusclient(focustop(selmon), NULL, 1);
+	focusclient(focusgo(selmon), NULL, 1);
 }
 
 void
@@ -1633,21 +1647,27 @@ focusstack(const Arg *arg)
 {
 	/* Focus the next or previous client (in tiling order) on selmon */
 	Client *c, *sel = focustop(selmon);
-	if (!sel || (sel->isfullscreen && !client_has_children(sel)))
+	if (!sel) {
+		/* Only windows the focus guard holds, if any: go to one */
+		if ((c = focusgo(selmon)))
+			focusclient(c, NULL, 1);
+		return;
+	}
+	if (sel->isfullscreen && !client_has_children(sel))
 		return;
 	if (arg->i > 0) {
 		wl_list_for_each(c, &sel->link, link) {
 			if (&c->link == &clients)
 				continue; /* wrap past the sentinel node */
-			if (VISIBLEON(c, selmon))
-				break; /* found it */
+			if (VISIBLEON(c, selmon) && c->held != FgPopup)
+				break; /* found it, never a status popup */
 		}
 	} else {
 		wl_list_for_each_reverse(c, &sel->link, link) {
 			if (&c->link == &clients)
 				continue; /* wrap past the sentinel node */
-			if (VISIBLEON(c, selmon))
-				break; /* found it */
+			if (VISIBLEON(c, selmon) && c->held != FgPopup)
+				break; /* found it, never a status popup */
 		}
 	}
 	/* If only one client is visible on selmon, then c == sel */
@@ -1662,7 +1682,23 @@ focustop(Monitor *m)
 {
 	Client *c;
 	wl_list_for_each(c, &fstack, flink) {
-		if (VISIBLEON(c, m))
+		if (VISIBLEON(c, m) && !c->held)
+			return c;
+	}
+	return NULL;
+}
+
+/* The window to focus when you go to m, by a workspace switch or focus
+ * output: its top one, or one the focus guard is holding, waiting for
+ * you to go there, if that's all it has. Never a status popup. */
+Client *
+focusgo(Monitor *m)
+{
+	Client *c = focustop(m);
+	if (c)
+		return c;
+	wl_list_for_each(c, &fstack, flink) {
+		if (VISIBLEON(c, m) && c->held == FgWaiting)
 			return c;
 	}
 	return NULL;
@@ -1790,6 +1826,8 @@ keypress(struct wl_listener *listener, void *data)
 	 * screen, only the config file's --locked ones. A release binding runs
 	 * when its key comes up, and the client sees both, as in sway. */
 	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		/* You moving on, before a binding can grant anything */
+		fg_key();
 		settings_key_pressed(event->keycode, group->mods, group->keysyms);
 		for (int i = 0; i < 2; i++) {
 			if (runbinding(group->mods, group->keysyms[i])) {
@@ -1904,6 +1942,7 @@ mapnotify(struct wl_listener *listener, void *data)
 	Client *p = NULL;
 	Client *w, *c = wl_container_of(listener, c, map);
 	Monitor *m;
+	char *grant_ws;
 	int i;
 
 	struct wlr_ext_foreign_toplevel_handle_v1_state foreign_toplevel_state = {
@@ -1932,6 +1971,8 @@ mapnotify(struct wl_listener *listener, void *data)
 		goto unset_fullscreen;
 	}
 
+	/* The focus guard's say, before its border shows whether it's urgent */
+	grant_ws = fg_open(c);
 	for (i = 0; i < 4; i++) {
 		c->border[i] = wlr_scene_rect_create(c->scene, 0, 0,
 				c->isurgent ? urgentcolor : bordercolor);
@@ -1970,6 +2011,8 @@ mapnotify(struct wl_listener *listener, void *data)
 	 * we always consider floating, clients that have parent and thus
 	 * we set the same workspace and monitor as its parent.
 	 * If there is no parent, apply rules */
+	/* Its focusing as it maps isn't you moving on */
+	fg_mapping = c;
 	if ((p = client_get_parent(c))) {
 		c->isfloating = 1;
 		setmon(c, p->mon, p->ws);
@@ -1978,11 +2021,13 @@ mapnotify(struct wl_listener *listener, void *data)
 	}
 	/* The config file's for_window rules, whose events wait for the new one */
 	settings_apply_rules(c);
+	fg_mapping = NULL;
 	printstatus();
 	/* Now it has a monitor, workspace and floating state; its focus waited for this */
 	ipc_event_window(c, "new");
 	if (c == focused_client)
 		ipc_event_window(c, "focus");
+	fg_opened(c, grant_ws);
 
 unset_fullscreen:
 	m = c->mon ? c->mon : xytomon(c->geom.x, c->geom.y);
@@ -3187,11 +3232,14 @@ updatemons(struct wl_listener *listener, void *data)
 	}
 
 	if (selmon && selmon->wlr_output->enabled) {
+		/* Nor is focus moving as outputs change, for the focus guard */
+		fg_focusing++;
 		wl_list_for_each(c, &clients, link) {
 			if (!c->mon && client_surface(c)->mapped)
 				setmon(c, selmon, c->ws);
 		}
 		focusclient(focustop(selmon), NULL, 1);
+		fg_focusing--;
 		if (selmon->lock_surface) {
 			client_notify_enter(selmon->lock_surface->surface,
 					wlr_seat_get_keyboard(seat));
@@ -3237,13 +3285,25 @@ urgent(struct wl_listener *listener, void *data)
 	struct wlr_xdg_activation_v1_request_activate_event *event = data;
 	Client *c = NULL;
 	toplevel_from_wlr_surface(event->surface, &c, NULL);
-	if (!c || c == focustop(selmon))
+	if (c)
+		requestactivate(c);
+}
+
+/* A window asked to be activated, over xdg-activation or X11's
+ * _NET_ACTIVE_WINDOW: a grant for its app lets it take focus, and
+ * otherwise it's marked urgent */
+void
+requestactivate(Client *c)
+{
+	/* A grant is used even by the window you're in, so it's one-shot */
+	if (fg_activate(c) || c == focustop(selmon))
 		return;
 
 	c->isurgent = 1;
 	printstatus();
 
-	if (client_surface(c)->mapped) {
+	/* An X11 window may have no surface yet */
+	if (client_surface(c) && client_surface(c)->mapped) {
 		client_set_border_color(c, urgentcolor);
 		ipc_event_window(c, "urgent");
 		ws_update_urgency(c->ws);
@@ -3318,9 +3378,10 @@ zoom(const Arg *arg)
 		return;
 
 	/* Search for the first tiled window that is not sel, marking sel as
-	 * NULL if we pass it along the way */
+	 * NULL if we pass it along the way; never a status popup, which only
+	 * the pointer focuses */
 	wl_list_for_each(c, &clients, link) {
-		if (VISIBLEON(c, selmon) && !c->isfloating) {
+		if (VISIBLEON(c, selmon) && !c->isfloating && c->held != FgPopup) {
 			if (c != sel)
 				break;
 			sel = NULL;
@@ -3348,9 +3409,9 @@ activatex11(struct wl_listener *listener, void *data)
 {
 	Client *c = wl_container_of(listener, c, activate);
 
-	/* Only "managed" windows can be activated */
+	/* Only "managed" windows can be activated, as a Wayland one is */
 	if (!client_is_unmanaged(c))
-		wlr_xwayland_surface_activate(c->surface.xwayland, 1);
+		requestactivate(c);
 }
 
 void

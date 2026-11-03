@@ -5,8 +5,10 @@
  * on the command line, filled with a solid color. It runs until the
  * compositor closes it or it's killed. Lines on stdin drive it:
  *
- * remap     unmaps the window and maps it again.
- * activate  asks for the window to be activated, over xdg-activation.
+ * remap     unmaps the window and maps it again, with the same app ID and
+ *           title, which an unmapped toplevel has lost.
+ * activate  asks for the window to be activated, over xdg-activation, and
+ *           prints "activated" once the compositor has had the request.
  *
  * With MAPPED_APP_ID, it changes its app ID to that after its first commit,
  * before it maps. With MIN_SIZE=WxH in its environment, it asks to be at
@@ -33,7 +35,9 @@ static struct xdg_wm_base *wm_base;
 static struct xdg_activation_v1 *activation;
 static struct xdg_toplevel *window;
 static const char *mapped_app_id;
+static const char *app_id, *title; /* as it was last given them */
 static struct wl_surface *surface;
+static struct wl_display *display;
 static int32_t width = 100, height = 100;
 
 static void
@@ -87,6 +91,7 @@ xdg_surface_configure(void *data, struct xdg_surface *xsurface, uint32_t serial)
 	xdg_surface_ack_configure(xsurface, serial);
 	if (mapped_app_id) {
 		xdg_toplevel_set_app_id(window, mapped_app_id);
+		app_id = mapped_app_id;
 		mapped_app_id = NULL;
 	}
 	draw();
@@ -132,10 +137,24 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 };
 
 static void
+activated(void *data, struct wl_callback *callback, uint32_t serial)
+{
+	wl_callback_destroy(callback);
+	printf("activated\n");
+	fflush(stdout);
+}
+
+static const struct wl_callback_listener activated_listener = {
+	.done = activated,
+};
+
+static void
 token_done(void *data, struct xdg_activation_token_v1 *token, const char *name)
 {
 	xdg_activation_v1_activate(activation, name, surface);
 	xdg_activation_token_v1_destroy(token);
+	/* The compositor answers in order, so it has had the request by then */
+	wl_callback_add_listener(wl_display_sync(display), &activated_listener, NULL);
 }
 
 static const struct xdg_activation_token_v1_listener token_listener = {
@@ -183,7 +202,6 @@ static const struct wl_registry_listener registry_listener = {
 int
 main(int argc, char *argv[])
 {
-	struct wl_display *display;
 	struct xdg_surface *xsurface;
 	const char *min = getenv("MIN_SIZE"), *max = getenv("MAX_SIZE");
 	int hint_width, hint_height;
@@ -205,8 +223,8 @@ main(int argc, char *argv[])
 	xdg_surface_add_listener(xsurface, &xdg_surface_listener, NULL);
 	window = xdg_surface_get_toplevel(xsurface);
 	xdg_toplevel_add_listener(window, &toplevel_listener, NULL);
-	xdg_toplevel_set_app_id(window, argv[1]);
-	xdg_toplevel_set_title(window, argv[2]);
+	xdg_toplevel_set_app_id(window, app_id = argv[1]);
+	xdg_toplevel_set_title(window, title = argv[2]);
 	if (min && sscanf(min, "%dx%d", &hint_width, &hint_height) == 2)
 		xdg_toplevel_set_min_size(window, hint_width, hint_height);
 	if (max && sscanf(max, "%dx%d", &hint_width, &hint_height) == 2)
@@ -238,6 +256,8 @@ main(int argc, char *argv[])
 			 * so the compositor configures it and it maps again. */
 			wl_surface_attach(surface, NULL, 0, 0);
 			wl_surface_commit(surface);
+			xdg_toplevel_set_app_id(window, app_id);
+			xdg_toplevel_set_title(window, title);
 			wl_surface_commit(surface);
 		} else if (!strcmp(line, "activate\n")) {
 			activate();

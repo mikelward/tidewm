@@ -17,6 +17,7 @@ static struct wl_list workspaces = {&workspaces, &workspaces}; /* in the order m
 static Workspace *curws;
 static Workspace *prevws; /* for back_and_forth */
 static void ws_view(Workspace *ws);
+static void ws_view_to(Workspace *ws, Client *c);
 /* layout.h, included after this file */
 static void lt_view(Workspace *old, Workspace *ws);
 static void lt_announce(void);
@@ -176,6 +177,16 @@ ws_arrange_all(void)
 static void
 ws_view(Workspace *ws)
 {
+	ws_view_to(ws, NULL);
+}
+
+/* Shows ws on every monitor and focuses c there, a window on it, or,
+ * without one, the window to go to on the monitor focus was on: going
+ * straight to c, so no other window the focus guard holds is focused on
+ * the way and loses its mark */
+static void
+ws_view_to(Workspace *ws, Client *c)
+{
 	Workspace *old = curws;
 	if (!ws || ws == curws)
 		return;
@@ -187,7 +198,9 @@ ws_view(Workspace *ws)
 	lt_view(old, ws);
 	ws_arrange_all();
 	lt_announce();
-	focusclient(focustop(selmon), NULL, 1);
+	if (c && c->mon)
+		selmon = c->mon;
+	focusclient(c ? c : focusgo(selmon), NULL, 1);
 	printstatus();
 	ipc_event_workspace("focus", ws, old);
 	ws_prune(old);

@@ -174,7 +174,7 @@ class Tidewm:
         return Ipc(self.socket)
 
     def open_window(self, app_id, title, stdin=False, mapped_app_id=None, min_size=None,
-                    max_size=None):
+                    max_size=None, stdout=False):
         args = [app_id, title] + ([mapped_app_id] if mapped_app_id else [])
         env = dict(self.env)
         if min_size:
@@ -182,13 +182,14 @@ class Tidewm:
         if max_size:
             env["MAX_SIZE"] = max_size
         client = subprocess.Popen([CLIENT, *args], env=env,
-                                  stdin=subprocess.PIPE if stdin else subprocess.DEVNULL)
+                                  stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE if stdout else subprocess.DEVNULL)
         self.clients.append(client)
         return client
 
-    def open_x11_window(self, class_, title):
+    def open_x11_window(self, class_, title, stdin=False):
         client = subprocess.Popen([X11CLIENT, class_, title], env=self.env,
-                                  stdin=subprocess.DEVNULL)
+                                  stdin=subprocess.PIPE if stdin else subprocess.DEVNULL)
         self.clients.append(client)
         return client
 
@@ -203,6 +204,8 @@ class Tidewm:
             client.wait(TIMEOUT)
             if client.stdin:
                 client.stdin.close()
+            if client.stdout:
+                client.stdout.close()
         if self.proc.poll() is None:
             self.proc.terminate()
             self.proc.wait(TIMEOUT)
