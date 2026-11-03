@@ -172,9 +172,15 @@ class Tidewm:
     def ipc(self):
         return Ipc(self.socket)
 
-    def open_window(self, app_id, title, stdin=False, mapped_app_id=None):
+    def open_window(self, app_id, title, stdin=False, mapped_app_id=None, min_size=None,
+                    max_size=None):
         args = [app_id, title] + ([mapped_app_id] if mapped_app_id else [])
-        client = subprocess.Popen([CLIENT, *args], env=self.env,
+        env = dict(self.env)
+        if min_size:
+            env["MIN_SIZE"] = min_size
+        if max_size:
+            env["MAX_SIZE"] = max_size
+        client = subprocess.Popen([CLIENT, *args], env=env,
                                   stdin=subprocess.PIPE if stdin else subprocess.DEVNULL)
         self.clients.append(client)
         return client
@@ -232,10 +238,12 @@ class TidewmTest(unittest.TestCase):
         self.addCleanup(ipc.close)
         return ipc
 
-    def open_window(self, ipc, app_id, title=None):
-        """Opens a window and returns its client and its "new" event's
-        container; ipc must be subscribed to window events."""
-        client = self.wm.open_window(app_id, title or app_id)
+    def open_window(self, ipc, app_id, title=None, min_size=None, max_size=None):
+        """Opens a window, at least min_size and at most max_size ("WxH")
+        big where they're given, and returns its client and its "new"
+        event's container; ipc must be subscribed to window events."""
+        client = self.wm.open_window(app_id, title or app_id, min_size=min_size,
+                                     max_size=max_size)
         event = ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new"
                                and e["container"]["app_id"] == app_id)
         return client, event["container"]

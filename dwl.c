@@ -240,6 +240,9 @@ struct Monitor {
 	unsigned long ipc_id; /* the IPC's output id, set on first use */
 	int want_pos, want_x, want_y; /* where it goes in the layout when enabled, if anywhere */
 	int want_mode, want_width, want_height, want_refresh; /* its mode once enabled, if given while off */
+	struct { const Layout *lt; float mfact; int nmaster; } modes[16]; /* each layout's, but the current one's */
+	float rule_mfact; /* config.h's monitor rule's, for a layout without defaults of its own */
+	int rule_nmaster;
 };
 
 typedef struct {
@@ -338,6 +341,8 @@ static void mapnotify(struct wl_listener *listener, void *data);
 static Monitor *matchrules(Client *c, const char **wsname);
 static void maximizenotify(struct wl_listener *listener, void *data);
 static void monocle(Monitor *m);
+static void threecol(Monitor *m);
+static void twocol(Monitor *m);
 static void motionabsolute(struct wl_listener *listener, void *data);
 static void motionnotify(uint32_t time, struct wlr_input_device *device, double sx,
 		double sy, double sx_unaccel, double sy_unaccel);
@@ -503,6 +508,7 @@ static struct wlr_xwayland *xwayland;
 #include "workspace.h"
 #include "ipc.h"
 #include "settings.h"
+#include "layout.h"
 
 /* function implementations */
 void
@@ -1181,8 +1187,8 @@ createmon(struct wl_listener *listener, void *data)
 		if (!r->name || strstr(wlr_output->name, r->name)) {
 			m->m.x = r->x;
 			m->m.y = r->y;
-			m->mfact = r->mfact;
-			m->nmaster = r->nmaster;
+			m->mfact = m->rule_mfact = r->mfact;
+			m->nmaster = m->rule_nmaster = r->nmaster;
 			m->lt[0] = r->lt;
 			m->lt[1] = &layouts[LENGTH(layouts) > 1 && r->lt != &layouts[1]];
 			strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
@@ -2605,12 +2611,16 @@ setfullscreen(Client *c, int fullscreen)
 void
 setlayout(const Arg *arg)
 {
+	const Layout *old;
 	if (!selmon)
 		return;
+	old = selmon->lt[selmon->sellt];
 	if (!arg || !arg->v || arg->v != selmon->lt[selmon->sellt])
 		selmon->sellt ^= 1;
 	if (arg && arg->v)
 		selmon->lt[selmon->sellt] = (Layout *)arg->v;
+	/* Each layout keeps its own mfact and nmaster */
+	lt_switch(selmon, old, selmon->lt[selmon->sellt]);
 	strncpy(selmon->ltsymbol, selmon->lt[selmon->sellt]->symbol, LENGTH(selmon->ltsymbol));
 	arrange(selmon);
 	printstatus();

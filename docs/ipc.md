@@ -82,7 +82,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `input NAME SETTING VALUE` | Sets one setting, such as `xkb_layout` or `tap`, on the input devices `NAME` names, as the config file's input lines do ([`config.md`](config.md)), until a reload. It fails for a name no device has |
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails |
 | `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles |
-| `layout tile\|floating\|monocle\|toggle` | tidewm's own: the focused monitor's layout, from `config.h`'s `layouts`, or back to the previous one |
+| `layout tile\|threecol\|twocol\|monocle\|floating\|toggle` | tidewm's own: the focused monitor's layout, from `config.h`'s `layouts`, or back to the previous one. The names are tide's: `threecol` centers the master with a stack either side, and `twocol` puts the masters side by side with the rest stacked on the right. Each layout keeps its own `mfact` and `nmaster` |
 | `nmaster N\|+N\|-N` | tidewm's own: how many windows the master area holds on the focused monitor |
 | `mfact F\|+F\|-F` | tidewm's own: the master area's share of the focused monitor's width, from 0.1 to 0.9. Only a finite number will do |
 | `zoom` | tidewm's own: swaps the focused window with the master, or with the next window if it's the master |

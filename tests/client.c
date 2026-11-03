@@ -9,7 +9,8 @@
  * activate  asks for the window to be activated, over xdg-activation.
  *
  * With MAPPED_APP_ID, it changes its app ID to that after its first commit,
- * before it maps.
+ * before it maps. With MIN_SIZE=WxH in its environment, it asks to be at
+ * least that big, and with MAX_SIZE=WxH, at most that big.
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -184,6 +185,8 @@ main(int argc, char *argv[])
 {
 	struct wl_display *display;
 	struct xdg_surface *xsurface;
+	const char *min = getenv("MIN_SIZE"), *max = getenv("MAX_SIZE");
+	int hint_width, hint_height;
 
 	if (argc != 3 && argc != 4)
 		die("usage: client APP_ID TITLE [MAPPED_APP_ID]");
@@ -204,6 +207,10 @@ main(int argc, char *argv[])
 	xdg_toplevel_add_listener(window, &toplevel_listener, NULL);
 	xdg_toplevel_set_app_id(window, argv[1]);
 	xdg_toplevel_set_title(window, argv[2]);
+	if (min && sscanf(min, "%dx%d", &hint_width, &hint_height) == 2)
+		xdg_toplevel_set_min_size(window, hint_width, hint_height);
+	if (max && sscanf(max, "%dx%d", &hint_width, &hint_height) == 2)
+		xdg_toplevel_set_max_size(window, hint_width, hint_height);
 	wl_surface_commit(surface);
 
 	for (int input = STDIN_FILENO;;) {
