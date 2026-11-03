@@ -28,11 +28,13 @@ MAGIC = b"i3-ipc"
 HEADER = struct.Struct("=6sII")
 RUN_COMMAND, GET_WORKSPACES, SUBSCRIBE, GET_OUTPUTS, GET_TREE = 0, 1, 2, 3, 4
 GET_VERSION, GET_BINDING_MODES, GET_CONFIG, SEND_TICK, GET_BINDING_STATE = 7, 8, 9, 10, 12
+GET_INPUTS = 100
 EVENT_WORKSPACE = 0x80000000
 EVENT_MODE = 0x80000002
 EVENT_WINDOW = 0x80000003
 EVENT_SHUTDOWN = 0x80000006
 EVENT_TICK = 0x80000007
+EVENT_INPUT = 0x80000015
 
 
 def is_urgency(event):
@@ -100,9 +102,12 @@ class Tidewm:
     with this many outputs. With config, it has that config file: named
     with -c if config_arg, else at its default place under
     XDG_CONFIG_HOME, which is in the runtime directory either way, so the
-    user's own config never leaks in."""
+    user's own config never leaks in. With parent, another Tidewm, it runs
+    nested in that one instead, on wlroots' Wayland backend, which gives it
+    a keyboard of its own if the parent's seat has one, as a real keyboard
+    would be, rather than a client's virtual one."""
 
-    def __init__(self, outputs=1, config=None, config_arg=True):
+    def __init__(self, outputs=1, config=None, config_arg=True, parent=None):
         self.dir = tempfile.TemporaryDirectory(prefix="tidewm-test-")
         os.chmod(self.dir.name, 0o700)
         self.clients = []
@@ -114,6 +119,10 @@ class Tidewm:
                    WLR_RENDERER="pixman", WLR_LIBINPUT_NO_DEVICES="1",
                    WLR_HEADLESS_OUTPUTS=str(outputs),
                    XDG_CONFIG_HOME=os.path.join(self.dir.name, "xdg"))
+        if parent:
+            env.update(WLR_BACKENDS="wayland", WLR_WL_OUTPUTS=str(outputs),
+                       WAYLAND_DISPLAY=os.path.join(parent.dir.name,
+                                                    parent.env["WAYLAND_DISPLAY"]))
         args = []
         if config_arg:
             self.config_path = os.path.join(self.dir.name, "config")

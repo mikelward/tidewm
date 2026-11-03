@@ -43,6 +43,11 @@ lands with a test.
 - **Window rules** (#15): `for_window [criteria] commands`, matching
   `app_id`, `class`, `instance`, `title` and `shell` by regular
   expression, in place of `config.h`'s rules once a file is loaded.
+- **Input devices** (#17): sway's `input NAME SETTING VALUE` lines and
+  `input NAME { ... }` blocks, for `*`, a type or a device's identifier:
+  XKB and repeat for keyboards, grouped as sway's smart grouping does,
+  and libinput's settings for pointers; the `input` command, `GET_INPUTS`
+  and the `input` event.
 
 ## Decisions needing review
 
@@ -74,44 +79,51 @@ lands with a test.
 - **Rules run once** (#15): when a window appears, not again when its
   title changes, as sway's can. tide's rules match app IDs, which don't
   change; a title rule that needs it can come later.
+- **config.h's input settings stay** (#17): a device takes the file's
+  input lines over `config.h`'s XKB names, repeat and libinput values,
+  as outputs take theirs over its monitor rules. sway's defaults are XKB's
+  and libinput's own, which `config.h`'s mostly are. Reversible.
+- **Virtual keyboards keep their keymap** (#17): input lines don't change
+  `wtype`'s or an on-screen keyboard's, as in sway, since the client
+  types in the keymap it sent.
 - **A bad file at startup** (#12): tidewm says why on stderr and in
   `GET_CONFIG`, and starts with `config.h`'s keys, rather than refusing to
   start, so a typo can't lock anyone out. Reversible.
 
 ## Plan
 
-1. **The rest of the runtime config**: per-device input and XKB.
-2. **Layouts**: new windows join the end of the stack; three-column, two
+1. **Layouts**: new windows join the end of the stack; three-column, two
    columns + stack and monocle beside tile, set per workspace; the layout
    messages and a layout event.
-3. **The focus guard**: no window takes focus on map without a grant;
+2. **The focus guard**: no window takes focus on map without a grant;
    grants over the IPC, lapsing on input elsewhere and on a timer; refused
    windows marked urgent, with an attention list and a cycle; activation,
    Wayland and X11, onto the urgent path; the last input and pids for the
    polkit check.
-4. **Window states**: maximize, ending when another window on the
+3. **Window states**: maximize, ending when another window on the
    workspace takes focus; fullscreen on open, applied with the grant.
-5. **Dialogs and floating**: centered on the parent, capped at 80% of the
+4. **Dialogs and floating**: centered on the parent, capped at 80% of the
    monitor, following it; modal; a picture-in-picture rule; a hand-floated
    window's size remembered.
-6. **Dimming** of every window but the focused one, with tide's
+5. **Dimming** of every window but the focused one, with tide's
    exceptions.
-7. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
-   a pointer button also ends the tap; per-device settings and scroll
-   factor.
-8. **Outputs**: a single-window width; the lid switch. Mode, scale,
-    position and hotplug came with the runtime config (#16).
-9. **Lock and keyboard**: a command that drops a dead lock, no pointer
-    events while locked; on-demand layers keep the keyboard.
-10. **Capture**: window identifiers over the IPC; capture start and stop
-    events; tide's launcher and notifications hidden from capture.
-11. **Outside clicks**: a focus-grab protocol or click event for the
+6. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
+   a pointer button also ends the tap; `scroll_factor`; the `input`
+   event's `xkb_layout`, when the active layout switches, for a layout
+   indicator. Per-device settings came with the runtime config (#17).
+7. **Outputs**: a single-window width; the lid switch. Mode, scale,
+   position and hotplug came with the runtime config (#16).
+8. **Lock and keyboard**: a command that drops a dead lock, no pointer
+   events while locked; on-demand layers keep the keyboard.
+9. **Capture**: window identifiers over the IPC; capture start and stop
+   events; tide's launcher and notifications hidden from capture.
+10. **Outside clicks**: a focus-grab protocol or click event for the
     notification center.
-12. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+11. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
     client starts Xwayland, and a window it maps before wlroots' window
     manager watches the root is never managed (the tests' client waits
     for it): start Xwayland ahead of clients, or take on windows already
     there.
-13. **Session**: the entry and wrapper tide starts it with.
+12. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

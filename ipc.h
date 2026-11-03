@@ -24,10 +24,10 @@
 
 enum { IpcCommand = 0, IpcGetWorkspaces = 1, IpcSubscribe = 2,
 	IpcGetOutputs = 3, IpcGetTree = 4, IpcGetVersion = 7, IpcGetBindingModes = 8,
-	IpcGetConfig = 9, IpcSendTick = 10, IpcGetBindingState = 12 };
+	IpcGetConfig = 9, IpcSendTick = 10, IpcGetBindingState = 12, IpcGetInputs = 100 };
 /* Event numbers, as sway sends them with IPC_EVENT_BIT set */
 enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvMode = 2, IpcEvWindow = 3,
-	IpcEvShutdown = 6, IpcEvTick = 7 };
+	IpcEvShutdown = 6, IpcEvTick = 7, IpcEvInput = 21 };
 
 typedef struct {
 	struct wl_list link;
@@ -59,6 +59,8 @@ static int settings_enter_mode(char *name);
 static const char *settings_mode_now(void);
 static struct json_object *settings_json_modes(void);
 static int settings_output_command(char *args, char *err, size_t errsize, int *parse);
+static int settings_input_command(char *args, char *err, size_t errsize, int *parse);
+static struct json_object *settings_json_inputs(void);
 
 static unsigned long
 ipc_id(unsigned long *id)
@@ -673,6 +675,16 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			json_object_object_add(result, "parse_error", json_object_new_boolean(1));
 		return result;
 	}
+	if (!has_criteria && ipc_take(&cmd, "input")) {
+		char why[256];
+		int parse;
+		if (settings_input_command(cmd, why, sizeof(why), &parse))
+			return ipc_json_success(1, NULL);
+		result = ipc_json_success(0, why);
+		if (parse)
+			json_object_object_add(result, "parse_error", json_object_new_boolean(1));
+		return result;
+	}
 	if (!has_criteria && ipc_take(&cmd, "mode")) {
 		if (!*cmd) {
 			error = "Expected mode NAME";
@@ -879,6 +891,7 @@ ipc_handle_subscribe(IpcClient *cl, const char *payload)
 	static const struct { const char *name; int event; } names[] = {
 		{"workspace", IpcEvWorkspace}, {"output", IpcEvOutput}, {"mode", IpcEvMode},
 		{"window", IpcEvWindow}, {"shutdown", IpcEvShutdown}, {"tick", IpcEvTick},
+		{"input", IpcEvInput},
 	};
 	struct json_object *req = json_tokener_parse(payload), *tick;
 	uint32_t events = 0;
@@ -953,6 +966,8 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 	}
 	case IpcGetConfig:
 		return ipc_send_json(cl, type, settings_json());
+	case IpcGetInputs:
+		return ipc_send_json(cl, type, settings_json_inputs());
 	case IpcSendTick:
 		tick = json_object_new_object();
 		json_object_object_add(tick, "first", json_object_new_boolean(0));

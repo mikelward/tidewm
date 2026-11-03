@@ -54,6 +54,57 @@ typedef struct {
 	int enabled; /* 1 or 0, or -1 to leave it */
 } OutputConfig;
 
+/* What an input line can set, as sway names it: XKB's names, then the
+ * rest, which take a word or a number */
+enum { InXkbRules, InXkbModel, InXkbLayout, InXkbVariant, InXkbOptions, InXkbLast };
+static const char *const settings_xkb_names[InXkbLast] = {
+	"xkb_rules", "xkb_model", "xkb_layout", "xkb_variant", "xkb_options",
+};
+enum { InTap, InTapButtonMap, InDrag, InDragLock, InNaturalScroll, InDwt, InLeftHanded,
+	InMiddleEmulation, InScrollMethod, InClickMethod, InAccelProfile, InEvents,
+	InRepeatRate, InRepeatDelay, InLast };
+/* Each setting's words and their libinput values; a number has none */
+static const struct {
+	const char *name;
+	const char *words[4];
+	int values[4];
+} settings_input_settings[InLast] = {
+	[InTap] = {"tap", {"enabled", "disabled"}, {1, 0}},
+	[InTapButtonMap] = {"tap_button_map", {"lrm", "lmr"},
+		{LIBINPUT_CONFIG_TAP_MAP_LRM, LIBINPUT_CONFIG_TAP_MAP_LMR}},
+	[InDrag] = {"drag", {"enabled", "disabled"}, {1, 0}},
+	[InDragLock] = {"drag_lock", {"enabled", "disabled"}, {1, 0}},
+	[InNaturalScroll] = {"natural_scroll", {"enabled", "disabled"}, {1, 0}},
+	[InDwt] = {"dwt", {"enabled", "disabled"}, {1, 0}},
+	[InLeftHanded] = {"left_handed", {"enabled", "disabled"}, {1, 0}},
+	[InMiddleEmulation] = {"middle_emulation", {"enabled", "disabled"}, {1, 0}},
+	[InScrollMethod] = {"scroll_method", {"none", "two_finger", "edge", "on_button_down"},
+		{LIBINPUT_CONFIG_SCROLL_NO_SCROLL, LIBINPUT_CONFIG_SCROLL_2FG,
+			LIBINPUT_CONFIG_SCROLL_EDGE, LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN}},
+	[InClickMethod] = {"click_method", {"none", "button_areas", "clickfinger"},
+		{LIBINPUT_CONFIG_CLICK_METHOD_NONE, LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS,
+			LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER}},
+	[InAccelProfile] = {"accel_profile", {"adaptive", "flat"},
+		{LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE, LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT}},
+	[InEvents] = {"events", {"enabled", "disabled", "disabled_on_external_mouse"},
+		{LIBINPUT_CONFIG_SEND_EVENTS_ENABLED, LIBINPUT_CONFIG_SEND_EVENTS_DISABLED,
+			LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE}},
+	[InRepeatRate] = {"repeat_rate", {NULL}, {0}},
+	[InRepeatDelay] = {"repeat_delay", {NULL}, {0}},
+};
+
+/* An input line, or block: what to set on the devices it names, "*" for
+ * all, "type:keyboard", "type:pointer" or "type:touchpad" for a kind, or
+ * a device's identifier */
+typedef struct {
+	char *name;
+	const char *xkb[InXkbLast]; /* NULL: not given */
+	int value[InLast]; /* -1: not given */
+	int has_accel;
+	double accel; /* pointer_accel, -1 to 1 */
+	unsigned int xkb_line; /* the line that last gave an XKB name */
+} InputConfig;
+
 typedef struct {
 	Mode *modes; /* modes[0] is "default", the file's top level */
 	size_t nmodes;
@@ -61,6 +112,8 @@ typedef struct {
 	size_t nrules;
 	OutputConfig *outputs;
 	size_t noutputs;
+	InputConfig *inputs;
+	size_t ninputs;
 	char *text; /* the file, as read, for GET_CONFIG */
 } Settings;
 
@@ -74,6 +127,9 @@ static Settings *settings; /* NULL: config.h's keys */
 static struct json_object *settings_errors; /* the last load's, as strings */
 static size_t settings_mode; /* the current mode, in settings->modes */
 static int settings_apply_outputs(const OutputConfig *only);
+static int settings_apply_inputs(const InputConfig *only);
+static void settings_group_register(KeyboardGroup *group);
+static void settings_free_input(InputConfig *ic);
 /* A release binding's key, while it's down and no other key has been */
 static struct {
 	int armed;
@@ -106,6 +162,9 @@ settings_free(Settings *s)
 	for (i = 0; i < s->noutputs; i++)
 		free(s->outputs[i].name);
 	free(s->outputs);
+	for (i = 0; i < s->ninputs; i++)
+		settings_free_input(&s->inputs[i]);
+	free(s->inputs);
 	free(s->text);
 	free(s);
 }
@@ -226,6 +285,24 @@ settings_word(char **p)
 	return word;
 }
 
+/* One argument, as sway reads it: a word, or text in double quotes, which
+ * may be empty. Moves *p past it. Returns NULL for an unclosed quote, or
+ * one with more of the word after it. */
+static char *
+settings_arg(char **p)
+{
+	char *arg = *p, *close;
+	if (*arg != '"')
+		return settings_word(p);
+	if (!(close = strchr(++arg, '"')) || (close[1] && !isspace((unsigned char)close[1])))
+		return NULL;
+	*close = '\0';
+	*p = close + 1;
+	while (isspace((unsigned char)**p))
+		(*p)++;
+	return arg;
+}
+
 static int
 settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_object *errors)
 {
@@ -342,7 +419,7 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 
 	memset(oc, 0, sizeof(*oc));
 	oc->enabled = -1;
-	if (!*(word = settings_word(&rest))) {
+	if (!(word = settings_arg(&rest)) || !*word) {
 		snprintf(err, errsize, "output needs a name, or *, then settings");
 		return 0;
 	}
@@ -354,7 +431,8 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 	while (*(word = settings_word(&rest))) {
 		if (!strcmp(word, "mode") || !strcmp(word, "resolution") || !strcmp(word, "res")) {
 			/* WIDTHxHEIGHT, then @HZ, Hz or not, if it's given */
-			arg = settings_word(&rest);
+			if (!(arg = settings_arg(&rest)))
+				goto unclosed;
 			len = strlen(arg);
 			if (len > 2 && !strcasecmp(arg + len - 2, "hz"))
 				arg[len - 2] = '\0';
@@ -375,7 +453,8 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 			oc->refresh = (int)roundf(hz * 1000);
 			oc->has_mode = 1;
 		} else if (!strcmp(word, "scale")) {
-			arg = settings_word(&rest);
+			if (!(arg = settings_arg(&rest)))
+				goto unclosed;
 			oc->scale = strtof(arg, &end);
 			if (end == arg || *end || !isfinite(oc->scale) || oc->scale <= 0 || oc->scale > 10) {
 				snprintf(err, errsize, "output %s: scale %s isn't a number from above 0 to 10", oc->name, arg);
@@ -383,16 +462,19 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 			}
 			oc->has_scale = 1;
 		} else if (!strcmp(word, "position") || !strcmp(word, "pos")) {
-			arg = settings_word(&rest);
+			if (!(arg = settings_arg(&rest)))
+				goto unclosed;
 			if (strchr(arg, ',') ? sscanf(arg, "%d,%d%c", &oc->x, &oc->y, &extra) != 2
 					: (sscanf(arg, "%d%c", &oc->x, &extra) != 1
-					|| sscanf(settings_word(&rest), "%d%c", &oc->y, &extra) != 1)) {
+					|| !(word = settings_arg(&rest))
+					|| sscanf(word, "%d%c", &oc->y, &extra) != 1)) {
 				snprintf(err, errsize, "output %s: position needs X Y", oc->name);
 				return 0;
 			}
 			oc->has_position = 1;
 		} else if (!strcmp(word, "transform")) {
-			arg = settings_word(&rest);
+			if (!(arg = settings_arg(&rest)))
+				goto unclosed;
 			for (i = 0; i < LENGTH(transforms) && strcmp(arg, transforms[i].name); i++)
 				;
 			if (i == LENGTH(transforms)) {
@@ -409,6 +491,9 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 		}
 	}
 	return 1;
+unclosed:
+	snprintf(err, errsize, "output %s: a value's \" has no closing \"", oc->name);
+	return 0;
 }
 
 /* Puts what from sets into into, as a later output line for the same
@@ -460,6 +545,165 @@ settings_add_output(Settings *s, char *rest, unsigned int line, struct json_obje
 	s->outputs = grown;
 	oc.name = settings_strdup(oc.name, strlen(oc.name));
 	s->outputs[s->noutputs++] = oc;
+	return 1;
+}
+
+static void
+settings_free_input(InputConfig *ic)
+{
+	size_t i;
+	free(ic->name);
+	for (i = 0; i < InXkbLast; i++)
+		free((char *)ic->xkb[i]);
+}
+
+/* An input config that gives nothing, for name, which it doesn't own */
+static void
+settings_input_init(InputConfig *ic, char *name)
+{
+	size_t i;
+	memset(ic, 0, sizeof(*ic));
+	ic->name = name;
+	for (i = 0; i < InLast; i++)
+		ic->value[i] = -1;
+}
+
+/* Whether name can name devices: "*", a known type, or an identifier */
+static int
+settings_input_name_ok(const char *name, char *err, size_t errsize)
+{
+	static const char *const types[] = {"keyboard", "pointer", "touchpad"};
+	size_t i;
+	if (!*name) {
+		snprintf(err, errsize, "input needs a device's identifier, a type:, or *, then a setting");
+		return 0;
+	}
+	if (strncmp(name, "type:", 5))
+		return 1;
+	for (i = 0; i < LENGTH(types); i++)
+		if (!strcmp(name + 5, types[i]))
+			return 1;
+	snprintf(err, errsize, "input %s: no device type is called %s", name, name + 5);
+	return 0;
+}
+
+/* Reads one input setting, "SETTING VALUE", into ic, whose name says what
+ * it's for. An XKB name it gives is a copy ic owns. */
+static int
+settings_parse_input_setting(InputConfig *ic, char *rest, char *err, size_t errsize)
+{
+	char *word = settings_word(&rest), *arg, *end;
+	size_t i, j;
+	long n;
+	double d;
+	int quoted = *rest == '"';
+	if (!*word) {
+		snprintf(err, errsize, "input %s needs a setting", ic->name);
+		return 0;
+	}
+	/* A value may be in quotes, and an XKB name empty, as "" */
+	if (!(arg = settings_arg(&rest))) {
+		snprintf(err, errsize, "input %s: %s's \" has no closing \"", ic->name, word);
+		return 0;
+	}
+	if ((!*arg && !quoted) || *rest) {
+		snprintf(err, errsize, "input %s: %s needs one value", ic->name, word);
+		return 0;
+	}
+	for (i = 0; i < InXkbLast; i++) {
+		if (!strcmp(word, settings_xkb_names[i])) {
+			free((char *)ic->xkb[i]);
+			ic->xkb[i] = settings_strdup(arg, strlen(arg));
+			return 1;
+		}
+	}
+	if (!strcmp(word, "pointer_accel")) {
+		errno = 0;
+		d = strtod(arg, &end);
+		if (end == arg || *end || errno || !isfinite(d) || d < -1 || d > 1) {
+			snprintf(err, errsize, "input %s: pointer_accel %s isn't a number from -1 to 1",
+					ic->name, arg);
+			return 0;
+		}
+		ic->has_accel = 1;
+		ic->accel = d;
+		return 1;
+	}
+	for (i = 0; i < InLast; i++) {
+		if (strcmp(word, settings_input_settings[i].name))
+			continue;
+		if (!settings_input_settings[i].words[0]) {
+			errno = 0;
+			n = strtol(arg, &end, 10);
+			if (end == arg || *end || errno || n < 0 || n > 100000) {
+				snprintf(err, errsize, "input %s: %s %s isn't a whole number from 0 to 100000",
+						ic->name, word, arg);
+				return 0;
+			}
+			ic->value[i] = (int)n;
+			return 1;
+		}
+		for (j = 0; j < LENGTH(settings_input_settings[i].words)
+				&& settings_input_settings[i].words[j]; j++) {
+			if (!strcmp(arg, settings_input_settings[i].words[j])) {
+				ic->value[i] = settings_input_settings[i].values[j];
+				return 1;
+			}
+		}
+		snprintf(err, errsize, "input %s: %s can't be %s", ic->name, word, arg);
+		return 0;
+	}
+	snprintf(err, errsize, "input %s: no setting is called %s", ic->name, word);
+	return 0;
+}
+
+/* Puts what src gives over dst. dst borrows src's XKB names. */
+static void
+settings_merge_input(InputConfig *dst, const InputConfig *src)
+{
+	size_t i;
+	for (i = 0; i < InXkbLast; i++)
+		if (src->xkb[i])
+			dst->xkb[i] = src->xkb[i];
+	for (i = 0; i < InLast; i++)
+		if (src->value[i] >= 0)
+			dst->value[i] = src->value[i];
+	if (src->has_accel) {
+		dst->has_accel = 1;
+		dst->accel = src->accel;
+	}
+}
+
+/* Adds one setting for the devices name names, from the file's line. A
+ * name's settings, from every line for it, are one InputConfig. */
+static int
+settings_add_input(Settings *s, char *name, char *setting, unsigned int line,
+		struct json_object *errors)
+{
+	InputConfig *ic = NULL, *grown;
+	char err[256];
+	size_t i;
+	if (!settings_input_name_ok(name, err, sizeof(err))) {
+		settings_error(errors, line, "%s", err);
+		return 0;
+	}
+	for (i = 0; i < s->ninputs; i++)
+		if (!strcmp(s->inputs[i].name, name))
+			ic = &s->inputs[i];
+	if (!ic) {
+		if (!(grown = realloc(s->inputs, (s->ninputs + 1) * sizeof(*grown))))
+			die("out of memory reading the config");
+		s->inputs = grown;
+		ic = &s->inputs[s->ninputs++];
+		settings_input_init(ic, settings_strdup(name, strlen(name)));
+	}
+	if (!settings_parse_input_setting(ic, setting, err, sizeof(err))) {
+		settings_error(errors, line, "%s", err);
+		return 0;
+	}
+	for (i = 0; i < InXkbLast; i++)
+		if (!strncmp(setting, settings_xkb_names[i], strlen(settings_xkb_names[i])))
+			ic->xkb_line = line;
 	return 1;
 }
 
@@ -565,21 +809,14 @@ settings_add_rule(Settings *s, char *rest, unsigned int line, struct json_object
 	return 1;
 }
 
-/* A mode's name: a word, or text in double quotes, as sway takes it.
- * Moves *p past it. Returns NULL for an empty name or an unclosed quote. */
+/* A mode's or input selector's name: a word, or text in double quotes,
+ * as sway takes it. Moves *p past it. Returns NULL for an empty name or an
+ * unclosed quote. */
 static char *
-settings_mode_name(char **p)
+settings_name(char **p)
 {
-	char *name = *p, *close;
-	if (*name != '"')
-		return *(name = settings_word(p)) ? name : NULL;
-	if (!(close = strchr(++name, '"')) || close == name)
-		return NULL;
-	*close = '\0';
-	*p = close + 1;
-	while (isspace((unsigned char)**p))
-		(*p)++;
-	return name;
+	char *name = settings_arg(p);
+	return name && *name ? name : NULL;
 }
 
 /* The index of the mode called name, made if it's new. */
@@ -599,6 +836,93 @@ settings_add_mode(Settings *s, const char *name)
 	return s->nmodes++;
 }
 
+static struct xkb_context *settings_xkb;
+
+/* config.h's XKB names, which an input line's go over */
+static void
+settings_xkb_base(const char *names[InXkbLast])
+{
+	names[InXkbRules] = xkb_rules.rules;
+	names[InXkbModel] = xkb_rules.model;
+	names[InXkbLayout] = xkb_rules.layout;
+	names[InXkbVariant] = xkb_rules.variant;
+	names[InXkbOptions] = xkb_rules.options;
+}
+
+/* A keymap of these XKB names, or NULL if XKB can't make one; quiet
+ * says not to write XKB's own messages to stderr. */
+static struct xkb_keymap *
+settings_keymap(const char *const names[InXkbLast], int quiet)
+{
+	struct xkb_rule_names rn = {
+		.rules = names[InXkbRules], .model = names[InXkbModel],
+		.layout = names[InXkbLayout], .variant = names[InXkbVariant],
+		.options = names[InXkbOptions],
+	};
+	struct xkb_keymap *keymap;
+	if (!settings_xkb && !(settings_xkb = xkb_context_new(XKB_CONTEXT_NO_FLAGS)))
+		return NULL;
+	xkb_context_set_log_level(settings_xkb, quiet ? XKB_LOG_LEVEL_CRITICAL : XKB_LOG_LEVEL_ERROR);
+	keymap = xkb_keymap_new_from_names(settings_xkb, &rn, XKB_KEYMAP_COMPILE_NO_FLAGS);
+	xkb_context_set_log_level(settings_xkb, XKB_LOG_LEVEL_ERROR);
+	return keymap;
+}
+
+/* Checks that XKB can make the keymap a keyboard gets from lines, each
+ * over the last, over config.h's names; if not, it's an error at blame's
+ * last xkb_ line. */
+static int
+settings_check_keymap(const InputConfig *const lines[3], const InputConfig *blame,
+		struct json_object *errors)
+{
+	const char *names[InXkbLast];
+	struct xkb_keymap *keymap;
+	size_t i, j;
+	settings_xkb_base(names);
+	for (i = 0; i < 3; i++)
+		for (j = 0; lines[i] && j < InXkbLast; j++)
+			if (lines[i]->xkb[j])
+				names[j] = lines[i]->xkb[j];
+	if ((keymap = settings_keymap(names, 1))) {
+		xkb_keymap_unref(keymap);
+		return 1;
+	}
+	settings_error(errors, blame->xkb_line, "input %s: XKB can't make a keymap of its xkb_ settings",
+			blame->name);
+	return 0;
+}
+
+/* Checks that XKB can make a keymap of what each keyboard would get from
+ * the file: *'s names, then type:keyboard's, then, for one with xkb_
+ * lines of its own, its identifier's. So a layout that isn't there, or a
+ * variant its layout lacks, is an error in the file. A pointer's xkb_
+ * lines are never used. */
+static int
+settings_check_keymaps(Settings *s, struct json_object *errors)
+{
+	const InputConfig *lines[3] = {NULL, NULL, NULL};
+	size_t i;
+	int ok = 1;
+	for (i = 0; i < s->ninputs; i++) {
+		if (!strcmp(s->inputs[i].name, "*"))
+			lines[0] = &s->inputs[i];
+		else if (!strcmp(s->inputs[i].name, "type:keyboard"))
+			lines[1] = &s->inputs[i];
+	}
+	if (lines[1] && lines[1]->xkb_line)
+		ok &= settings_check_keymap(lines, lines[1], errors);
+	else if (lines[0] && lines[0]->xkb_line)
+		ok &= settings_check_keymap(lines, lines[0], errors);
+	for (i = 0; i < s->ninputs; i++) {
+		if (!s->inputs[i].xkb_line || !strcmp(s->inputs[i].name, "*")
+				|| !strncmp(s->inputs[i].name, "type:", 5))
+			continue;
+		lines[2] = &s->inputs[i];
+		ok &= settings_check_keymap(lines, lines[2], errors);
+	}
+	return ok;
+}
+
 /* Parses text, which it keeps, into new settings, or returns NULL and
  * adds each error to errors. */
 static Settings *
@@ -607,8 +931,8 @@ settings_parse(char *text, struct json_object *errors)
 	Settings *s = ecalloc(1, sizeof(*s));
 	SettingsVar *vars = NULL;
 	size_t nvars = 0, i, len, mode = 0;
-	unsigned int line = 0, mode_line = 0;
-	char *start, *end, *raw, *expanded, *p, *word, *name;
+	unsigned int line = 0, mode_line = 0, input_line = 0;
+	char *start, *end, *raw, *expanded, *p, *word, *name, *input = NULL;
 	int ok = 1;
 
 	s->text = text;
@@ -642,8 +966,18 @@ settings_parse(char *text, struct json_object *errors)
 		}
 		expanded = settings_substitute(p, vars, nvars);
 		p = expanded;
+		/* In an input block, each line is a setting for its devices */
+		if (input && strcmp(p, "}")) {
+			ok &= settings_add_input(s, input, p, line, errors);
+			free(expanded);
+			free(raw);
+			continue;
+		}
 		word = settings_word(&p);
-		if (!strcasecmp(word, "bindsym")) {
+		if (input) {
+			free(input);
+			input = NULL;
+		} else if (!strcasecmp(word, "bindsym")) {
 			ok &= settings_add_binding(&s->modes[mode], p, line, errors);
 		} else if (!strcasecmp(word, "output")) {
 			if (mode) {
@@ -651,6 +985,28 @@ settings_parse(char *text, struct json_object *errors)
 				ok = 0;
 			} else {
 				ok &= settings_add_output(s, p, line, errors);
+			}
+		} else if (!strcasecmp(word, "input")) {
+			if (!(name = settings_name(&p)))
+				name = "";
+			if (mode) {
+				settings_error(errors, line, "input can't be in a mode");
+				ok = 0;
+			} else if (!strcmp(p, "{")) {
+				char err[256];
+				if (settings_input_name_ok(name, err, sizeof(err))) {
+					input = settings_strdup(name, strlen(name));
+					input_line = line;
+				} else {
+					settings_error(errors, line, "%s", err);
+					ok = 0;
+				}
+			} else if (!*name) {
+				settings_error(errors, line, "input needs a device's identifier, "
+						"a type:, or *, then a setting");
+				ok = 0;
+			} else {
+				ok &= settings_add_input(s, name, p, line, errors);
 			}
 		} else if (!strcasecmp(word, "for_window")) {
 			if (mode) {
@@ -664,7 +1020,7 @@ settings_parse(char *text, struct json_object *errors)
 				settings_error(errors, line, "mode %s is still open: modes don't nest",
 						s->modes[mode].name);
 				ok = 0;
-			} else if (!(name = settings_mode_name(&p)) || strcmp(p, "{")) {
+			} else if (!(name = settings_name(&p)) || strcmp(p, "{")) {
 				settings_error(errors, line, "mode needs a name, then {");
 				ok = 0;
 			} else if (!strcmp(name, "default")) {
@@ -680,7 +1036,7 @@ settings_parse(char *text, struct json_object *errors)
 			}
 		} else if (!strcmp(word, "}")) {
 			if (!mode) {
-				settings_error(errors, line, "} closes no mode");
+				settings_error(errors, line, "} closes no mode or input block");
 				ok = 0;
 			}
 			mode = 0;
@@ -695,6 +1051,12 @@ settings_parse(char *text, struct json_object *errors)
 		settings_error(errors, mode_line, "mode %s has no }", s->modes[mode].name);
 		ok = 0;
 	}
+	if (input) {
+		settings_error(errors, input_line, "input %s has no }", input);
+		free(input);
+		ok = 0;
+	}
+	ok &= settings_check_keymaps(s, errors);
 	for (i = 0; i < nvars; i++) {
 		free(vars[i].name);
 		free(vars[i].value);
@@ -752,9 +1114,10 @@ settings_load(void)
 		return 0;
 	settings_free(settings);
 	settings = loaded;
-	/* Outputs take the new lines at once; at startup, there are none yet.
-	 * One that refuses them is an error, but the rest of the file stands */
+	/* Outputs and inputs take the new lines at once; at startup, there are
+	 * none yet. One that refuses them is an error, but the rest stands */
 	refused = settings_apply_outputs(NULL) < 0;
+	refused |= settings_apply_inputs(NULL) < 0;
 	/* As sway does, a load starts at the top level */
 	if (settings_mode) {
 		settings_mode = 0;
@@ -781,6 +1144,7 @@ settings_init(const char *arg)
 				home ? home : "");
 	if (n < 0 || (size_t)n >= sizeof(settings_path))
 		die("the config file's path is too long");
+	settings_group_register(kb_group);
 	if (settings_load())
 		return;
 	for (i = 0; i < json_object_array_length(settings_errors); i++)
@@ -1137,6 +1501,529 @@ settings_output_command(char *args, char *err, size_t errsize, int *parse)
 	return 0;
 }
 
+/* An input device tidewm knows: a keyboard or pointer, its own or a
+ * client's virtual one */
+typedef struct {
+	struct wl_list link;
+	struct wlr_input_device *dev;
+	char *identifier; /* VENDOR:PRODUCT:NAME, as sway makes it */
+	const char *type; /* "keyboard", "pointer" or "touchpad" */
+	int is_virtual; /* a client's: it keeps its own keymap, and has no libinput */
+	KeyboardGroup *group; /* a keyboard's, unless it's virtual */
+	const char *names[InXkbLast]; /* a keyboard's XKB names now, its own copies */
+	int rate, delay;
+	struct wl_listener destroy;
+} SettingsInput;
+
+/* A keyboard group for keyboards with the same keymap and repeat info, as
+ * sway's smart grouping makes them: kb_group, config.h's, is one, which
+ * stays; tidewm makes the others as keyboards need them. */
+typedef struct {
+	struct wl_list link;
+	KeyboardGroup *group;
+} SettingsGroup;
+
+static struct wl_list settings_inputs = {&settings_inputs, &settings_inputs};
+static struct wl_list settings_groups = {&settings_groups, &settings_groups};
+
+/* The word setting i's value is, as GET_INPUTS says it */
+static const char *
+settings_input_word(int i, int value)
+{
+	size_t j;
+	for (j = 0; j < LENGTH(settings_input_settings[i].words)
+			&& settings_input_settings[i].words[j]; j++)
+		if (settings_input_settings[i].values[j] == value)
+			return settings_input_settings[i].words[j];
+	return "unknown";
+}
+
+static struct libinput_device *
+settings_libinput_device(const SettingsInput *in)
+{
+	return !in->is_virtual && wlr_input_device_is_libinput(in->dev)
+		? wlr_libinput_get_device_handle(in->dev) : NULL;
+}
+
+/* An input in GET_INPUTS and the input event, with sway's fields */
+static struct json_object *
+settings_json_input(const SettingsInput *in)
+{
+	struct json_object *obj = json_object_new_object(), *names, *li;
+	struct libinput_device *d = settings_libinput_device(in);
+	struct wlr_keyboard *kb;
+	xkb_layout_index_t i, n, active;
+	const char *name;
+	json_object_object_add(obj, "identifier", json_object_new_string(in->identifier));
+	json_object_object_add(obj, "name", json_object_new_string(in->dev->name ? in->dev->name : ""));
+	json_object_object_add(obj, "vendor", json_object_new_int(d ? (int)libinput_device_get_id_vendor(d) : 0));
+	json_object_object_add(obj, "product", json_object_new_int(d ? (int)libinput_device_get_id_product(d) : 0));
+	json_object_object_add(obj, "type", json_object_new_string(in->type));
+	if (!strcmp(in->type, "keyboard")) {
+		kb = in->group ? &in->group->wlr_group->keyboard : wlr_keyboard_from_input_device(in->dev);
+		n = kb->keymap ? xkb_keymap_num_layouts(kb->keymap) : 0;
+		active = kb->xkb_state ? xkb_state_serialize_layout(kb->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE) : 0;
+		names = json_object_new_array();
+		for (i = 0; i < n; i++) {
+			name = xkb_keymap_layout_get_name(kb->keymap, i);
+			json_object_array_add(names, json_object_new_string(name ? name : ""));
+		}
+		json_object_object_add(obj, "xkb_layout_names", names);
+		json_object_object_add(obj, "xkb_active_layout_index", json_object_new_int((int)active));
+		name = active < n ? xkb_keymap_layout_get_name(kb->keymap, active) : NULL;
+		json_object_object_add(obj, "xkb_active_layout_name", name ? json_object_new_string(name) : NULL);
+		json_object_object_add(obj, "repeat_delay", json_object_new_int(kb->repeat_info.delay));
+		json_object_object_add(obj, "repeat_rate", json_object_new_int(kb->repeat_info.rate));
+	}
+	if (!d)
+		return obj;
+	li = json_object_new_object();
+	json_object_object_add(li, "send_events", json_object_new_string(
+			settings_input_word(InEvents, (int)libinput_device_config_send_events_get_mode(d))));
+	if (libinput_device_config_tap_get_finger_count(d)) {
+		json_object_object_add(li, "tap", json_object_new_string(settings_input_word(InTap,
+				libinput_device_config_tap_get_enabled(d))));
+		json_object_object_add(li, "tap_button_map", json_object_new_string(settings_input_word(
+				InTapButtonMap, libinput_device_config_tap_get_button_map(d))));
+		json_object_object_add(li, "tap_drag", json_object_new_string(settings_input_word(InDrag,
+				libinput_device_config_tap_get_drag_enabled(d))));
+		json_object_object_add(li, "tap_drag_lock", json_object_new_string(settings_input_word(
+				InDragLock, libinput_device_config_tap_get_drag_lock_enabled(d))));
+	}
+	if (libinput_device_config_accel_is_available(d)) {
+		json_object_object_add(li, "accel_speed",
+				json_object_new_double(libinput_device_config_accel_get_speed(d)));
+		json_object_object_add(li, "accel_profile", json_object_new_string(settings_input_word(
+				InAccelProfile, libinput_device_config_accel_get_profile(d))));
+	}
+	if (libinput_device_config_scroll_has_natural_scroll(d))
+		json_object_object_add(li, "natural_scroll", json_object_new_string(settings_input_word(
+				InNaturalScroll, libinput_device_config_scroll_get_natural_scroll_enabled(d))));
+	if (libinput_device_config_left_handed_is_available(d))
+		json_object_object_add(li, "left_handed", json_object_new_string(settings_input_word(
+				InLeftHanded, libinput_device_config_left_handed_get(d))));
+	if (libinput_device_config_click_get_methods(d) != LIBINPUT_CONFIG_CLICK_METHOD_NONE)
+		json_object_object_add(li, "click_method", json_object_new_string(settings_input_word(
+				InClickMethod, libinput_device_config_click_get_method(d))));
+	if (libinput_device_config_middle_emulation_is_available(d))
+		json_object_object_add(li, "middle_emulation", json_object_new_string(settings_input_word(
+				InMiddleEmulation, libinput_device_config_middle_emulation_get_enabled(d))));
+	if (libinput_device_config_scroll_get_methods(d) != LIBINPUT_CONFIG_SCROLL_NO_SCROLL)
+		json_object_object_add(li, "scroll_method", json_object_new_string(settings_input_word(
+				InScrollMethod, libinput_device_config_scroll_get_method(d))));
+	if (libinput_device_config_dwt_is_available(d))
+		json_object_object_add(li, "dwt", json_object_new_string(settings_input_word(InDwt,
+				libinput_device_config_dwt_get_enabled(d))));
+	json_object_object_add(obj, "libinput", li);
+	return obj;
+}
+
+/* GET_INPUTS's reply: each input device, in the order they came */
+static struct json_object *
+settings_json_inputs(void)
+{
+	struct json_object *arr = json_object_new_array();
+	SettingsInput *in;
+	wl_list_for_each(in, &settings_inputs, link)
+		json_object_array_add(arr, settings_json_input(in));
+	return arr;
+}
+
+/* sway's input event: change is added, removed, xkb_keymap or
+ * libinput_config */
+static void
+settings_event_input(const char *change, const SettingsInput *in)
+{
+	struct json_object *obj;
+	if (!ipc_subscribed(IpcEvInput))
+		return;
+	obj = json_object_new_object();
+	json_object_object_add(obj, "change", json_object_new_string(change));
+	json_object_object_add(obj, "input", settings_json_input(in));
+	ipc_broadcast(IpcEvInput, obj);
+}
+
+/* A device's identifier, as sway makes it: VENDOR:PRODUCT:NAME, the
+ * numbers 0 for a device without libinput, and in the name, which loses
+ * space at either end, _ for each space or unprintable character. */
+static char *
+settings_identifier(struct wlr_input_device *dev)
+{
+	struct libinput_device *d = wlr_input_device_is_libinput(dev)
+		? wlr_libinput_get_device_handle(dev) : NULL;
+	const char *name = dev->name ? dev->name : "";
+	unsigned int vendor = d ? libinput_device_get_id_vendor(d) : 0;
+	unsigned int product = d ? libinput_device_get_id_product(d) : 0;
+	size_t len;
+	char *id, *p;
+	int n;
+	while (isspace((unsigned char)*name))
+		name++;
+	len = strlen(name);
+	while (len && isspace((unsigned char)name[len - 1]))
+		len--;
+	n = snprintf(NULL, 0, "%u:%u:%.*s", vendor, product, (int)len, name);
+	id = ecalloc(1, (size_t)n + 1);
+	snprintf(id, (size_t)n + 1, "%u:%u:%.*s", vendor, product, (int)len, name);
+	for (p = id + (size_t)n - len; *p; p++)
+		if (*p == ' ' || !isprint((unsigned char)*p))
+			*p = '_';
+	return id;
+}
+
+/* The file's settings for in: "*"'s, then its type's, then its own,
+ * each over the last, over config.h's. out borrows their XKB names. */
+static void
+settings_input_config(const SettingsInput *in, InputConfig *out)
+{
+	char type[32];
+	size_t i;
+	int pass;
+	settings_input_init(out, NULL);
+	settings_xkb_base(out->xkb);
+	out->value[InRepeatRate] = repeat_rate;
+	out->value[InRepeatDelay] = repeat_delay;
+	out->value[InTap] = tap_to_click;
+	out->value[InTapButtonMap] = (int)button_map;
+	out->value[InDrag] = tap_and_drag;
+	out->value[InDragLock] = drag_lock;
+	out->value[InNaturalScroll] = natural_scrolling;
+	out->value[InDwt] = disable_while_typing;
+	out->value[InLeftHanded] = left_handed;
+	out->value[InMiddleEmulation] = middle_button_emulation;
+	out->value[InScrollMethod] = (int)scroll_method;
+	out->value[InClickMethod] = (int)click_method;
+	out->value[InAccelProfile] = (int)accel_profile;
+	out->value[InEvents] = (int)send_events_mode;
+	out->has_accel = 1;
+	out->accel = accel_speed;
+	snprintf(type, sizeof(type), "type:%s", in->type);
+	for (pass = 0; settings && pass < 3; pass++)
+		for (i = 0; i < settings->ninputs; i++)
+			if (!strcmp(settings->inputs[i].name, pass == 0 ? "*" : pass == 1 ? type : in->identifier))
+				settings_merge_input(out, &settings->inputs[i]);
+}
+
+/* Puts each setting ic gives on in's libinput device, where the device
+ * has it. Returns 0 if in has no libinput device. */
+static int
+settings_libinput(const SettingsInput *in, const InputConfig *ic)
+{
+	struct libinput_device *d = settings_libinput_device(in);
+	const int *v = ic->value;
+	if (!d)
+		return 0;
+	if (libinput_device_config_tap_get_finger_count(d)) {
+		if (v[InTap] >= 0)
+			libinput_device_config_tap_set_enabled(d, v[InTap]);
+		if (v[InDrag] >= 0)
+			libinput_device_config_tap_set_drag_enabled(d, v[InDrag]);
+		if (v[InDragLock] >= 0)
+			libinput_device_config_tap_set_drag_lock_enabled(d, v[InDragLock]);
+		if (v[InTapButtonMap] >= 0)
+			libinput_device_config_tap_set_button_map(d, v[InTapButtonMap]);
+	}
+	if (v[InNaturalScroll] >= 0 && libinput_device_config_scroll_has_natural_scroll(d))
+		libinput_device_config_scroll_set_natural_scroll_enabled(d, v[InNaturalScroll]);
+	if (v[InDwt] >= 0 && libinput_device_config_dwt_is_available(d))
+		libinput_device_config_dwt_set_enabled(d, v[InDwt]);
+	if (v[InLeftHanded] >= 0 && libinput_device_config_left_handed_is_available(d))
+		libinput_device_config_left_handed_set(d, v[InLeftHanded]);
+	if (v[InMiddleEmulation] >= 0 && libinput_device_config_middle_emulation_is_available(d))
+		libinput_device_config_middle_emulation_set_enabled(d, v[InMiddleEmulation]);
+	if (v[InScrollMethod] >= 0
+			&& libinput_device_config_scroll_get_methods(d) != LIBINPUT_CONFIG_SCROLL_NO_SCROLL)
+		libinput_device_config_scroll_set_method(d, v[InScrollMethod]);
+	if (v[InClickMethod] >= 0
+			&& libinput_device_config_click_get_methods(d) != LIBINPUT_CONFIG_CLICK_METHOD_NONE)
+		libinput_device_config_click_set_method(d, v[InClickMethod]);
+	if (v[InEvents] >= 0 && libinput_device_config_send_events_get_modes(d))
+		libinput_device_config_send_events_set_mode(d, (uint32_t)v[InEvents]);
+	if (libinput_device_config_accel_is_available(d)) {
+		if (v[InAccelProfile] >= 0)
+			libinput_device_config_accel_set_profile(d, v[InAccelProfile]);
+		if (ic->has_accel)
+			libinput_device_config_accel_set_speed(d, ic->accel);
+	}
+	return 1;
+}
+
+static void
+settings_group_register(KeyboardGroup *group)
+{
+	SettingsGroup *g = ecalloc(1, sizeof(*g));
+	g->group = group;
+	wl_list_insert(settings_groups.prev, &g->link);
+}
+
+static struct wl_event_source *settings_release_source;
+
+/* Destroys each group no keyboard is in, but config.h's. The seat's
+ * keyboard, if that went with one, becomes a group still in use. */
+static void
+settings_release_groups(void *data)
+{
+	SettingsGroup *g, *tmp;
+	settings_release_source = NULL;
+	wl_list_for_each_safe(g, tmp, &settings_groups, link) {
+		if (g->group == kb_group || !wl_list_empty(&g->group->wlr_group->devices))
+			continue;
+		wl_list_remove(&g->link);
+		destroykeyboardgroup(&g->group->destroy, NULL);
+		free(g);
+	}
+	if (seat->keyboard_state.keyboard)
+		return;
+	wl_list_for_each(g, &settings_groups, link) {
+		if (!wl_list_empty(&g->group->wlr_group->devices)) {
+			wlr_seat_set_keyboard(seat, &g->group->wlr_group->keyboard);
+			return;
+		}
+	}
+	wlr_seat_set_keyboard(seat, &kb_group->wlr_group->keyboard);
+}
+
+/* Destroys group once no keyboard is in it, unless it's config.h's, when
+ * tidewm is next idle: a key binding can empty the group whose key
+ * keypress() is still handling. */
+static void
+settings_group_release(KeyboardGroup *group)
+{
+	if (!group || group == kb_group || !wl_list_empty(&group->wlr_group->devices)
+			|| settings_release_source)
+		return;
+	settings_release_source = wl_event_loop_add_idle(event_loop, settings_release_groups, NULL);
+}
+
+/* Puts keyboard in into the group for these XKB names and repeat info,
+ * making one if no keyboard has them yet, and keeps them as in's own.
+ * Returns 0, leaving it as it was, if XKB can't make their keymap. */
+static int
+settings_keyboard_set(SettingsInput *in, const char *const names[InXkbLast], int rate, int delay)
+{
+	struct wlr_keyboard *kb = wlr_keyboard_from_input_device(in->dev), *gk;
+	struct xkb_keymap *keymap = settings_keymap(names, 0);
+	KeyboardGroup *group = NULL, *old = in->group;
+	SettingsGroup *g;
+	const char *copy[InXkbLast];
+	size_t i;
+	if (!keymap)
+		return 0;
+	wl_list_for_each(g, &settings_groups, link) {
+		gk = &g->group->wlr_group->keyboard;
+		if (wlr_keyboard_keymaps_match(gk->keymap, keymap)
+				&& gk->repeat_info.rate == rate && gk->repeat_info.delay == delay) {
+			group = g->group;
+			break;
+		}
+	}
+	if (!group) {
+		group = createkeyboardgroup();
+		wl_list_init(&group->destroy.link);
+		wlr_keyboard_set_keymap(&group->wlr_group->keyboard, keymap);
+		wlr_keyboard_set_repeat_info(&group->wlr_group->keyboard, rate, delay);
+		settings_group_register(group);
+	}
+	xkb_keymap_unref(keymap);
+	/* names may be in's own: copy them before letting those go */
+	for (i = 0; i < InXkbLast; i++)
+		copy[i] = names[i] ? settings_strdup(names[i], strlen(names[i])) : NULL;
+	for (i = 0; i < InXkbLast; i++) {
+		free((char *)in->names[i]);
+		in->names[i] = copy[i];
+	}
+	in->rate = rate;
+	in->delay = delay;
+	if (group == old)
+		return 1;
+	if (old && kb->group)
+		wlr_keyboard_group_remove_keyboard(old->wlr_group, kb);
+	wlr_keyboard_set_keymap(kb, group->wlr_group->keyboard.keymap);
+	wlr_keyboard_set_repeat_info(kb, rate, delay);
+	wlr_keyboard_group_add_keyboard(group->wlr_group, kb);
+	in->group = group;
+	settings_group_release(old);
+	/* The focused window gets the keymap now, not at the next key */
+	wlr_seat_set_keyboard(seat, &group->wlr_group->keyboard);
+	if (old)
+		settings_event_input("xkb_keymap", in);
+	return 1;
+}
+
+static void
+settings_input_destroyed(struct wl_listener *listener, void *data)
+{
+	SettingsInput *in = wl_container_of(listener, in, destroy);
+	struct wlr_keyboard *kb;
+	size_t i;
+	settings_event_input("removed", in);
+	if (in->group) {
+		kb = wlr_keyboard_from_input_device(in->dev);
+		if (kb->group)
+			wlr_keyboard_group_remove_keyboard(kb->group, kb);
+		settings_group_release(in->group);
+	}
+	wl_list_remove(&in->destroy.link);
+	wl_list_remove(&in->link);
+	for (i = 0; i < InXkbLast; i++)
+		free((char *)in->names[i]);
+	free(in->identifier);
+	free(in);
+}
+
+static SettingsInput *
+settings_track(struct wlr_input_device *dev, const char *type, int is_virtual)
+{
+	SettingsInput *in = ecalloc(1, sizeof(*in));
+	in->dev = dev;
+	in->identifier = settings_identifier(dev);
+	in->type = type;
+	in->is_virtual = is_virtual;
+	LISTEN(&dev->events.destroy, &in->destroy, settings_input_destroyed);
+	wl_list_insert(settings_inputs.prev, &in->link);
+	return in;
+}
+
+/* A new keyboard: into the group for its settings, config.h's and the
+ * file's input lines, or config.h's alone if XKB can't make their
+ * keymap, which stderr says. */
+static void
+settings_keyboard_added(struct wlr_keyboard *keyboard)
+{
+	SettingsInput *in = settings_track(&keyboard->base, "keyboard", 0);
+	InputConfig ic;
+	const char *names[InXkbLast];
+	settings_input_config(in, &ic);
+	if (!settings_keyboard_set(in, ic.xkb, ic.value[InRepeatRate], ic.value[InRepeatDelay])) {
+		fprintf(stderr, "tidewm: XKB can't make a keymap of %s's settings; "
+				"it has config.h's\n", in->identifier);
+		settings_xkb_base(names);
+		settings_keyboard_set(in, names, repeat_rate, repeat_delay);
+	}
+	/* A libinput keyboard has events, as a pointer does */
+	settings_libinput(in, &ic);
+	settings_event_input("added", in);
+}
+
+/* A new pointer: its libinput settings, config.h's and the file's. A
+ * libinput device that can tap is a touchpad. */
+static void
+settings_pointer_added(struct wlr_pointer *pointer)
+{
+	struct wlr_input_device *dev = &pointer->base;
+	struct libinput_device *d = wlr_input_device_is_libinput(dev)
+		? wlr_libinput_get_device_handle(dev) : NULL;
+	SettingsInput *in = settings_track(dev, d && libinput_device_config_tap_get_finger_count(d)
+			? "touchpad" : "pointer", 0);
+	InputConfig ic;
+	settings_input_config(in, &ic);
+	settings_libinput(in, &ic);
+	settings_event_input("added", in);
+}
+
+/* A client's virtual keyboard or pointer, which GET_INPUTS lists, but
+ * which keeps its own keymap and has no libinput settings */
+static void
+settings_virtual_added(struct wlr_input_device *dev)
+{
+	settings_event_input("added", settings_track(dev,
+			dev->type == WLR_INPUT_DEVICE_KEYBOARD ? "keyboard" : "pointer", 1));
+}
+
+/* Whether keycode is down on kb. A group's key is until its keyboard
+ * leaves the group, as a binding can make it, when wlroots lets it go. */
+static int
+settings_key_held(const struct wlr_keyboard *kb, uint32_t keycode)
+{
+	size_t i;
+	for (i = 0; i < kb->num_keycodes; i++)
+		if (kb->keycodes[i] == keycode)
+			return 1;
+	return 0;
+}
+
+/* Whether a keyboard of tidewm's own is there, for the seat's
+ * capabilities */
+static int
+settings_has_keyboard(void)
+{
+	SettingsInput *in;
+	wl_list_for_each(in, &settings_inputs, link)
+		if (in->group)
+			return 1;
+	return 0;
+}
+
+/* Sets on the devices only names, as the input command does, its settings
+ * over what they have. Without it, as on reload, each device starts again
+ * from config.h's and takes the file's. Returns how many devices it named,
+ * or -1 if XKB couldn't make a keymap for a keyboard, which keeps the one
+ * it had, as stderr and, on reload, settings_errors say. */
+static int
+settings_apply_inputs(const InputConfig *only)
+{
+	SettingsInput *in;
+	InputConfig ic;
+	const char *names[InXkbLast];
+	char type[32];
+	size_t i;
+	int n = 0, refused = 0, rate, delay;
+	wl_list_for_each(in, &settings_inputs, link) {
+		if (only) {
+			snprintf(type, sizeof(type), "type:%s", in->type);
+			if (strcmp(only->name, "*") && strcmp(only->name, type)
+					&& strcmp(only->name, in->identifier))
+				continue;
+			ic = *only;
+		} else {
+			settings_input_config(in, &ic);
+		}
+		n++;
+		if (in->group) {
+			for (i = 0; i < InXkbLast; i++)
+				names[i] = only && !ic.xkb[i] ? in->names[i] : ic.xkb[i];
+			rate = ic.value[InRepeatRate] >= 0 ? ic.value[InRepeatRate] : in->rate;
+			delay = ic.value[InRepeatDelay] >= 0 ? ic.value[InRepeatDelay] : in->delay;
+			if (!settings_keyboard_set(in, names, rate, delay)) {
+				fprintf(stderr, "tidewm: XKB can't make a keymap of %s's settings\n",
+						in->identifier);
+				if (!only)
+					settings_error(settings_errors, 0, "input %s: XKB can't make a keymap "
+							"of its settings, so it keeps the one it had", in->identifier);
+				refused = 1;
+			}
+		}
+		if (settings_libinput(in, &ic))
+			settings_event_input("libinput_config", in);
+	}
+	return refused ? -1 : n;
+}
+
+/* The input command, "NAME SETTING VALUE": sets it now, on the devices
+ * NAME names, until a reload. Returns 1, or 0 with err saying why; *parse
+ * says it didn't parse. */
+static int
+settings_input_command(char *args, char *err, size_t errsize, int *parse)
+{
+	InputConfig ic;
+	char *name = settings_name(&args);
+	size_t i;
+	int n = 0;
+	*parse = 1;
+	if (!settings_input_name_ok(name ? name : "", err, errsize))
+		return 0;
+	settings_input_init(&ic, name);
+	if (settings_parse_input_setting(&ic, args, err, errsize)) {
+		*parse = 0;
+		if ((n = settings_apply_inputs(&ic)) <= 0)
+			snprintf(err, errsize, n < 0 ? "XKB can't make a keymap of those settings"
+					: "No input device matches %s", name);
+	}
+	for (i = 0; i < InXkbLast; i++)
+		free((char *)ic.xkb[i]);
+	return !*parse && n > 0;
+}
+
 /* A key went down, with these modifiers and keysyms. Another key's press
  * means a tap is over, so it disarms a release binding; then this key
  * arms its own, which runs when it comes up. The modifiers are as they
@@ -1175,7 +2062,7 @@ settings_enter_mode(char *name)
 {
 	size_t i;
 	char *p = name;
-	if (*p == '"' && (name = settings_mode_name(&p)) && *p)
+	if (*p == '"' && (name = settings_name(&p)) && *p)
 		return 0; /* something after the quoted name */
 	if (!name)
 		return 0;
@@ -1215,6 +2102,29 @@ settings_json_modes(void)
 static void
 settings_finish(void)
 {
+	SettingsInput *in, *itmp;
+	SettingsGroup *g, *gtmp;
+	size_t i;
+	if (settings_release_source)
+		wl_event_source_remove(settings_release_source);
+	settings_release_source = NULL;
+	wl_list_for_each_safe(in, itmp, &settings_inputs, link) {
+		wl_list_remove(&in->destroy.link);
+		wl_list_remove(&in->link);
+		for (i = 0; i < InXkbLast; i++)
+			free((char *)in->names[i]);
+		free(in->identifier);
+		free(in);
+	}
+	wl_list_for_each_safe(g, gtmp, &settings_groups, link) {
+		if (g->group != kb_group)
+			destroykeyboardgroup(&g->group->destroy, NULL);
+		wl_list_remove(&g->link);
+		free(g);
+	}
+	if (settings_xkb)
+		xkb_context_unref(settings_xkb);
+	settings_xkb = NULL;
 	settings_free(settings);
 	settings = NULL;
 	settings_mode = 0;

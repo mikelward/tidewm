@@ -45,6 +45,7 @@ the magic, or over 4 MiB, closes that connection only.
 | 9 | `GET_CONFIG` | `config`, the loaded config file's text, and tidewm's own `path` and `errors` ([`config.md`](config.md)) |
 | 10 | `SEND_TICK` | `{"success": true}`, after sending the payload in a `tick` event |
 | 12 | `GET_BINDING_STATE` | `{"name": ...}`, the binding mode now |
+| 100 | `GET_INPUTS` | Each input device, in the order they came: `identifier` (as [`config.md`](config.md)'s input lines name it), `name`, `vendor`, `product`, `type` (`keyboard`, `pointer` or `touchpad`); a keyboard's `xkb_layout_names`, `xkb_active_layout_index`, `xkb_active_layout_name`, `repeat_delay` and `repeat_rate`; and a libinput device's `libinput` settings, as sway names them |
 
 Any other type gets `{"success": false, "error": "unsupported message type"}`.
 
@@ -78,6 +79,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `reload` | Reads the config file again ([`config.md`](config.md)); fails with its errors, keeping what was loaded |
 | `mode NAME` | Makes the config file's mode `NAME`'s bindings the ones in force; `mode default` goes back to the top level. `NAME` may be in `"` |
 | `output NAME SETTINGS` | Sets the output `NAME`'s, or every output's for `*`, mode, scale, position, transform, or `enable` or `disable`, as the config file's output lines do ([`config.md`](config.md)), until a reload |
+| `input NAME SETTING VALUE` | Sets one setting, such as `xkb_layout` or `tap`, on the input devices `NAME` names, as the config file's input lines do ([`config.md`](config.md)), until a reload. It fails for a name no device has |
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails |
 | `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles |
 | `layout tile\|floating\|monocle\|toggle` | tidewm's own: the focused monitor's layout, from `config.h`'s `layouts`, or back to the previous one |
@@ -111,5 +113,6 @@ in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
 | `window` | `0x80000003` | A window is `new`, `close`d, gets `focus`, changes `title`, `fullscreen_mode`, `floating` or `urgent`, or moves to another workspace or output, by a command, a key or a drag (`move`): `{"change": ..., "container": ...}`. A window's first event is `new`, sent once it has an output, workspace and floating state |
 | `shutdown` | `0x80000006` | tidewm exits: `{"change": "exit"}` |
 | `tick` | `0x80000007` | Someone sends `SEND_TICK`: `{"first": false, "payload": ...}`. Subscribing sends one at once, with `first` true |
+| `input` | `0x80000015` | An input device is `added` or `removed`, a keyboard's keymap changes (`xkb_keymap`), or a libinput device's settings are set (`libinput_config`): `{"change": ..., "input": ...}`, the device as `GET_INPUTS` has it. A switch of the active layout doesn't send one yet |
 
 A client that stops reading is closed once 16 MiB of events wait for it.

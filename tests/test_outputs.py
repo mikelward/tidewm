@@ -72,6 +72,14 @@ class OneOutputTest(OutputsTest):
         self.command(self.connect(), "reload")
         self.assertEqual(self.connect().request(GET_CONFIG)["errors"], [])
 
+    def test_a_name_and_values_may_be_quoted(self):
+        self.wm.write_config('output "HEADLESS-1" mode "640x480@30Hz" scale "1"\n')
+        self.command(self.connect(), "reload")
+        output = self.outputs()["HEADLESS-1"]
+        self.assertEqual((mode(output), output["scale"]), ((640, 480, 30000), 1))
+        self.command(self.connect(), 'output "HEADLESS-1" transform "90"')
+        self.assertEqual(self.outputs()["HEADLESS-1"]["transform"], "90")
+
     def test_the_output_command_says_when_no_output_is_called_that(self):
         self.assertIn("No output is called HDMI-A-9", self.fails("output HDMI-A-9 scale 2")["error"])
 
@@ -82,6 +90,8 @@ class OneOutputTest(OutputsTest):
             ("output HEADLESS-1 mode wide\n", "mode wide isn't WIDTHxHEIGHT[@HZ]"),
             ("output HEADLESS-1 mode 800x600junk\n", "mode 800x600junk isn't WIDTHxHEIGHT[@HZ]"),
             ("output HEADLESS-1 mode 800x600@0\n", "mode 800x600@0 isn't WIDTHxHEIGHT[@HZ]"),
+            ('output HEADLESS-1 mode "800x600\n', 'output HEADLESS-1: a value\'s " has no closing "'),
+            ('output "HEADLESS-1 scale 2\n', "output needs a name, or *, then settings"),
             ("output HEADLESS-1 scale 0\n", "scale 0 isn't a number from above 0 to 10"),
             ("output HEADLESS-1 scale nan\n", "scale nan isn't a number from above 0 to 10"),
             ("output HEADLESS-1 position 10\n", "position needs X Y"),

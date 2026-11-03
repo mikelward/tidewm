@@ -107,12 +107,24 @@ tests/power: tests/power.c tests/wlr-output-power-management-unstable-v1-client-
 	$(CC) tests/power.c tests/wlr-output-power-management-unstable-v1-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
-test: dwl tests/client tests/workspaces tests/locker tests/power $(XWAYLAND:-DXWAYLAND=tests/x11client)
+tests/input-method-unstable-v2-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		protocols/input-method-unstable-v2.xml $@
+tests/input-method-unstable-v2-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		protocols/input-method-unstable-v2.xml $@
+tests/ime: tests/ime.c tests/input-method-unstable-v2-client-protocol.h \
+		tests/input-method-unstable-v2-protocol.c
+	$(CC) tests/ime.c tests/input-method-unstable-v2-protocol.c -Itests \
+		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime \
+		$(XWAYLAND:-DXWAYLAND=tests/x11client)
 	python3 -m unittest discover -s tests -v
 
 clean:
 	rm -f dwl *.o *-protocol.h tests/client tests/workspaces tests/locker tests/power \
-		tests/x11client tests/*-protocol.h tests/*-protocol.c
+		tests/ime tests/x11client tests/*-protocol.h tests/*-protocol.c
 
 dist: clean
 	mkdir -p dwl-$(VERSION)
