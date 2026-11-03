@@ -27,9 +27,20 @@ MAGIC = b"i3-ipc"
 HEADER = struct.Struct("=6sII")
 RUN_COMMAND, GET_WORKSPACES, SUBSCRIBE, GET_OUTPUTS, GET_TREE = 0, 1, 2, 3, 4
 GET_VERSION, SEND_TICK = 7, 10
+EVENT_WORKSPACE = 0x80000000
 EVENT_WINDOW = 0x80000003
 EVENT_SHUTDOWN = 0x80000006
 EVENT_TICK = 0x80000007
+
+
+def is_urgency(event):
+    """Whether a workspace event is a change of urgency."""
+    return event["change"] == "urgent"
+
+
+def urgency(event):
+    """A workspace event's workspace and whether it's urgent."""
+    return event["current"]["name"], event["current"]["urgent"]
 
 
 class Ipc:
@@ -217,3 +228,26 @@ class TidewmTest(unittest.TestCase):
 
     def workspace_names(self):
         return [w["name"] for w in self.connect().request(GET_WORKSPACES)]
+
+    def urgent_window_on(self, ipc, workspace):
+        """Opens a window on a persistent workspace, not the current one,
+        and has it ask to be activated, which makes it urgent. ipc must be
+        subscribed to window and workspace events."""
+        client = self.wm.open_window("test.urgent", "Urgent", stdin=True)
+        con = ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new")["container"]
+        self.command(self.connect(), f"persist workspace {workspace}")
+        self.command(self.connect(), f"[con_id={con['id']}] move to workspace {workspace}")
+        client.stdin.write(b"activate\n")
+        client.stdin.flush()
+        self.assertEqual(urgency(ipc.next_event(EVENT_WORKSPACE, is_urgency)), (workspace, True))
+        return client, con
+
+
+def ext_workspaces(wm, *args):
+    """What tests/workspaces prints: each ext-workspace workspace as
+    (name, state, outputs its group is on)."""
+    out = subprocess.run([os.path.join(ROOT, "tests", "workspaces"), *args],
+                         env=wm.env, capture_output=True, text=True,
+                         timeout=TIMEOUT, check=True).stdout
+    return [(name, state, int(outputs))
+            for name, state, outputs in (line.rsplit(" ", 2) for line in out.splitlines())]

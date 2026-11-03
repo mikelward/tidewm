@@ -76,11 +76,22 @@ tests/x11client: tests/x11client.c
 	$(CC) tests/x11client.c `$(PKG_CONFIG) --cflags xcb xcb-icccm` \
 		$(DWLDEVCFLAGS) $(CFLAGS) $(LDFLAGS) \
 		`$(PKG_CONFIG) --libs xcb xcb-icccm` -o $@
-test: dwl tests/client $(XWAYLAND:-DXWAYLAND=tests/x11client)
+tests/ext-workspace-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		$(WAYLAND_PROTOCOLS)/staging/ext-workspace/ext-workspace-v1.xml $@
+tests/ext-workspace-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/staging/ext-workspace/ext-workspace-v1.xml $@
+tests/workspaces: tests/workspaces.c tests/ext-workspace-v1-client-protocol.h tests/ext-workspace-v1-protocol.c
+	$(CC) tests/workspaces.c tests/ext-workspace-v1-protocol.c -Itests \
+		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+test: dwl tests/client tests/workspaces $(XWAYLAND:-DXWAYLAND=tests/x11client)
 	python3 -m unittest discover -s tests -v
 
 clean:
-	rm -f dwl *.o *-protocol.h tests/client tests/x11client tests/*-protocol.h tests/*-protocol.c
+	rm -f dwl *.o *-protocol.h tests/client tests/workspaces tests/x11client \
+		tests/*-protocol.h tests/*-protocol.c
 
 dist: clean
 	mkdir -p dwl-$(VERSION)

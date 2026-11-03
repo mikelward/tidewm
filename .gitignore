@@ -7,3 +7,4 @@ config.h
 tests/client
 __pycache__/
 tests/x11client
+tests/workspaces

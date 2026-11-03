@@ -9,12 +9,55 @@
  * persistent. dwl.c includes this file, like client.h.
  */
 
+static unsigned long ipc_id(unsigned long *id);
 static void ipc_event_window(Client *c, const char *change);
 static void ipc_event_workspace(const char *change, Workspace *cur, Workspace *old);
 
 static struct wl_list workspaces = {&workspaces, &workspaces}; /* in the order made */
 static Workspace *curws;
 static Workspace *prevws; /* for back_and_forth */
+static void ws_view(Workspace *ws);
+
+/* ext-workspace: one group, on every output, as a workspace spans them,
+ * holding every workspace. A client may ask to activate one. */
+static struct wlr_ext_workspace_manager_v1 *ws_manager;
+static struct wlr_ext_workspace_group_handle_v1 *ws_group;
+
+static void
+ws_protocol_commit(struct wl_listener *listener, void *data)
+{
+	struct wlr_ext_workspace_v1_commit_event *event = data;
+	struct wlr_ext_workspace_v1_request *req;
+	wl_list_for_each(req, event->requests, link) {
+		/* Only activate is offered; a destroyed workspace is NULL */
+		if (req->type == WLR_EXT_WORKSPACE_V1_REQUEST_ACTIVATE && req->activate.workspace)
+			ws_view(req->activate.workspace->data);
+	}
+}
+
+static struct wl_listener ws_protocol_commit_listener = {.notify = ws_protocol_commit};
+
+static void
+ws_protocol_init(void)
+{
+	ws_manager = wlr_ext_workspace_manager_v1_create(dpy, 1);
+	ws_group = wlr_ext_workspace_group_handle_v1_create(ws_manager, 0);
+	wl_signal_add(&ws_manager->events.commit, &ws_protocol_commit_listener);
+}
+
+/* wlroots wants every listener gone before the display goes */
+static void
+ws_protocol_finish(void)
+{
+	wl_list_remove(&ws_protocol_commit_listener.link);
+}
+
+static void
+ws_set_active(Workspace *ws, int active)
+{
+	if (ws && ws->ext)
+		wlr_ext_workspace_handle_v1_set_active(ws->ext, active);
+}
 
 static Workspace *
 ws_find(const char *name)
@@ -50,6 +93,16 @@ ws_get(const char *name)
 	if (!ws->name)
 		die("out of memory naming workspace");
 	wl_list_insert(workspaces.prev, &ws->link);
+	if (ws_manager) {
+		/* Its id lasts for the workspace's life, through a rename */
+		char id[32];
+		snprintf(id, sizeof(id), "tidewm-%lu", ipc_id(&ws->ipc_id));
+		ws->ext = wlr_ext_workspace_handle_v1_create(ws_manager, id,
+				EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_ACTIVATE);
+		ws->ext->data = ws;
+		wlr_ext_workspace_handle_v1_set_group(ws->ext, ws_group);
+		wlr_ext_workspace_handle_v1_set_name(ws->ext, ws->name);
+	}
 	ipc_event_workspace("init", ws, NULL);
 	return ws;
 }
@@ -82,6 +135,8 @@ ws_update_urgency(Workspace *ws)
 	if (!ws || (urgent = ws_urgent(ws)) == ws->urgent)
 		return;
 	ws->urgent = urgent;
+	if (ws->ext)
+		wlr_ext_workspace_handle_v1_set_urgent(ws->ext, urgent);
 	ipc_event_workspace("urgent", ws, NULL);
 }
 
@@ -95,6 +150,8 @@ ws_prune(Workspace *ws)
 	ipc_event_workspace("empty", ws, NULL);
 	if (prevws == ws)
 		prevws = NULL;
+	if (ws->ext)
+		wlr_ext_workspace_handle_v1_destroy(ws->ext);
 	wl_list_remove(&ws->link);
 	free(ws->name);
 	free(ws);
@@ -118,6 +175,8 @@ ws_view(Workspace *ws)
 		return;
 	prevws = old;
 	curws = ws;
+	ws_set_active(old, 0);
+	ws_set_active(ws, 1);
 	ws_arrange_all();
 	focusclient(focustop(selmon), NULL, 1);
 	printstatus();
@@ -151,6 +210,8 @@ ws_rename(Workspace *ws, const char *name)
 		die("out of memory renaming workspace");
 	free(ws->name);
 	ws->name = copy;
+	if (ws->ext)
+		wlr_ext_workspace_handle_v1_set_name(ws->ext, ws->name);
 	printstatus();
 	ipc_event_workspace("rename", ws, NULL);
 }

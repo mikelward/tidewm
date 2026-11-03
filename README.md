@@ -130,7 +130,8 @@ To get a list of status bars that work with dwl consult our [wiki].
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so
 `swaymsg`, Quickshell's I3 module and other clients of sway's socket work
-with it. [`docs/ipc.md`](docs/ipc.md) lists what it answers.
+with it. [`docs/ipc.md`](docs/ipc.md) lists what it answers. Its
+workspaces are on ext-workspace too, for Wayland clients that read that.
 
 ### (Known) Java nonreparenting WM issue
 Certain IDEs don't display correctly unless an environmental variable for Java AWT
