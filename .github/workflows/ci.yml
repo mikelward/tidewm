@@ -74,11 +74,40 @@ jobs:
       - if: ${{ matrix.xwayland }}
         run: make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm"
 
+  # Debian testing is where tide runs this, from apt's wlroots 0.20 and GCC,
+  # so it builds there too. A job of its own, beside `build`, so the checks
+  # `build` already reports keep their names.
+  build-debian:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    container:
+      image: debian:testing
+    strategy:
+      fail-fast: false
+      matrix:
+        xwayland: [false, true]
+    steps:
+      - run: apt-get update
+      - run: >-
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+          build-essential pkgconf libwlroots-0.20-dev libwayland-dev
+          wayland-protocols libinput-dev libxkbcommon-dev libxcb1-dev
+          libxcb-icccm4-dev
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - if: ${{ !matrix.xwayland }}
+        run: make
+      - if: ${{ matrix.xwayland }}
+        run: make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm"
+
   lanes:
     name: lanes
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [classify, build]
+    needs: [classify, build, build-debian]
     if: always()
     steps:
       - uses: actions/checkout@v5
@@ -90,4 +119,4 @@ jobs:
           pr: ${{ github.event.pull_request.number }}
           classify-result: ${{ needs.classify.result }}
           base-sha: ${{ needs.classify.outputs.base_sha }}
-          results: build=${{ needs.build.result }}
+          results: build=${{ needs.build.result }} build-debian=${{ needs.build-debian.result }}
