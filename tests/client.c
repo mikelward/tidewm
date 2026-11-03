@@ -3,10 +3,15 @@
  *
  * The tests' window: one xdg-shell toplevel with the app ID and title given
  * on the command line, filled with a solid color. It runs until the
- * compositor closes it or it's killed. A line "remap" on stdin unmaps the
- * window and maps it again.
+ * compositor closes it or it's killed. Lines on stdin drive it:
  *
- * Usage: client APP_ID TITLE
+ * remap     unmaps the window and maps it again.
+ * activate  asks for the window to be activated, over xdg-activation.
+ *
+ * With MAPPED_APP_ID, it changes its app ID to that after its first commit,
+ * before it maps.
+ *
+ * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
 #define _GNU_SOURCE /* memfd_create */
 #include <poll.h>
@@ -18,11 +23,15 @@
 #include <unistd.h>
 #include <wayland-client.h>
 
+#include "xdg-activation-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 static struct wl_compositor *compositor;
 static struct wl_shm *shm;
 static struct xdg_wm_base *wm_base;
+static struct xdg_activation_v1 *activation;
+static struct xdg_toplevel *window;
+static const char *mapped_app_id;
 static struct wl_surface *surface;
 static int32_t width = 100, height = 100;
 
@@ -75,6 +84,10 @@ static void
 xdg_surface_configure(void *data, struct xdg_surface *xsurface, uint32_t serial)
 {
 	xdg_surface_ack_configure(xsurface, serial);
+	if (mapped_app_id) {
+		xdg_toplevel_set_app_id(window, mapped_app_id);
+		mapped_app_id = NULL;
+	}
 	draw();
 }
 
@@ -118,6 +131,31 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 };
 
 static void
+token_done(void *data, struct xdg_activation_token_v1 *token, const char *name)
+{
+	xdg_activation_v1_activate(activation, name, surface);
+	xdg_activation_token_v1_destroy(token);
+}
+
+static const struct xdg_activation_token_v1_listener token_listener = {
+	.done = token_done,
+};
+
+/* Asks for a token for this surface, then activates it with that token,
+ * as an app does when it's started for something already open. */
+static void
+activate(void)
+{
+	struct xdg_activation_token_v1 *token;
+	if (!activation)
+		die("the compositor lacks xdg_activation_v1");
+	token = xdg_activation_v1_get_activation_token(activation);
+	xdg_activation_token_v1_add_listener(token, &token_listener, NULL);
+	xdg_activation_token_v1_set_surface(token, surface);
+	xdg_activation_token_v1_commit(token);
+}
+
+static void
 registry_global(void *data, struct wl_registry *registry, uint32_t name,
 		const char *interface, uint32_t version)
 {
@@ -127,6 +165,8 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 		shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
 	else if (!strcmp(interface, xdg_wm_base_interface.name))
 		wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
+	else if (!strcmp(interface, xdg_activation_v1_interface.name))
+		activation = wl_registry_bind(registry, name, &xdg_activation_v1_interface, 1);
 }
 
 static void
@@ -144,10 +184,10 @@ main(int argc, char *argv[])
 {
 	struct wl_display *display;
 	struct xdg_surface *xsurface;
-	struct xdg_toplevel *toplevel;
 
-	if (argc != 3)
-		die("usage: client APP_ID TITLE");
+	if (argc != 3 && argc != 4)
+		die("usage: client APP_ID TITLE [MAPPED_APP_ID]");
+	mapped_app_id = argv[3]; /* argv[argc] is NULL */
 	if (!(display = wl_display_connect(NULL)))
 		die("can't connect to the compositor");
 	wl_registry_add_listener(wl_display_get_registry(display), &registry_listener, NULL);
@@ -160,10 +200,10 @@ main(int argc, char *argv[])
 	surface = wl_compositor_create_surface(compositor);
 	xsurface = xdg_wm_base_get_xdg_surface(wm_base, surface);
 	xdg_surface_add_listener(xsurface, &xdg_surface_listener, NULL);
-	toplevel = xdg_surface_get_toplevel(xsurface);
-	xdg_toplevel_add_listener(toplevel, &toplevel_listener, NULL);
-	xdg_toplevel_set_app_id(toplevel, argv[1]);
-	xdg_toplevel_set_title(toplevel, argv[2]);
+	window = xdg_surface_get_toplevel(xsurface);
+	xdg_toplevel_add_listener(window, &toplevel_listener, NULL);
+	xdg_toplevel_set_app_id(window, argv[1]);
+	xdg_toplevel_set_title(window, argv[2]);
 	wl_surface_commit(surface);
 
 	for (int input = STDIN_FILENO;;) {
@@ -192,6 +232,8 @@ main(int argc, char *argv[])
 			wl_surface_attach(surface, NULL, 0, 0);
 			wl_surface_commit(surface);
 			wl_surface_commit(surface);
+		} else if (!strcmp(line, "activate\n")) {
+			activate();
 		}
 	}
 }

@@ -46,13 +46,9 @@ by editing the sources, in particular
 The default key bindings are as follows:
 .Bl -tag -width 20n -offset indent -compact
 .It Mod-[1-9]
-Show only all windows with a tag.
-.It Mod-Ctrl-[1-9]
-Show all windows with a tag.
+Show the workspace named 1 to 9 on every monitor, making it if it's new.
 .It Mod-Shift-[1-9]
-Move window to a single tag.
-.It Mod-Ctrl-Shift-[1-9]
-Toggle tag for window.
+Move window to the workspace named 1 to 9, on its own monitor.
 .It Mod-p
 Spawn
 .Xr wmenu-run 1 .
@@ -68,7 +64,7 @@ Decrease/increase master area.
 .It Mod-Return
 Move window on top of stack or switch top of stack with second window.
 .It Mod-Tab
-Show only all windows with previous tag.
+Show the previous workspace.
 .It Mod-Shift-c
 Close window.
 .It Mod-t
@@ -83,10 +79,6 @@ Switch to previous layout.
 Toggle floating state of window.
 .It Mod-e
 Toggle fullscreen state of window.
-.It Mod-0
-Show all windows.
-.It Mod-Shift-0
-Set all tags for window.
 .It Mod-,
 Move focus to previous monitor.
 .It Mod-.
@@ -136,7 +128,7 @@ is one of (in order)
 .Em fullscreen ,
 .Em floating ,
 .Em selmon ,
-.Em tags ,
+.Em workspace ,
 .Em layout .
 .It Ar <data>
 changes depending on
@@ -164,24 +156,8 @@ window it prints nothing.
 Prints 1 if
 .Ar <monitor>
 is the selected monitor, otherwise prints 0.
-.It Em tags
-Prints four bitmasks in the following order:
-.Bl -bullet -width 2n -compact
-.It
-Occupied tags of
-.Ar <monitor> .
-.It
-Selected tags of
-.Ar <monitor> .
-.It
-Tags of the focused window on
-.Ar <monitor> .
-.It
-Tags where a window on
-.Ar <monitor>
-requested activation or has urgency hints.
-.El
-The bitmasks are 32-bit unsigned decimal integers.
+.It Em workspace
+Prints the name of the current workspace, which every monitor shows.
 .It Em layout
 Prints the symbol of the current layout.
 .El
@@ -194,7 +170,7 @@ HDMI\-A\-1 appid footclient
 HDMI\-A\-1 fullscreen 0
 HDMI\-A\-1 floating 0
 HDMI\-A\-1 selmon 1
-HDMI\-A\-1 tags 271 4 4 0
+HDMI\-A\-1 workspace 3
 HDMI\-A\-1 layout [T]
 .Ed
 .Pp
@@ -205,7 +181,7 @@ HDMI\-A\-1 appid
 HDMI\-A\-1 fullscreen
 HDMI\-A\-1 floating
 HDMI\-A\-1 selmon 1
-HDMI\-A\-1 tags 271 512 0 0
+HDMI\-A\-1 workspace 10
 HDMI\-A\-1 layout [T]
 .Ed
 .Sh ENVIRONMENT
