@@ -29,6 +29,7 @@ supported yet.
 |---|---|
 | `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
+| `mode NAME {` … `}` | A submap: the `bindsym` lines inside are in force while `NAME` is the mode, and the top level's aren't. `NAME` is a word, or text in `"`, without `;`, which ends a command; opening a mode again adds to it |
 
 `KEYS` is modifiers and a key, joined by `+`, as `Mod4+Shift+Return`:
 
@@ -55,6 +56,22 @@ bindsym $mod+Shift+r reload
 bindsym Control+Mod1+F2 chvt 2
 ```
 
+## Modes
+
+As in sway, the `mode NAME` command makes a mode's bindings the ones in
+force, and `mode default` goes back to the top level, so a mode's own
+keys must include a way out. Modes don't nest, and `default` can't be
+opened. A load, `reload` included, starts at the top level.
+
+```
+bindsym $mod+r mode "resize"
+mode "resize" {
+    bindsym h mfact -0.05
+    bindsym l mfact +0.05
+    bindsym Escape mode default
+}
+```
+
 ## Errors
 
 A file with any error is left out whole, and what was loaded before stays:
@@ -77,3 +94,7 @@ fails is written to stderr, with the binding's keys.
 | `reload` (a command) | Reads the file again; fails with its errors and keeps what was loaded. Without the file, goes back to `config.h`'s keys |
 | `GET_CONFIG` (type 9) | `config`, the loaded file's text (`""` with `config.h`'s keys), and tidewm's own `path`, where it looks, and `errors`, the last load's |
 | `GET_VERSION` | Its `loaded_config_file_name` is the loaded file, or `""` |
+| `mode NAME` (a command) | Makes `NAME` the mode, or `default` the top level; fails for a mode the file hasn't |
+| `GET_BINDING_MODES` (type 8) | Each mode's name, `default` first |
+| `GET_BINDING_STATE` (type 12) | `{"name": ...}`, the mode now |
+| The `mode` event | `{"change": NAME, "pango_markup": false}`, when the mode changes |

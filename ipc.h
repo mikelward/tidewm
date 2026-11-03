@@ -23,10 +23,10 @@
 #define IPC_EVENT_BIT 0x80000000u
 
 enum { IpcCommand = 0, IpcGetWorkspaces = 1, IpcSubscribe = 2,
-	IpcGetOutputs = 3, IpcGetTree = 4, IpcGetVersion = 7, IpcGetConfig = 9,
-	IpcSendTick = 10 };
+	IpcGetOutputs = 3, IpcGetTree = 4, IpcGetVersion = 7, IpcGetBindingModes = 8,
+	IpcGetConfig = 9, IpcSendTick = 10, IpcGetBindingState = 12 };
 /* Event numbers, as sway sends them with IPC_EVENT_BIT set */
-enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvWindow = 3,
+enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvMode = 2, IpcEvWindow = 3,
 	IpcEvShutdown = 6, IpcEvTick = 7 };
 
 typedef struct {
@@ -55,6 +55,9 @@ static void ipc_client_destroy(IpcClient *cl);
 static int settings_reload(char *buf, size_t size);
 static struct json_object *settings_json(void);
 static const char *settings_loaded_path(void);
+static int settings_enter_mode(char *name);
+static const char *settings_mode_now(void);
+static struct json_object *settings_json_modes(void);
 
 static unsigned long
 ipc_id(unsigned long *id)
@@ -629,6 +632,15 @@ ipc_run_command(char *cmd, int *quit_after)
 		ws_rename(from, to);
 		return ipc_json_success(1, NULL);
 	}
+	if (!has_criteria && ipc_take(&cmd, "mode")) {
+		if (!*cmd) {
+			error = "Expected mode NAME";
+			goto parse_error;
+		}
+		if (!settings_enter_mode(cmd))
+			return ipc_json_success(0, "No mode is called that");
+		return ipc_json_success(1, NULL);
+	}
 	if (!has_criteria && !strcasecmp(cmd, "reload")) {
 		char errors[512];
 		if (!settings_reload(errors, sizeof(errors)))
@@ -823,7 +835,7 @@ static int
 ipc_handle_subscribe(IpcClient *cl, const char *payload)
 {
 	static const struct { const char *name; int event; } names[] = {
-		{"workspace", IpcEvWorkspace}, {"output", IpcEvOutput},
+		{"workspace", IpcEvWorkspace}, {"output", IpcEvOutput}, {"mode", IpcEvMode},
 		{"window", IpcEvWindow}, {"shutdown", IpcEvShutdown}, {"tick", IpcEvTick},
 	};
 	struct json_object *req = json_tokener_parse(payload), *tick;
@@ -890,6 +902,13 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 		return ipc_send_json(cl, type, ipc_json_tree());
 	case IpcGetVersion:
 		return ipc_send_json(cl, type, ipc_json_version());
+	case IpcGetBindingModes:
+		return ipc_send_json(cl, type, settings_json_modes());
+	case IpcGetBindingState: {
+		struct json_object *state = json_object_new_object();
+		json_object_object_add(state, "name", json_object_new_string(settings_mode_now()));
+		return ipc_send_json(cl, type, state);
+	}
 	case IpcGetConfig:
 		return ipc_send_json(cl, type, settings_json());
 	case IpcSendTick:
@@ -1140,6 +1159,19 @@ ipc_event_workspace(const char *change, Workspace *cur, Workspace *old)
 	json_object_object_add(obj, "current", cur ? ipc_json_workspace(cur, selmon) : NULL);
 	json_object_object_add(obj, "old", old ? ipc_json_workspace(old, selmon) : NULL);
 	ipc_broadcast(IpcEvWorkspace, obj);
+}
+
+/* As sway sends it, when the binding mode changes */
+static void
+ipc_event_mode(const char *name)
+{
+	struct json_object *obj;
+	if (!ipc_subscribed(IpcEvMode))
+		return;
+	obj = json_object_new_object();
+	json_object_object_add(obj, "change", json_object_new_string(name));
+	json_object_object_add(obj, "pango_markup", json_object_new_boolean(0));
+	ipc_broadcast(IpcEvMode, obj);
 }
 
 static void

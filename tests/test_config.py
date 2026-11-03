@@ -6,8 +6,8 @@ import select
 import shlex
 import unittest
 
-from harness import (EVENT_WORKSPACE, GET_CONFIG, GET_VERSION, RUN_COMMAND, TIMEOUT,
-                     TidewmTest)
+from harness import (EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MODES, GET_BINDING_STATE,
+                     GET_CONFIG, GET_VERSION, RUN_COMMAND, TIMEOUT, TidewmTest)
 
 CONFIG = """# Lines like this, and blank ones, are skipped
 
@@ -149,6 +149,94 @@ class ConfigTest(KeysTest):
         self.alt("2")
         self.assertEqual(self.shown(ipc), "2")
         self.assertEqual(self.connect().request(GET_CONFIG)["config"], "")
+
+
+MODES = """bindsym Mod1+r mode "resize"
+bindsym x workspace outside
+mode "resize" {
+    bindsym x workspace inside
+    bindsym Escape mode default
+}
+mode plain {
+    bindsym y workspace plain
+}
+"""
+
+
+class ModeTest(KeysTest):
+    CONFIG = MODES
+
+    def mode_ipc(self):
+        ipc = self.connect()
+        ipc.subscribe("mode", "workspace")
+        return ipc
+
+    def mode(self):
+        return self.connect().request(GET_BINDING_STATE)["name"]
+
+    def test_a_mode_has_its_own_bindings(self):
+        ipc = self.mode_ipc()
+        self.alt("r")
+        self.assertEqual(ipc.next_event(EVENT_MODE), {"change": "resize", "pango_markup": False})
+        self.assertEqual(self.mode(), "resize")
+        self.press("-k", "x")
+        self.assertEqual(self.shown(ipc), "inside")
+        self.press("-k", "Escape")
+        self.assertEqual(ipc.next_event(EVENT_MODE)["change"], "default")
+        self.press("-k", "x")
+        self.assertEqual(self.shown(ipc), "outside")
+
+    def test_the_top_levels_bindings_are_off_in_a_mode(self):
+        ipc = self.mode_ipc()
+        self.command(self.connect(), "mode plain")
+        self.press("-k", "x")  # the top level's x would show "outside"
+        self.press("-k", "y")
+        self.assertEqual(self.shown(ipc), "plain")
+
+    def test_binding_modes_lists_each_mode(self):
+        self.assertEqual(self.connect().request(GET_BINDING_MODES), ["default", "resize", "plain"])
+
+    def test_the_mode_command_takes_a_quoted_name_and_refuses_an_unknown_one(self):
+        self.command(self.connect(), 'mode "plain"')
+        self.assertEqual(self.mode(), "plain")
+        self.fails("mode nowhere")
+        self.assertEqual(self.mode(), "plain")
+        self.assertTrue(self.fails("mode")["parse_error"])
+
+    def test_entering_the_mode_youre_in_says_nothing(self):
+        ipc = self.mode_ipc()
+        self.command(self.connect(), "mode default")
+        self.command(self.connect(), "mode plain")
+        self.assertEqual(ipc.next_event(EVENT_MODE)["change"], "plain")
+
+    def test_reload_goes_back_to_the_top_level(self):
+        ipc = self.mode_ipc()
+        self.command(self.connect(), "mode plain")
+        ipc.next_event(EVENT_MODE)
+        self.command(self.connect(), "reload")
+        self.assertEqual(ipc.next_event(EVENT_MODE)["change"], "default")
+        self.assertEqual(self.mode(), "default")
+
+    def test_mode_errors(self):
+        for text, error in [
+            ("mode a {\nbindsym x nop\n", ":1: mode a has no }"),
+            ("mode a {\nmode b {\n}\n", ":2: mode a is still open: modes don't nest"),
+            ("}\n", ":1: } closes no mode"),
+            ("mode a\n", ":1: mode needs a name, then {"),
+            ('mode "a {\n', ":1: mode needs a name, then {"),
+            ("mode default {\n}\n", ":1: default is the top level, not a mode to open"),
+            ('mode "a; b" {\n}\n', ":1: mode a; b: a mode's name can't hold ;"),
+        ]:
+            self.wm.write_config(text)
+            self.assertIn(error, self.fails("reload")["error"], text)
+
+
+class NoConfigModeTest(KeysTest):
+    def test_config_h_keys_have_only_the_top_level(self):
+        self.assertEqual(self.connect().request(GET_BINDING_MODES), ["default"])
+        self.assertEqual(self.connect().request(GET_BINDING_STATE), {"name": "default"})
+        self.command(self.connect(), "mode default")
+        self.fails("mode resize")
 
 
 class BadConfigAtStartTest(KeysTest):
