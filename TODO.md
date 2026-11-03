@@ -35,6 +35,8 @@ lands with a test.
 - **Submaps** (#13): sway's `mode NAME { ... }` blocks and `mode`
   command, with the `mode` event, `GET_BINDING_MODES` and
   `GET_BINDING_STATE`.
+- **Release and locked bindings** (#14): `--release` runs on a tap,
+  `--locked` on the lock screen too.
 
 ## Decisions needing review
 
@@ -66,11 +68,10 @@ lands with a test.
 ## Plan
 
 1. **The rest of the runtime config**, in steps:
-   1. locked and release bindings;
-   2. window rules, testing that two matching rules make only the last
+   1. window rules, testing that two matching rules make only the last
       one's workspace (#8);
-   3. outputs;
-   4. per-device input and XKB.
+   2. outputs;
+   3. per-device input and XKB.
 2. **Layouts**: new windows join the end of the stack; three-column, two
    columns + stack and monocle beside tile, set per workspace; the layout
    messages and a layout event.
@@ -86,7 +87,9 @@ lands with a test.
    window's size remembered.
 6. **Dimming** of every window but the focused one, with tide's
    exceptions.
-7. **Input**: a tap-Super event; per-device settings and scroll factor.
+7. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
+   a pointer button also ends the tap; per-device settings and scroll
+   factor.
 8. **Outputs**: runtime rules (mode, scale, position, single-window
     width), reapplied on hotplug; the lid switch.
 9. **Lock and keyboard**: a command that drops a dead lock, no pointer

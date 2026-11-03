@@ -15,6 +15,8 @@
 typedef struct {
 	uint32_t mods;
 	xkb_keysym_t sym;
+	int release; /* runs when the key comes up, if it was tapped */
+	int locked; /* runs while the screen is locked, too */
 	char *keys; /* as written, for messages */
 	char *command;
 } Binding;
@@ -41,6 +43,12 @@ static char settings_path[PATH_MAX];
 static Settings *settings; /* NULL: config.h's keys */
 static struct json_object *settings_errors; /* the last load's, as strings */
 static size_t settings_mode; /* the current mode, in settings->modes */
+/* A release binding's key, while it's down and no other key has been */
+static struct {
+	int armed;
+	uint32_t keycode, mods;
+	xkb_keysym_t sym;
+} settings_tap;
 
 static void
 settings_free(Settings *s)
@@ -185,15 +193,19 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 	uint32_t mods;
 	xkb_keysym_t sym;
 	size_t i;
+	int release = 0, locked_too = 0;
 	Binding *b;
 
 	while (rest[0] == '-' && rest[1] == '-') {
 		char *flag = settings_word(&rest);
-		if (!strcmp(flag, "--release") || !strcmp(flag, "--locked"))
-			settings_error(errors, line, "bindsym %s isn't supported yet", flag);
-		else
+		if (!strcmp(flag, "--release")) {
+			release = 1;
+		} else if (!strcmp(flag, "--locked")) {
+			locked_too = 1;
+		} else {
 			settings_error(errors, line, "bindsym has no flag %s", flag);
-		return 0;
+			return 0;
+		}
 	}
 	combo = settings_word(&rest);
 	if (!*combo || !*rest) {
@@ -206,10 +218,11 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 		free(spec);
 		return 0;
 	}
-	/* A later binding of the same keys replaces an earlier one */
+	/* A later binding of the same keys replaces an earlier one; a release
+	 * binding is apart from a press one */
 	for (i = 0; i < mode->nbindings; i++) {
 		b = &mode->bindings[i];
-		if (b->mods == mods && b->sym == sym) {
+		if (b->mods == mods && b->sym == sym && b->release == release) {
 			free(b->keys);
 			free(b->command);
 			break;
@@ -223,6 +236,8 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 	}
 	b->mods = mods;
 	b->sym = sym;
+	b->release = release;
+	b->locked = locked_too;
 	b->keys = spec;
 	b->command = settings_strdup(rest, strlen(rest));
 	return 1;
@@ -514,24 +529,40 @@ settings_loaded_path(void)
 	return settings ? settings_path : "";
 }
 
-/* Runs the loaded file's binding for these keys. Returns whether it has
- * one. */
+/* The current mode's press or release binding for these keys, or NULL.
+ * While the screen is locked, only a --locked one counts. */
+static const Binding *
+settings_find(uint32_t mods, xkb_keysym_t sym, int release)
+{
+	const Mode *mode;
+	size_t i;
+	if (!settings)
+		return NULL;
+	mode = &settings->modes[settings_mode];
+	for (i = 0; i < mode->nbindings; i++) {
+		const Binding *b = &mode->bindings[i];
+		if (b->mods == CLEANMASK(mods) && b->sym == sym && b->release == release
+				&& (!locked || b->locked))
+			return b;
+	}
+	return NULL;
+}
+
+/* Runs the loaded file's press or release binding for these keys.
+ * Returns whether it has one. */
 static int
-settings_run_binding(uint32_t mods, xkb_keysym_t sym)
+settings_run_binding(uint32_t mods, xkb_keysym_t sym, int release)
 {
 	struct json_object *results, *result, *error;
-	const Mode *mode = &settings->modes[settings_mode];
+	const Binding *b = settings_find(mods, sym, release);
 	char *command, *combo;
 	size_t i;
 	int quit = 0;
-	for (i = 0; i < mode->nbindings; i++)
-		if (mode->bindings[i].mods == CLEANMASK(mods) && mode->bindings[i].sym == sym)
-			break;
-	if (i == mode->nbindings)
+	if (!b)
 		return 0;
 	/* Copies, since the commands may reload the settings or change mode */
-	command = settings_strdup(mode->bindings[i].command, strlen(mode->bindings[i].command));
-	combo = settings_strdup(mode->bindings[i].keys, strlen(mode->bindings[i].keys));
+	command = settings_strdup(b->command, strlen(b->command));
+	combo = settings_strdup(b->keys, strlen(b->keys));
 	results = ipc_run_commands(command, &quit);
 	for (i = 0; i < json_object_array_length(results); i++) {
 		result = json_object_array_get_idx(results, i);
@@ -545,6 +576,37 @@ settings_run_binding(uint32_t mods, xkb_keysym_t sym)
 	if (quit)
 		ipc_quit();
 	return 1;
+}
+
+/* A key went down, with these modifiers and keysyms. Another key's press
+ * means a tap is over, so it disarms a release binding; then this key
+ * arms its own, which runs when it comes up. The modifiers are as they
+ * were before this key, so a binding of Super_L alone matches it. */
+static void
+settings_key_pressed(uint32_t keycode, uint32_t mods, const xkb_keysym_t syms[2])
+{
+	int i;
+	settings_tap.armed = 0;
+	for (i = 0; i < 2; i++) {
+		if (settings_find(mods, syms[i], 1)) {
+			settings_tap.armed = 1;
+			settings_tap.keycode = keycode;
+			settings_tap.mods = mods;
+			settings_tap.sym = syms[i];
+			return;
+		}
+	}
+}
+
+/* A key came up: runs the release binding it armed, if it's still there.
+ * Returns whether one ran. */
+static int
+settings_key_released(uint32_t keycode)
+{
+	if (!settings_tap.armed || settings_tap.keycode != keycode)
+		return 0;
+	settings_tap.armed = 0;
+	return settings_run_binding(settings_tap.mods, settings_tap.sym, 1);
 }
 
 /* The mode command: makes name's bindings the ones in force. Returns 0 if

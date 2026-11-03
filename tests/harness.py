@@ -21,6 +21,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TIDEWM = os.environ.get("TIDEWM", os.path.join(ROOT, "dwl"))
 CLIENT = os.path.join(ROOT, "tests", "client")
 X11CLIENT = os.path.join(ROOT, "tests", "x11client")
+LOCKER = os.path.join(ROOT, "tests", "locker")
 TIMEOUT = 10
 
 MAGIC = b"i3-ipc"

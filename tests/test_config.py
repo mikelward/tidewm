@@ -4,10 +4,11 @@ and again by reload (docs/config.md)."""
 import os
 import select
 import shlex
+import subprocess
 import unittest
 
 from harness import (EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MODES, GET_BINDING_STATE,
-                     GET_CONFIG, GET_VERSION, RUN_COMMAND, TIMEOUT, TidewmTest)
+                     GET_CONFIG, GET_VERSION, LOCKER, RUN_COMMAND, TIMEOUT, TidewmTest)
 
 CONFIG = """# Lines like this, and blank ones, are skipped
 
@@ -94,9 +95,9 @@ class ConfigTest(KeysTest):
         self.wm.write_config("bindsym Mod1+x\n")
         self.assertIn("bindsym needs keys and a command", self.fails("reload")["error"])
 
-    def test_release_and_locked_bindings_arent_supported_yet(self):
-        self.wm.write_config("bindsym --release Mod1+x nop\n")
-        self.assertIn("bindsym --release isn't supported yet", self.fails("reload")["error"])
+    def test_an_unknown_flag_is_an_error(self):
+        self.wm.write_config("bindsym --whole-window Mod1+x nop\n")
+        self.assertIn(":1: bindsym has no flag --whole-window", self.fails("reload")["error"])
 
     def test_set_needs_a_name(self):
         self.wm.write_config("set mod Mod1\n")
@@ -237,6 +238,71 @@ class NoConfigModeTest(KeysTest):
         self.assertEqual(self.connect().request(GET_BINDING_STATE), {"name": "default"})
         self.command(self.connect(), "mode default")
         self.fails("mode resize")
+
+
+class ReleaseTest(KeysTest):
+    CONFIG = """bindsym --release Super_L workspace tapped
+bindsym Mod1+z workspace marker
+bindsym Mod1+r workspace pressed
+bindsym --release Mod1+r workspace released
+"""
+
+    def test_a_release_binding_runs_when_its_key_is_tapped(self):
+        ipc = self.workspaces_ipc()
+        self.press("-k", "Super_L")
+        self.assertEqual(self.shown(ipc), "tapped")
+
+    def test_another_key_pressed_meanwhile_is_no_tap(self):
+        ipc = self.workspaces_ipc()
+        self.press("-P", "Super_L", "-k", "x", "-p", "Super_L")
+        self.alt("z")
+        self.assertEqual(self.shown(ipc), "marker")
+
+    def test_press_and_release_bindings_of_the_same_keys_run_in_turn(self):
+        ipc = self.workspaces_ipc()
+        self.alt("r")
+        self.assertEqual([self.shown(ipc), self.shown(ipc)], ["pressed", "released"])
+
+
+class LockTest(KeysTest):
+    """The screen locked by tests/locker, over ext-session-lock."""
+
+    def lock(self):
+        locker = subprocess.Popen([LOCKER], env=self.wm.env, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE)
+        self.wm.clients.append(locker)
+        self.assertTrue(select.select([locker.stdout], [], [], TIMEOUT)[0], "the lock didn't take")
+        self.assertEqual(locker.stdout.readline(), b"locked\n")
+        return locker
+
+    def unlock(self, locker):
+        locker.stdin.write(b"unlock\n")
+        locker.stdin.flush()
+        self.assertEqual(locker.wait(TIMEOUT), 0)
+
+
+class LockedTest(LockTest):
+    CONFIG = "bindsym --locked Mod1+x workspace locked\nbindsym Mod1+y workspace plain\n"
+
+    def test_only_locked_bindings_run_on_the_lock_screen(self):
+        ipc = self.workspaces_ipc()
+        locker = self.lock()
+        self.alt("y")  # not --locked: nothing yet
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "locked")
+        self.unlock(locker)
+        self.alt("y")
+        self.assertEqual(self.shown(ipc), "plain")
+
+
+class NoConfigLockTest(LockTest):
+    def test_config_h_keys_are_off_on_the_lock_screen(self):
+        ipc = self.workspaces_ipc()
+        locker = self.lock()
+        self.alt("2")
+        self.unlock(locker)
+        self.alt("3")
+        self.assertEqual(self.shown(ipc), "3")
 
 
 class BadConfigAtStartTest(KeysTest):
