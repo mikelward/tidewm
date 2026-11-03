@@ -184,6 +184,19 @@ ws_view(Workspace *ws)
 	ws_prune(old);
 }
 
+/* Moves c to the end of the client list, so it comes last in its part's
+ * stack, as a new window does: one moved to another workspace or monitor,
+ * or tiled again after floating, counts as new. Nothing for a window not
+ * in the list, before it maps or after it unmaps. */
+static void
+ws_to_end(Client *c)
+{
+	if (!c->link.next)
+		return;
+	wl_list_remove(&c->link);
+	wl_list_insert(clients.prev, &c->link);
+}
+
 /* Moves c into ws's part on c's own monitor. */
 static void
 ws_move(Client *c, Workspace *ws)
@@ -192,6 +205,7 @@ ws_move(Client *c, Workspace *ws)
 	if (!ws || ws == old)
 		return;
 	c->ws = ws;
+	ws_to_end(c);
 	if (c->mon)
 		arrange(c->mon);
 	focusclient(focustop(selmon), NULL, 1);

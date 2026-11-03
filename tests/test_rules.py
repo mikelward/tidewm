@@ -65,11 +65,11 @@ class RulesTest(TidewmTest):
         _, first = self.open_window(ipc, "test.first")
         _, second = self.open_window(ipc, "test.second")
         left = self.connect().request(GET_OUTPUTS)[0]["rect"]["x"]
-        self.assertEqual(self.windows()[second["id"]]["rect"]["x"], left)
+        self.assertEqual(self.windows()[first["id"]]["rect"]["x"], left)
         # The new window is moved away, so zooming it does nothing; zooming
-        # the focused window would make test.first the master
+        # the focused window would make test.second the master
         self.new(ipc, "test.hidden")
-        self.assertEqual(self.windows()[second["id"]]["rect"]["x"], left)
+        self.assertEqual(self.windows()[first["id"]]["rect"]["x"], left)
 
     def test_an_x11_window_matches_by_class(self):
         self.need(self.wm.x11, "tidewm wasn't built with XWayland, or has no Xwayland")

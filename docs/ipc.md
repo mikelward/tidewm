@@ -93,6 +93,11 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 
 ### Windows
 
+A new window joins the end of its monitor's stack, so the master stays
+put, as in tide. A window moved in from another workspace or monitor, or
+tiled again after floating, counts as new. `zoom` makes a window the
+master.
+
 A window in the tree or in an event is a container: `id` (unique for
 tidewm's life), `type` (`con`, or `floating_con`), `name` (the title),
 `app_id`, `pid`, `shell` (`xdg_shell` or `xwayland`), `focused`, `urgent`,

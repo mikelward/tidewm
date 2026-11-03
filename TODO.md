@@ -92,9 +92,9 @@ lands with a test.
 
 ## Plan
 
-1. **Layouts**: new windows join the end of the stack; three-column, two
-   columns + stack and monocle beside tile, set per workspace; the layout
-   messages and a layout event.
+1. **Layouts**: three-column, two columns + stack and monocle beside tile,
+   set per workspace; the layout messages and a layout event. New windows
+   join the end of the stack (#19).
 2. **The focus guard**: no window takes focus on map without a grant;
    grants over the IPC, lapsing on input elsewhere and on a timer; refused
    windows marked urgent, with an attention list and a cycle; activation,

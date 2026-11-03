@@ -892,7 +892,7 @@ closemon(Monitor *m)
 {
 	/* update selmon if needed and
 	 * move closed monitor's clients to the focused one */
-	Client *c;
+	Client *c, *tmp, *last = wl_container_of(clients.prev, last, link);
 	int i = 0, nmons = wl_list_length(&mons);
 	if (!nmons) {
 		selmon = NULL;
@@ -905,12 +905,16 @@ closemon(Monitor *m)
 			selmon = NULL;
 	}
 
-	wl_list_for_each(c, &clients, link) {
+	/* setmon() moves each window to the end of the list, as a new one, so
+	 * go safely, and stop after the one that was last */
+	wl_list_for_each_safe(c, tmp, &clients, link) {
 		if (c->isfloating && c->geom.x > m->m.width)
 			resize(c, (struct wlr_box){.x = c->geom.x - m->w.width, .y = c->geom.y,
 					.width = c->geom.width, .height = c->geom.height}, 0);
 		if (c->mon == m)
 			setmon(c, selmon, c->ws);
+		if (c == last)
+			break;
 	}
 	focusclient(focustop(selmon), NULL, 1);
 	printstatus();
@@ -1926,8 +1930,9 @@ mapnotify(struct wl_listener *listener, void *data)
 		c->geom.y = c->geom.y < sgeom.y ? y : MAX(y, sgeom.y);
 	}
 
-	/* Insert this client into client lists. */
-	wl_list_insert(&clients, &c->link);
+	/* Insert this client into client lists: at the end of the stack, so
+	 * the master stays put */
+	wl_list_insert(clients.prev, &c->link);
 	wl_list_insert(&fstack, &c->flink);
 
 	c->foreign_toplevel_handle = wlr_ext_foreign_toplevel_handle_v1_create(
@@ -2558,6 +2563,9 @@ setfloating(Client *c, int floating)
 	c->isfloating = floating;
 	if (changed && c->mon && client_surface(c)->mapped)
 		ipc_event_window(c, "floating");
+	/* Tiled again, it joins the end of the stack, as a new window does */
+	if (changed && !floating)
+		ws_to_end(c);
 	/* If in floating layout do not change the client's layer */
 	if (!c->mon || !client_surface(c)->mapped || !c->mon->lt[c->mon->sellt]->arrange)
 		return;
@@ -2645,9 +2653,13 @@ setmon(Client *c, Monitor *m, Workspace *ws)
 		/* An X11 window can be urgent before it maps */
 		ws_update_urgency(c->ws);
 	}
-	/* Not for a window's first placement, nor its unmapping */
-	if (oldmon && m)
+	/* Not for a window's first placement, nor its unmapping; moved, it
+	 * joins the end of the stack there, as a new window does */
+	if (oldmon && m) {
+		ws_to_end(c);
+		arrange(m);
 		ipc_event_window(c, "move");
+	}
 	focusclient(focustop(selmon), NULL, 1);
 }
 
