@@ -10,3 +10,4 @@ tests/x11client
 tests/workspaces
 tests/locker
 tests/power
+tests/ime

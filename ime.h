@@ -128,9 +128,9 @@ get_keyboard_grab(KeyboardGroup *keyboard)
 {
 	struct wlr_input_method_v2 *input_method = input_method_relay->input_method;
 
-	if (!input_method || !input_method->keyboard_grab || keyboard != kb_group ||
-			keyboard_is_emulated_by_input_method(keyboard->virtual_keyboard,
-				input_method))
+	/* Any group of real keyboards: kb_group, or one the config file's
+	 * input lines made, but not a client's virtual keyboard */
+	if (!input_method || !input_method->keyboard_grab || keyboard->virtual_keyboard)
 		return NULL;
 
 	return input_method->keyboard_grab;
@@ -368,7 +368,13 @@ handle_input_method_grab_keyboard(struct wl_listener *listener,
 		wl_container_of(listener, relay, input_method_grab_keyboard);
 	struct wlr_input_method_keyboard_grab_v2 *keyboard_grab = data;
 
-	struct wlr_keyboard *active_keyboard = &kb_group->wlr_group->keyboard;
+	struct wlr_keyboard *active_keyboard = wlr_seat_get_keyboard(seat);
+	struct wlr_keyboard_group *group = active_keyboard
+		? wlr_keyboard_group_from_wlr_keyboard(active_keyboard) : NULL;
+
+	/* The seat's keyboard, if it's a group of real keyboards, else kb_group */
+	if (!group || ((KeyboardGroup *)group->data)->virtual_keyboard)
+		active_keyboard = &kb_group->wlr_group->keyboard;
 
 	if (!keyboard_is_emulated_by_input_method(active_keyboard,
 				relay->input_method)) {

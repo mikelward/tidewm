@@ -3,7 +3,6 @@
 tidewm reads a config file in sway's syntax at startup, and again when it
 gets the `reload` command. A binding's action is a list of the IPC
 commands in [`ipc.md`](ipc.md), so anything `swaymsg` can do, a key can.
-Input follows (see `TODO.md`).
 
 ## Where it is
 
@@ -23,7 +22,8 @@ defaults says them itself.
 Each line is one setting. Blank lines, and lines starting with `#`, are
 skipped. Space at either end of a line goes, except a space escaped with a
 backslash, which an `exec`'s shell will want. Line continuations aren't
-supported yet.
+supported yet. In an `input` or `output` line, a name or value may be in
+`"`, as in sway, and an XKB name may be empty, as `""`.
 
 | Setting | Does |
 |---|---|
@@ -31,6 +31,7 @@ supported yet.
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
 | `for_window [CRITERIA] COMMANDS` | Runs `COMMANDS` on each new window `CRITERIA` match, as below |
 | `output NAME SETTINGS` | Sets up the output called `NAME`, or every output for `*`, as below |
+| `input NAME SETTING VALUE` | Sets up the input devices `NAME` names, as below; `input NAME {` … `}` takes a setting a line |
 | `mode NAME {` … `}` | A submap: the `bindsym` lines inside are in force while `NAME` is the mode, and the top level's aren't. `NAME` is a word, or text in `"`, without `;`, which ends a command; opening a mode again adds to it |
 
 `KEYS` is modifiers and a key, joined by `+`, as `Mod4+Shift+Return`:
@@ -149,6 +150,64 @@ output DP-1 mode 2560x1440@144Hz position 1707 0
 output HDMI-A-1 disable
 ```
 
+## Input
+
+As in sway, `input NAME SETTING VALUE` sets up the input devices `NAME`
+names, and an `input NAME {` … `}` block takes a `SETTING VALUE` a line.
+`NAME`, a word or text in `"`, is one of:
+
+- a device's identifier, as `GET_INPUTS` gives it, such as
+  `1:1:AT_Translated_Set_2_keyboard`: its vendor and product numbers,
+  then its name, with `_` for each space;
+- `type:keyboard`, `type:pointer` or `type:touchpad`, a touchpad being a
+  pointer that can tap;
+- `*`, every device.
+
+A device takes `*`'s settings, then its type's, then its own, each over
+the last, and all over `config.h`'s, so a setting the file doesn't give
+is `config.h`'s. A later line for a name adds to an earlier one.
+
+| Setting | Does |
+|---|---|
+| `xkb_layout`, `xkb_variant`, `xkb_options`, `xkb_model`, `xkb_rules` | A keyboard's keymap, in XKB's names, as `xkb_layout us,de` or `xkb_options grp:alt_shift_toggle` |
+| `repeat_rate N`, `repeat_delay MS` | A held key's repeats a second, and how long it's held before they start |
+| `tap`, `drag`, `drag_lock` | A touchpad's tap to click, tap and drag, and drag lock: `enabled` or `disabled` |
+| `tap_button_map` | Which buttons one, two and three fingers tap: `lrm` or `lmr` |
+| `natural_scroll`, `dwt`, `left_handed`, `middle_emulation` | Natural scrolling, disable while typing, left-handed buttons, and the middle button from both: `enabled` or `disabled` |
+| `scroll_method` | `none`, `two_finger`, `edge` or `on_button_down` |
+| `click_method` | `none`, `button_areas` or `clickfinger` |
+| `accel_profile`, `pointer_accel` | `adaptive` or `flat`, and the speed, from -1 to 1 |
+| `events` | `enabled`, `disabled` or `disabled_on_external_mouse` |
+
+```
+input type:keyboard {
+    xkb_layout us,de
+    xkb_options grp:alt_shift_toggle
+}
+input type:touchpad {
+    tap enabled
+    natural_scroll enabled
+}
+input 1133:49291:Logitech_G502 pointer_accel -0.3
+```
+
+Keyboards with the same keymap and repeat share their modifiers, as sway's
+default `smart` grouping has them, so Shift on one and a key on another
+make a capital. The pointer settings are libinput's, so they act on
+libinput's devices, where the device has them. A client's virtual
+keyboard, such as `wtype`'s, keeps its own keymap, and a virtual pointer
+has no libinput settings, but `GET_INPUTS` lists both.
+
+The lines apply when a device appears, and again on `reload`, when each
+device starts over from `config.h`'s settings, so a setting taken out of
+the file goes. `xkb_` settings XKB can't make a keymap of are an error in
+the file: what a keyboard gets from `*`'s line, then `type:keyboard`'s,
+then its own, so a variant may take its layout from a broader line, but
+not one that layout lacks. The `input` command takes one setting, as a
+line does, and sets it at once, until a reload; it fails for a name no
+device has, or settings XKB can't make a keymap of, leaving the keymap as
+it was.
+
 ## Errors
 
 A file with any error is left out whole, and what was loaded before stays:
@@ -180,4 +239,6 @@ fails is written to stderr, with the binding's keys.
 | `mode NAME` (a command) | Makes `NAME` the mode, or `default` the top level; fails for a mode the file hasn't |
 | `GET_BINDING_MODES` (type 8) | Each mode's name, `default` first |
 | `GET_BINDING_STATE` (type 12) | `{"name": ...}`, the mode now |
+| `GET_INPUTS` (type 100) | Each input device, its identifier and settings |
+| `input NAME SETTING VALUE` (a command) | Sets that on the devices `NAME` names, until a reload |
 | The `mode` event | `{"change": NAME, "pango_markup": false}`, when the mode changes |

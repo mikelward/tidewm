@@ -128,9 +128,10 @@ To get a list of status bars that work with dwl consult our [wiki].
 
 ### Config file
 
-tidewm also reads a config file in sway's syntax, `bindsym` and `set` for
-now, from `-c FILE` or `~/.config/tidewm/config`, and again on `reload`.
-Once it's loaded, its bindings replace `config.h`'s keys.
+tidewm also reads a config file in sway's syntax, from `-c FILE` or
+`~/.config/tidewm/config`, and again on `reload`: key bindings and modes,
+window rules, outputs and input devices. Once it's loaded, its bindings
+replace `config.h`'s keys and its rules `config.h`'s rules.
 [`docs/config.md`](docs/config.md) says what it takes.
 
 ### IPC
