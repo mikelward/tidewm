@@ -34,6 +34,7 @@ version of `wlroots` should target this branch.
 
 ### Building dwl
 dwl has the following dependencies:
+- json-c (for tidewm's IPC)
 - libinput
 - wayland
 - wlroots (compiled with the libinput backend)
@@ -54,6 +55,8 @@ you want to use the unstable development `main` branch, you need to use the git
 version of [wlroots].
 
 To enable XWayland, you should uncomment its flags in `config.mk`.
+
+`make test` also needs python3 (compile-time only).
 
 ## Configuration
 
@@ -120,6 +123,12 @@ script with the line
     exec <&-
 
 To get a list of status bars that work with dwl consult our [wiki].
+
+### IPC
+
+tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so
+`swaymsg`, Quickshell's I3 module and other clients of sway's socket work
+with it. [`docs/ipc.md`](docs/ipc.md) lists what it answers.
 
 ### (Known) Java nonreparenting WM issue
 Certain IDEs don't display correctly unless an environmental variable for Java AWT

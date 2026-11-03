@@ -12,12 +12,12 @@ DWLDEVCFLAGS = -g -Wpedantic -Wall -Wextra -Wdeclaration-after-statement \
 	-Wfloat-conversion
 
 # CFLAGS / LDFLAGS
-PKGS      = wayland-server xkbcommon libinput $(XLIBS)
+PKGS      = wayland-server xkbcommon libinput json-c $(XLIBS)
 DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEVCFLAGS) $(CFLAGS)
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 all: dwl
-dwl: dwl.c client.h config.h ime.h util.h config.mk cursor-shape-v1-protocol.h \
+dwl: dwl.c client.h config.h ime.h ipc.h util.h config.mk cursor-shape-v1-protocol.h \
 	ext-image-copy-capture-v1-protocol.h \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
 	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h
@@ -50,13 +50,35 @@ xdg-shell-protocol.h:
 
 config.h:
 	cp config.def.h $@
+
+# The tests run dwl on wlroots' headless backend, with tests/client for
+# windows, and check what it reports over the IPC.
+tests/xdg-shell-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		$(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml $@
+tests/xdg-shell-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml $@
+tests/client: tests/client.c tests/xdg-shell-client-protocol.h tests/xdg-shell-protocol.c
+	$(CC) tests/client.c tests/xdg-shell-protocol.c -Itests \
+		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+# tests/x11client needs XWayland's xcb libraries. The substitution makes it
+# a prerequisite only when XWAYLAND is set, as it is for CI's tests.
+tests/x11client: tests/x11client.c
+	$(CC) tests/x11client.c `$(PKG_CONFIG) --cflags xcb xcb-icccm` \
+		$(DWLDEVCFLAGS) $(CFLAGS) $(LDFLAGS) \
+		`$(PKG_CONFIG) --libs xcb xcb-icccm` -o $@
+test: dwl tests/client $(XWAYLAND:-DXWAYLAND=tests/x11client)
+	python3 -m unittest discover -s tests -v
+
 clean:
-	rm -f dwl *.o *-protocol.h
+	rm -f dwl *.o *-protocol.h tests/client tests/x11client tests/*-protocol.h tests/*-protocol.c
 
 dist: clean
 	mkdir -p dwl-$(VERSION)
 	cp -R LICENSE NOTICE Makefile CHANGELOG.md README.md client.h config.def.h \
-		config.mk protocols dwl.1 dwl.c ime.h util.h dwl.desktop \
+		config.mk protocols dwl.1 dwl.c ime.h ipc.h util.h dwl.desktop tests \
 		dwl-$(VERSION)
 	tar -caf dwl-$(VERSION).tar.gz dwl-$(VERSION)
 	rm -rf dwl-$(VERSION)

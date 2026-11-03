@@ -13,44 +13,52 @@ lands with a test.
   commands, so Quickshell's I3 module, `swaymsg` and waybar's sway modules
   work against it.
 
+## Done
+
+- **IPC and a test harness** (#7): sway's i3-ipc on `SWAYSOCK`
+  (`docs/ipc.md`), and `make test`, which runs tidewm headless and asserts
+  over it.
+
+## Bugs
+
+- **Exit crashes without Xwayland** (from dwl): built with `XWAYLAND` but
+  with no `Xwayland` binary, `wlr_xwayland_create` fails, and exit still
+  removes the two XWayland listeners it never added. Guard those removals
+  with `if (xwayland)`.
+
 ## Plan
 
-1. **IPC and a test harness.** A socket named by `SWAYSOCK`, with
-   `GET_VERSION`, `GET_OUTPUTS`, `GET_TREE`, `GET_WORKSPACES`, `SUBSCRIBE`
-   (window, workspace, output and shutdown events) and `RUN_COMMAND`. Tests
-   run tidewm on wlroots' headless backend with a small test client, and
-   assert through the IPC. CI runs them.
-2. **A shared workspace pool** in place of dwl's per-monitor tags:
+1. **A shared workspace pool** in place of dwl's per-monitor tags:
    workspaces 1–9, each shown on at most one monitor, with ext-workspace,
    workspace events and the commands to show and move to one.
-3. **Runtime config with reload**: bindings (locked and release ones too,
+2. **Runtime config with reload**: bindings (locked and release ones too,
    and submaps), window rules, outputs, per-device input and XKB, from a
    file reread by a `reload` command.
-4. **Layouts**: new windows join the end of the stack; three-column, two
+3. **Layouts**: new windows join the end of the stack; three-column, two
    columns + stack and monocle beside tile, set per workspace; the layout
    messages and a layout event.
-5. **The focus guard**: no window takes focus on map without a grant;
+4. **The focus guard**: no window takes focus on map without a grant;
    grants over the IPC, lapsing on input elsewhere and on a timer; refused
    windows marked urgent, with an attention list and a cycle; activation,
    Wayland and X11, onto the urgent path; the last input and pids for the
    polkit check.
-6. **Window states**: maximize, ending when another window on the
+5. **Window states**: maximize, ending when another window on the
    workspace takes focus; fullscreen on open, applied with the grant.
-7. **Dialogs and floating**: centered on the parent, capped at 80% of the
+6. **Dialogs and floating**: centered on the parent, capped at 80% of the
    monitor, following it; modal; a picture-in-picture rule; a hand-floated
    window's size remembered.
-8. **Dimming** of every window but the focused one, with tide's
+7. **Dimming** of every window but the focused one, with tide's
    exceptions.
-9. **Input**: a tap-Super event; per-device settings and scroll factor.
-10. **Outputs**: runtime rules (mode, scale, position, single-window
+8. **Input**: a tap-Super event; per-device settings and scroll factor.
+9. **Outputs**: runtime rules (mode, scale, position, single-window
     width), reapplied on hotplug; the lid switch.
-11. **Lock and keyboard**: a command that drops a dead lock, no pointer
+10. **Lock and keyboard**: a command that drops a dead lock, no pointer
     events while locked; on-demand layers keep the keyboard.
-12. **Capture**: window identifiers over the IPC; capture start and stop
+11. **Capture**: window identifiers over the IPC; capture start and stop
     events; tide's launcher and notifications hidden from capture.
-13. **Outside clicks**: a focus-grab protocol or click event for the
+12. **Outside clicks**: a focus-grab protocol or click event for the
     notification center.
-14. **Sharp X11 at fractional scale**: unscaled Xwayland.
-15. **Session**: the entry and wrapper tide starts it with.
+13. **Sharp X11 at fractional scale**: unscaled Xwayland.
+14. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

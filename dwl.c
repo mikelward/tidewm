@@ -159,6 +159,8 @@ typedef struct {
 	unsigned int bw;
 	uint32_t tags;
 	int isfloating, isurgent, isfullscreen;
+	unsigned long ipc_id; /* the IPC's container id, set on first use */
+	int ipc_announced; /* its "new" event is out, so others may follow */
 } Client;
 
 typedef struct {
@@ -226,6 +228,7 @@ struct Monitor {
 	int nmaster;
 	char ltsymbol[16];
 	int asleep;
+	unsigned long ipc_id; /* the IPC's output id, set on first use */
 };
 
 typedef struct {
@@ -484,6 +487,8 @@ static struct wlr_xwayland *xwayland;
 #include "client.h"
 
 #include "ime.h"
+
+#include "ipc.h"
 
 /* function implementations */
 void
@@ -788,6 +793,7 @@ checkidleinhibitor(struct wlr_surface *exclude)
 void
 cleanup(void)
 {
+	ipc_finish();
 	cleanuplisteners();
 #ifdef XWAYLAND
 	wlr_xwayland_destroy(xwayland);
@@ -841,6 +847,7 @@ cleanupmon(struct wl_listener *listener, void *data)
 	closemon(m);
 	wlr_scene_node_destroy(&m->fullscreen_bg->node);
 	free(m);
+	ipc_event_output();
 }
 
 void
@@ -1221,6 +1228,7 @@ createmon(struct wl_listener *listener, void *data)
 		wlr_output_layout_add_auto(output_layout, wlr_output);
 	else
 		wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);
+	ipc_event_output();
 }
 
 void
@@ -1590,8 +1598,10 @@ focusclient(Client *c, LayerSurface *l, int lift)
 	client_activate_surface(surface, 1);
 	motionnotify(0, NULL, 0, 0, 0, 0);
 
-	if (!client_is_unmanaged(c))
+	if (!client_is_unmanaged(c)) {
 		focused_client = c;
+		ipc_event_window(c, "focus");
+	}
 }
 
 void
@@ -1952,6 +1962,10 @@ mapnotify(struct wl_listener *listener, void *data)
 		applyrules(c);
 	}
 	printstatus();
+	/* Now it has a monitor and its floating state; its focus waited for this */
+	ipc_event_window(c, "new");
+	if (c == focused_client)
+		ipc_event_window(c, "focus");
 
 unset_fullscreen:
 	m = c->mon ? c->mon : xytomon(c->geom.x, c->geom.y);
@@ -2418,6 +2432,7 @@ run(char *startup_cmd)
 	if (!socket)
 		die("startup: display_add_socket_auto");
 	setenv("WAYLAND_DISPLAY", socket, 1);
+	ipc_init();
 
 	/* Start the backend. This will enumerate outputs and inputs, become the DRM
 	 * master, etc */
@@ -2509,7 +2524,10 @@ void
 setfloating(Client *c, int floating)
 {
 	Client *p = client_get_parent(c);
+	int changed = c->isfloating != floating;
 	c->isfloating = floating;
+	if (changed && c->mon && client_surface(c)->mapped)
+		ipc_event_window(c, "floating");
 	/* If in floating layout do not change the client's layer */
 	if (!c->mon || !client_surface(c)->mapped || !c->mon->lt[c->mon->sellt]->arrange)
 		return;
@@ -2523,6 +2541,7 @@ setfloating(Client *c, int floating)
 void
 setfullscreen(Client *c, int fullscreen)
 {
+	int changed = c->isfullscreen != fullscreen;
 	c->isfullscreen = fullscreen;
 	if (!c->mon || !client_surface(c)->mapped)
 		return;
@@ -2541,6 +2560,8 @@ setfullscreen(Client *c, int fullscreen)
 	}
 	arrange(c->mon);
 	printstatus();
+	if (changed)
+		ipc_event_window(c, "fullscreen_mode");
 }
 
 void
@@ -3005,6 +3026,7 @@ unmapnotify(struct wl_listener *listener, void *data)
 		cursor_mode = CurNormal;
 		grabc = NULL;
 	}
+	ipc_event_window(c, "close");
 	if (c == focused_client)
 		focused_client = NULL;
 
@@ -3151,6 +3173,9 @@ updatetitle(struct wl_listener *listener, void *data)
 	Client *c = wl_container_of(listener, c, set_title);
 	if (c == focustop(c->mon))
 		printstatus();
+	/* An X11 window can set a title before it has a surface */
+	if (client_surface(c) && client_surface(c)->mapped)
+		ipc_event_window(c, "title");
 
 	if (c->foreign_toplevel_handle) {
 		struct wlr_ext_foreign_toplevel_handle_v1_state foreign_toplevel_state = {
@@ -3174,8 +3199,10 @@ urgent(struct wl_listener *listener, void *data)
 	c->isurgent = 1;
 	printstatus();
 
-	if (client_surface(c)->mapped)
+	if (client_surface(c)->mapped) {
 		client_set_border_color(c, urgentcolor);
+		ipc_event_window(c, "urgent");
+	}
 }
 
 void
@@ -3377,6 +3404,8 @@ sethints(struct wl_listener *listener, void *data)
 	c->isurgent = xcb_icccm_wm_hints_get_urgency(c->surface.xwayland->hints);
 	printstatus();
 
+	if (surface && surface->mapped)
+		ipc_event_window(c, "urgent");
 	if (c->isurgent && surface && surface->mapped)
 		client_set_border_color(c, urgentcolor);
 }
