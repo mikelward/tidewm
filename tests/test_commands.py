@@ -22,8 +22,9 @@ class CommandTest(TidewmTest):
         return result
 
     def two_windows(self, ipc):
-        """Opens two windows and returns their containers, the second focused
-        and, as dwl puts a new window first, the master."""
+        """Opens two windows and returns their containers: the first the
+        master, as a new window joins the end of the stack, and the second
+        focused."""
         _, first = self.open_window(ipc, "test.first")
         _, second = self.open_window(ipc, "test.second")
         ipc.next_event(EVENT_WINDOW, change_is("focus", second))
@@ -164,7 +165,7 @@ class CommandTest(TidewmTest):
     def test_mfact_sizes_the_master_area(self):
         ipc = self.connect()
         ipc.subscribe("window")
-        _, master = self.two_windows(ipc)
+        master, _ = self.two_windows(ipc)
         width = self.rect(master)["width"]
         self.command(self.connect(), "mfact +0.1")
         self.assertGreater(self.rect(master)["width"], width)
@@ -185,16 +186,65 @@ class CommandTest(TidewmTest):
         ipc.subscribe("window")
         first, second = self.two_windows(ipc)
         left = self.output_rect()["x"]
-        self.assertEqual(self.rect(second)["x"], left)
-        self.command(self.connect(), "zoom")
-        # The master was focused, so the next window takes its place
         self.assertEqual(self.rect(first)["x"], left)
-        self.assertNotEqual(self.rect(second)["x"], left)
+        self.command(self.connect(), "zoom")
+        self.assertEqual(self.rect(second)["x"], left)
+        self.assertNotEqual(self.rect(first)["x"], left)
+        # Now the master is focused, so the next window takes its place
+        self.command(self.connect(), "zoom")
+        self.assertEqual(self.rect(first)["x"], left)
+
+    def stack(self, *cons):
+        """The windows in tile's order: the master, then the stack, top down."""
+        return sorted(cons, key=lambda con: (self.rect(con)["x"], self.rect(con)["y"]))
+
+    def test_a_new_window_joins_the_end_of_the_stack(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        first, second = self.two_windows(ipc)
+        _, third = self.open_window(ipc, "test.third")
+        self.assertEqual([c["id"] for c in self.stack(first, second, third)],
+                         [first["id"], second["id"], third["id"]])
+
+    def test_a_window_moved_back_from_another_workspace_counts_as_new(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        first, second = self.two_windows(ipc)
+        _, third = self.open_window(ipc, "test.third")
+        self.command(self.connect(), f"[con_id={first['id']}] move to workspace away")
+        self.command(self.connect(), f"[con_id={first['id']}] move to workspace 1")
+        self.assertEqual([c["id"] for c in self.stack(first, second, third)],
+                         [second["id"], third["id"], first["id"]])
+
+    def test_a_window_tiled_again_after_floating_counts_as_new(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        first, second = self.two_windows(ipc)
+        _, third = self.open_window(ipc, "test.third")
+        self.command(self.connect(), f"[con_id={first['id']}] floating enable")
+        self.command(self.connect(), f"[con_id={first['id']}] floating disable")
+        self.assertEqual([c["id"] for c in self.stack(first, second, third)],
+                         [second["id"], third["id"], first["id"]])
 
     def test_chvt_fails_without_a_session(self):
         self.fails("chvt 2")
         self.assertTrue(self.fails("chvt two")["parse_error"])
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TwoMonitorOrderTest(TidewmTest):
+    OUTPUTS = 2
+    rect = CommandTest.rect
+    stack = CommandTest.stack
+
+    def test_a_window_moved_to_another_monitor_counts_as_new(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        # Opened first, it's ahead of the others in the client list
+        self.command(self.connect(), "focus output HEADLESS-1")
+        _, moved = self.open_window(ipc, "test.moved")
+        self.command(self.connect(), "focus output HEADLESS-2")
+        _, first = self.open_window(ipc, "test.first")
+        _, second = self.open_window(ipc, "test.second")
+        self.command(self.connect(), f"[con_id={moved['id']}] move to output HEADLESS-2")
+        self.assertEqual([c["id"] for c in self.stack(first, second, moved)],
+                         [first["id"], second["id"], moved["id"]])

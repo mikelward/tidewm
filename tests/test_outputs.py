@@ -137,6 +137,15 @@ output HEADLESS-2 pos 0,0
         self.command(self.connect(), "output HEADLESS-2 enable")
         self.assertTrue(self.outputs()["HEADLESS-2"]["active"])
 
+    def test_every_window_of_a_disabled_output_moves(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        self.command(self.connect(), "focus output HEADLESS-2")
+        cons = [self.open_window(ipc, f"test.moving{i}")[1] for i in range(3)]
+        self.command(self.connect(), "output HEADLESS-2 disable")
+        windows = self.windows()
+        self.assertEqual([windows[c["id"]]["output"] for c in cons], ["HEADLESS-1"] * 3)
+
     def test_an_output_powered_off_can_still_be_disabled(self):
         ipc = self.connect()
         ipc.subscribe("window")
