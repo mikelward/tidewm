@@ -8,6 +8,7 @@
 .Nm
 .Op Fl v
 .Op Fl d
+.Op Fl c Ar config file
 .Op Fl s Ar startup command
 .Sh DESCRIPTION
 .Nm
@@ -27,6 +28,18 @@ When given the
 option,
 .Nm
 enables full wlroots logging, including debug information.
+.Pp
+When given the
+.Fl c
+option,
+.Nm
+reads its config file from
+.Ar file ,
+instead of
+.Pa $XDG_CONFIG_HOME/tidewm/config
+or
+.Pa ~/.config/tidewm/config .
+Once the file is loaded, its key bindings replace the ones below.
 .Pp
 When given the
 .Fl s

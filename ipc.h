@@ -23,7 +23,8 @@
 #define IPC_EVENT_BIT 0x80000000u
 
 enum { IpcCommand = 0, IpcGetWorkspaces = 1, IpcSubscribe = 2,
-	IpcGetOutputs = 3, IpcGetTree = 4, IpcGetVersion = 7, IpcSendTick = 10 };
+	IpcGetOutputs = 3, IpcGetTree = 4, IpcGetVersion = 7, IpcGetConfig = 9,
+	IpcSendTick = 10 };
 /* Event numbers, as sway sends them with IPC_EVENT_BIT set */
 enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvWindow = 3,
 	IpcEvShutdown = 6, IpcEvTick = 7 };
@@ -50,6 +51,10 @@ static int ipc_shutdown_sent;
 static IpcClient *ipc_current;
 
 static void ipc_client_destroy(IpcClient *cl);
+/* settings.h, included after this file */
+static int settings_reload(char *buf, size_t size);
+static struct json_object *settings_json(void);
+static const char *settings_loaded_path(void);
 
 static unsigned long
 ipc_id(unsigned long *id)
@@ -362,7 +367,8 @@ ipc_json_version(void)
 	json_object_object_add(obj, "major", json_object_new_int(major));
 	json_object_object_add(obj, "minor", json_object_new_int(minor));
 	json_object_object_add(obj, "patch", json_object_new_int(patch));
-	json_object_object_add(obj, "loaded_config_file_name", json_object_new_string(""));
+	json_object_object_add(obj, "loaded_config_file_name",
+			json_object_new_string(settings_loaded_path()));
 	return obj;
 }
 
@@ -623,6 +629,12 @@ ipc_run_command(char *cmd, int *quit_after)
 		ws_rename(from, to);
 		return ipc_json_success(1, NULL);
 	}
+	if (!has_criteria && !strcasecmp(cmd, "reload")) {
+		char errors[512];
+		if (!settings_reload(errors, sizeof(errors)))
+			return ipc_json_success(0, errors);
+		return ipc_json_success(1, NULL);
+	}
 	if (!has_criteria && ipc_take(&cmd, "exec")) {
 		if (!*cmd) {
 			error = "exec needs a command";
@@ -772,23 +784,38 @@ ipc_next_command(char **p)
 	return cmd;
 }
 
-static int
-ipc_handle_command(IpcClient *cl, char *payload)
+/* Runs payload's commands, separated by semicolons outside quotes, as a
+ * RUN_COMMAND or a binding holds them, and returns their results.
+ * *quit_after says one was exit, which the caller does once it has
+ * replied. */
+static struct json_object *
+ipc_run_commands(char *payload, int *quit_after)
 {
 	struct json_object *results = json_object_new_array();
 	char *rest = payload, *cmd;
-	int quit_after = 0, r;
 	while ((cmd = ipc_next_command(&rest)))
 		if (cmd[strspn(cmd, " \t\n")]) /* as strtok did, skip empty ones */
-			json_object_array_add(results, ipc_run_command(cmd, &quit_after));
+			json_object_array_add(results, ipc_run_command(cmd, quit_after));
 	if (!json_object_array_length(results))
-		json_object_array_add(results, ipc_run_command(payload, &quit_after));
-	r = ipc_send_json(cl, IpcCommand, results);
-	if (quit_after) {
-		/* Subscribers hear of the exit before the socket goes away. */
-		ipc_send_shutdown();
-		wl_display_terminate(dpy);
-	}
+		json_object_array_add(results, ipc_run_command(payload, quit_after));
+	return results;
+}
+
+/* Subscribers hear of the exit before the socket goes away. */
+static void
+ipc_quit(void)
+{
+	ipc_send_shutdown();
+	wl_display_terminate(dpy);
+}
+
+static int
+ipc_handle_command(IpcClient *cl, char *payload)
+{
+	int quit_after = 0, r;
+	r = ipc_send_json(cl, IpcCommand, ipc_run_commands(payload, &quit_after));
+	if (quit_after)
+		ipc_quit();
 	return r;
 }
 
@@ -863,6 +890,8 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 		return ipc_send_json(cl, type, ipc_json_tree());
 	case IpcGetVersion:
 		return ipc_send_json(cl, type, ipc_json_version());
+	case IpcGetConfig:
+		return ipc_send_json(cl, type, settings_json());
 	case IpcSendTick:
 		tick = json_object_new_object();
 		json_object_object_add(tick, "first", json_object_new_boolean(0));

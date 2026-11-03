@@ -29,6 +29,9 @@ lands with a test.
 - **Commands for every default key** (#11): `exec`, `focus next|prev`,
   `floating`, `fullscreen`, `layout`, `nmaster`, `mfact`, `zoom` and
   `chvt`, so a binding can do whatever a key in `config.h` does.
+- **A config file** (#12): `bindsym` and `set` in sway's syntax, from `-c`
+  or `~/.config/tidewm/config`, reread by `reload`, its errors in
+  `GET_CONFIG` (`docs/config.md`).
 
 ## Decisions needing review
 
@@ -49,17 +52,22 @@ lands with a test.
   last, where sway ends it at an unquoted `;`. Finding that `;` means
   reading a shell's quoting, `$(...)` and escapes; this way the shell does
   it. Reversible, if a sway config that chains after `exec` turns up.
+- **A file's keys replace config.h's** (#12): once a file is loaded, its
+  bindings are all the keys there are, as in sway. The alternative was
+  the file adding to and overriding `config.h`'s. Reversible: tide writes
+  the whole file.
+- **A bad file at startup** (#12): tidewm says why on stderr and in
+  `GET_CONFIG`, and starts with `config.h`'s keys, rather than refusing to
+  start, so a typo can't lock anyone out. Reversible.
 
 ## Plan
 
-1. **Runtime config with reload**, from a file reread by a `reload`
-   command, in steps:
-   1. `bindsym` and `set`, the file, and `reload`;
-   2. locked and release bindings, and submaps;
-   3. window rules, testing that two matching rules make only the last
+1. **The rest of the runtime config**, in steps:
+   1. locked and release bindings, and submaps;
+   2. window rules, testing that two matching rules make only the last
       one's workspace (#8);
-   4. outputs;
-   5. per-device input and XKB.
+   3. outputs;
+   4. per-device input and XKB.
 2. **Layouts**: new windows join the end of the stack; three-column, two
    columns + stack and monocle beside tile, set per workspace; the layout
    messages and a layout event.

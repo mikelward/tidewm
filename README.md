@@ -126,6 +126,13 @@ script with the line
 
 To get a list of status bars that work with dwl consult our [wiki].
 
+### Config file
+
+tidewm also reads a config file in sway's syntax, `bindsym` and `set` for
+now, from `-c FILE` or `~/.config/tidewm/config`, and again on `reload`.
+Once it's loaded, its bindings replace `config.h`'s keys.
+[`docs/config.md`](docs/config.md) says what it takes.
+
 ### IPC
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so
