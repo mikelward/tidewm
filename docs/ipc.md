@@ -40,7 +40,8 @@ the magic, or over 4 MiB, closes that connection only.
 | 2 | `SUBSCRIBE` | `{"success": true}`, or `false` for anything but a JSON array of the event names below |
 | 3 | `GET_OUTPUTS` | Each output: `id`, `name`, `make`, `model`, `serial`, `active`, `power`, `primary`, `scale`, `transform`, `focused`, `current_workspace`, `rect`, `current_mode` |
 | 4 | `GET_TREE` | The root, its outputs, every workspace under each output, and in each the windows of that monitor's part, in `nodes` (tiled) and `floating_nodes` |
-| 7 | `GET_VERSION` | `human_readable`, `variant` (`"tidewm"`), `major`, `minor`, `patch`, `loaded_config_file_name` |
+| 7 | `GET_VERSION` | `human_readable`, `variant` (`"tidewm"`), `major`, `minor`, `patch`, `loaded_config_file_name` (the loaded config file, or `""`) |
+| 9 | `GET_CONFIG` | `config`, the loaded config file's text, and tidewm's own `path` and `errors` ([`config.md`](config.md)) |
 | 10 | `SEND_TICK` | `{"success": true}`, after sending the payload in a `tick` event |
 
 Any other type gets `{"success": false, "error": "unsupported message type"}`.
@@ -72,6 +73,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `focus next\|prev` | Focuses the next or previous window on the focused monitor, in stack order, going round |
 | `kill` | Asks the window to close |
 | `exec COMMAND` | Runs the rest of the payload, `;` and all, with `/bin/sh -c`, in a session of its own. sway ends it at an unquoted `;`; tidewm leaves the shell to read its own quotes |
+| `reload` | Reads the config file again ([`config.md`](config.md)); fails with its errors, keeping what was loaded |
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails |
 | `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles |
 | `layout tile\|floating\|monocle\|toggle` | tidewm's own: the focused monitor's layout, from `config.h`'s `layouts`, or back to the previous one |

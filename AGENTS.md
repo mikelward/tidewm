@@ -39,8 +39,9 @@ places a packaged wlroots 0.20 is available, and the tests on Debian
 testing (job `test`), where tide runs it.
 
 tidewm's own code lives in its own files where it can (`ipc.h`,
-`workspace.h`, included from `dwl.c` like `client.h`), so merging upstream
-dwl touches few lines; replacing dwl's tags with workspaces touched more.
+`workspace.h`, `settings.h`, included from `dwl.c` like `client.h`), so
+merging upstream dwl touches few lines; replacing dwl's tags with
+workspaces touched more.
 
 ## Everything below
 

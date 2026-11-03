@@ -26,7 +26,7 @@ TIMEOUT = 10
 MAGIC = b"i3-ipc"
 HEADER = struct.Struct("=6sII")
 RUN_COMMAND, GET_WORKSPACES, SUBSCRIBE, GET_OUTPUTS, GET_TREE = 0, 1, 2, 3, 4
-GET_VERSION, SEND_TICK = 7, 10
+GET_VERSION, GET_CONFIG, SEND_TICK = 7, 9, 10
 EVENT_WORKSPACE = 0x80000000
 EVENT_WINDOW = 0x80000003
 EVENT_SHUTDOWN = 0x80000006
@@ -95,9 +95,12 @@ class Ipc:
 
 class Tidewm:
     """tidewm on the headless backend, in a runtime directory of its own,
-    with this many outputs."""
+    with this many outputs. With config, it has that config file: named
+    with -c if config_arg, else at its default place under
+    XDG_CONFIG_HOME, which is in the runtime directory either way, so the
+    user's own config never leaks in."""
 
-    def __init__(self, outputs=1):
+    def __init__(self, outputs=1, config=None, config_arg=True):
         self.dir = tempfile.TemporaryDirectory(prefix="tidewm-test-")
         os.chmod(self.dir.name, 0o700)
         self.clients = []
@@ -107,14 +110,24 @@ class Tidewm:
                if k not in ("WAYLAND_DISPLAY", "DISPLAY", "SWAYSOCK", "I3SOCK")}
         env.update(XDG_RUNTIME_DIR=self.dir.name, WLR_BACKENDS="headless",
                    WLR_RENDERER="pixman", WLR_LIBINPUT_NO_DEVICES="1",
-                   WLR_HEADLESS_OUTPUTS=str(outputs))
+                   WLR_HEADLESS_OUTPUTS=str(outputs),
+                   XDG_CONFIG_HOME=os.path.join(self.dir.name, "xdg"))
+        args = []
+        if config_arg:
+            self.config_path = os.path.join(self.dir.name, "config")
+            if config is not None:
+                args = ["-c", self.config_path]
+        else:
+            self.config_path = os.path.join(self.dir.name, "xdg", "tidewm", "config")
+        if config is not None:
+            self.write_config(config)
         # The startup command runs once tidewm is up, with its sockets named
         # in its environment; writing them to the FIFO says it's ready.
         startup = (f'printf "%s %s %s\\n" "$SWAYSOCK" "$WAYLAND_DISPLAY" "${{DISPLAY:--}}"'
                    f' > {shlex.quote(ready)}')
         self.log = open(os.path.join(self.dir.name, "tidewm.log"), "w+")
         fifo = os.open(ready, os.O_RDONLY | os.O_NONBLOCK)
-        self.proc = subprocess.Popen([TIDEWM, "-s", startup], env=env,
+        self.proc = subprocess.Popen([TIDEWM, *args, "-s", startup], env=env,
                                      stdout=subprocess.DEVNULL, stderr=self.log)
         line = b""
         try:
@@ -134,6 +147,11 @@ class Tidewm:
         self.x11 = x11 != "-"
         if self.x11:
             self.env["DISPLAY"] = x11
+
+    def write_config(self, text):
+        os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+        with open(self.config_path, "w") as f:
+            f.write(text)
 
     def output(self):
         self.log.flush()
@@ -175,12 +193,15 @@ class Tidewm:
 
 
 class TidewmTest(unittest.TestCase):
-    """A test with its own tidewm; OUTPUTS says how many outputs it has."""
+    """A test with its own tidewm. OUTPUTS says how many outputs it has;
+    CONFIG and CONFIG_ARG, its config file, as Tidewm takes them."""
 
     OUTPUTS = 1
+    CONFIG = None
+    CONFIG_ARG = True
 
     def setUp(self):
-        self.wm = Tidewm(self.OUTPUTS)
+        self.wm = Tidewm(self.OUTPUTS, self.CONFIG, self.CONFIG_ARG)
         self.addCleanup(self.wm.stop)
 
     def need(self, ok, why):

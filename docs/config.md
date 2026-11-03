@@ -1,0 +1,79 @@
+# tidewm's config file
+
+tidewm reads a config file in sway's syntax at startup, and again when it
+gets the `reload` command. A binding's action is a list of the IPC
+commands in [`ipc.md`](ipc.md), so anything `swaymsg` can do, a key can.
+This is the start of tidewm's runtime config. Window rules, outputs and
+input follow (see `TODO.md`).
+
+## Where it is
+
+The first of these that's given:
+
+1. `-c FILE` on tidewm's command line;
+2. `$XDG_CONFIG_HOME/tidewm/config`;
+3. `~/.config/tidewm/config`.
+
+Without the file, `config.h`'s keys work, as in dwl. Once a file is loaded,
+its bindings are all the keys there are, and `config.h`'s are left out, so
+a file wanting dwl's defaults binds them itself.
+
+## Lines
+
+Each line is one setting. Blank lines, and lines starting with `#`, are
+skipped. Space at either end of a line goes, except a space escaped with a
+backslash, which an `exec`'s shell will want. Line continuations aren't
+supported yet.
+
+| Setting | Does |
+|---|---|
+| `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
+| `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
+
+`KEYS` is modifiers and a key, joined by `+`, as `Mod4+Shift+Return`:
+
+- **Modifiers:** `Shift`, `Control` or `Ctrl`, `Mod1` or `Alt`, `Mod4`,
+  `Super` or `Logo`, `Mod2`, `Mod3`, `Mod5` and `Lock`. Caps Lock is
+  ignored when matching, as in dwl, so `Lock` is too: `Lock+Mod1+x` is
+  `Mod1+x`.
+- **Keys:** a keysym name, such as `Return`, `space`, `period` or `F1`, as
+  `xkbcommon` names them, in any case. A letter is the key itself: `X` is
+  the x key, so `Mod1+X` and `Mod1+x` are the same binding. A key matches
+  whether it's typed shifted or not, so `Mod1+Shift+period` and
+  `Mod1+Shift+greater` both work on a US keyboard.
+
+A later binding of the same keys replaces an earlier one. `--release` and
+`--locked` come in a later step, and are errors until then. Holding a
+key repeats its binding, as dwl's keys do.
+
+```
+set $mod Mod4
+bindsym $mod+Return exec foot
+bindsym $mod+1 workspace 1
+bindsym $mod+Shift+1 move container to workspace 1
+bindsym $mod+Shift+r reload
+bindsym Control+Mod1+F2 chvt 2
+```
+
+## Errors
+
+A file with any error is left out whole, and what was loaded before stays:
+the previous file, or `config.h`'s keys. Each error names the file, the
+line and what's wrong, as `/path/to/config:12: no setting is called
+bindcode`.
+
+- **At startup**, tidewm writes the errors to stderr, then starts with
+  `config.h`'s keys, so the file can be fixed and reloaded.
+- **On `reload`**, the command fails with the first three errors.
+- **Either way**, `GET_CONFIG` lists them all, until a load works.
+
+A binding's commands are only checked when the key is pressed. One that
+fails is written to stderr, with the binding's keys.
+
+## Over the IPC
+
+| Request | Gives |
+|---|---|
+| `reload` (a command) | Reads the file again; fails with its errors and keeps what was loaded. Without the file, goes back to `config.h`'s keys |
+| `GET_CONFIG` (type 9) | `config`, the loaded file's text (`""` with `config.h`'s keys), and tidewm's own `path`, where it looks, and `errors`, the last load's |
+| `GET_VERSION` | Its `loaded_config_file_name` is the loaded file, or `""` |

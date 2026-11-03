@@ -349,6 +349,7 @@ static void pointerfocus(Client *c, LayerSurface* l, struct wlr_surface *surface
 static void printstatus(void);
 static void powermgrsetmode(struct wl_listener *listener, void *data);
 static void quit(const Arg *arg);
+static int runbinding(uint32_t mods, xkb_keysym_t sym);
 static void rendermon(struct wl_listener *listener, void *data);
 static void requestdecorationmode(struct wl_listener *listener, void *data);
 static void requeststartdrag(struct wl_listener *listener, void *data);
@@ -499,6 +500,7 @@ static struct wlr_xwayland *xwayland;
 
 #include "workspace.h"
 #include "ipc.h"
+#include "settings.h"
 
 /* function implementations */
 void
@@ -783,6 +785,7 @@ void
 cleanup(void)
 {
 	ipc_finish();
+	settings_finish();
 	ws_protocol_finish();
 	cleanuplisteners();
 #ifdef XWAYLAND
@@ -1778,10 +1781,8 @@ keypress(struct wl_listener *listener, void *data)
 	 * attempt to process a compositor keybinding. */
 	if (!locked && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		for (int i = 0; i < 2; i++) {
-			const Key *key = keybinding(group->mods, group->keysyms[i]);
-			if (key) {
+			if (runbinding(group->mods, group->keysyms[i])) {
 				consumed[event->keycode] = 1;
-				key->func(&key->arg);
 				handled = 1;
 				break;
 			}
@@ -1834,13 +1835,9 @@ keyrepeat(void *data)
 	wl_event_source_timer_update(group->key_repeat_source,
 			1000 / group->wlr_group->keyboard.repeat_info.rate);
 
-	for (int i = 0; i < 2; i++) {
-		const Key *key = keybinding(group->mods, group->keysyms[i]);
-		if (key) {
-			key->func(&key->arg);
+	for (int i = 0; i < 2; i++)
+		if (runbinding(group->mods, group->keysyms[i]))
 			break;
-		}
-	}
 
 	return 0;
 }
@@ -2505,6 +2502,20 @@ run(char *startup_cmd)
 	 * loop configuration to listen to libinput events, DRM events, generate
 	 * frame events at the refresh rate, and so on. */
 	wl_display_run(dpy);
+}
+
+/* Runs the binding for these keys: the config file's, once one is loaded,
+ * or config.h's. Returns whether there was one. */
+int
+runbinding(uint32_t mods, xkb_keysym_t sym)
+{
+	const Key *key;
+	if (settings)
+		return settings_run_binding(mods, sym);
+	if (!(key = keybinding(mods, sym)))
+		return 0;
+	key->func(&key->arg);
+	return 1;
 }
 
 void
@@ -3413,11 +3424,13 @@ xwaylandready(struct wl_listener *listener, void *data)
 int
 main(int argc, char *argv[])
 {
-	char *startup_cmd = NULL;
+	char *startup_cmd = NULL, *config = NULL;
 	int c;
 
-	while ((c = getopt(argc, argv, "s:hdv")) != -1) {
-		if (c == 's')
+	while ((c = getopt(argc, argv, "c:s:hdv")) != -1) {
+		if (c == 'c')
+			config = optarg;
+		else if (c == 's')
 			startup_cmd = optarg;
 		else if (c == 'd')
 			log_level = WLR_DEBUG;
@@ -3433,10 +3446,11 @@ main(int argc, char *argv[])
 	if (!getenv("XDG_RUNTIME_DIR"))
 		die("XDG_RUNTIME_DIR must be set");
 	setup();
+	settings_init(config);
 	run(startup_cmd);
 	cleanup();
 	return EXIT_SUCCESS;
 
 usage:
-	die("Usage: %s [-v] [-d] [-s startup command]", argv[0]);
+	die("Usage: %s [-v] [-d] [-c config file] [-s startup command]", argv[0]);
 }
