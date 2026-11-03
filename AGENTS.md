@@ -1,7 +1,7 @@
 ---
 trigger: always_on
 alwaysApply: true
-last_modified: 2026-10-26
+last_modified: 2026-11-03
 ---
 
 # AGENTS.md
@@ -29,8 +29,9 @@ build); `README.md` and `CHANGELOG.md` are the normative documents.
 Run `make` before every commit; it compiles `dwl.c` with warnings enabled.
 To also compile the `#ifdef XWAYLAND` paths, run
 `make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm"`. There is no test suite.
-CI (`.github/workflows/ci.yml`, job `build`) runs both builds in an Arch
-Linux container, since that is where a packaged wlroots 0.20 is available.
+CI (`.github/workflows/ci.yml`) runs both builds in an Arch Linux container
+(job `build`) and in a Debian testing one (job `build-debian`), the two
+places a packaged wlroots 0.20 is available; tide runs it on Debian testing.
 
 ## Everything below
 
