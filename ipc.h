@@ -438,6 +438,61 @@ ipc_command_workspace(char *arg, const char **error)
 	return ws;
 }
 
+/* Runs cmd with /bin/sh, as its own session, as sway's exec does.
+ * Returns 0, or -1 if it can't fork. */
+static int
+ipc_exec(const char *cmd)
+{
+	pid_t pid = fork();
+	if (pid < 0) {
+		fprintf(stderr, "ipc: can't fork to exec %s: %s\n", cmd, strerror(errno));
+		return -1;
+	}
+	if (pid == 0) {
+		dup2(STDERR_FILENO, STDOUT_FILENO);
+		setsid();
+		execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+		die("dwl: execl /bin/sh for exec %s failed:", cmd);
+	}
+	return 0;
+}
+
+/* "enable", "disable" or "toggle" (or nothing, if empty_toggles) against
+ * the current value: the new value, or -1 for anything else. */
+static int
+ipc_switch(const char *arg, int current, int empty_toggles)
+{
+	if (!strcasecmp(arg, "enable"))
+		return 1;
+	if (!strcasecmp(arg, "disable"))
+		return 0;
+	if (!strcasecmp(arg, "toggle") || (empty_toggles && !*arg))
+		return !current;
+	return -1;
+}
+
+/* A finite number with nothing after it. Its sign, if it has one, says
+ * it's relative, which *relative is set to say. */
+static int
+ipc_number(const char *arg, float *value, int *relative)
+{
+	char *end;
+	*relative = *arg == '+' || *arg == '-';
+	*value = strtof(arg, &end);
+	return end != arg && !*end && isfinite(*value);
+}
+
+/* Whether cmd, criteria aside, is exec, whose rest goes to a shell. */
+static int
+ipc_is_exec(const char *cmd)
+{
+	cmd += strspn(cmd, " \t\n");
+	if (*cmd == '[' && strchr(cmd, ']'))
+		cmd = strchr(cmd, ']') + 1;
+	cmd += strspn(cmd, " \t\n");
+	return !strncasecmp(cmd, "exec", 4) && (!cmd[4] || isspace((unsigned char)cmd[4]));
+}
+
 /* Runs one command, as a RUN_COMMAND payload holds several separated by
  * semicolons, and returns its result. Criteria in brackets, [con_id=N],
  * pick the window a command acts on; without them it's the focused one. */
@@ -454,8 +509,9 @@ ipc_run_command(char *cmd, int *quit_after)
 
 	while (isspace((unsigned char)*cmd))
 		cmd++;
+	/* exec's command keeps its end, where a space may be escaped */
 	end = cmd + strlen(cmd);
-	while (end > cmd && isspace((unsigned char)end[-1]))
+	while (!ipc_is_exec(cmd) && end > cmd && isspace((unsigned char)end[-1]))
 		*--end = '\0';
 	orig = cmd;
 
@@ -520,8 +576,14 @@ ipc_run_command(char *cmd, int *quit_after)
 			focusclient(focustop(selmon), NULL, 1);
 			return ipc_json_success(1, NULL);
 		}
+		if (!has_criteria && (!strcasecmp(cmd, "next") || !strcasecmp(cmd, "prev"))) {
+			if (!target)
+				return ipc_json_success(0, "No window to focus from");
+			focusstack(&(const Arg){.i = tolower((unsigned char)*cmd) == 'n' ? +1 : -1});
+			return ipc_json_success(1, NULL);
+		}
 		if (*cmd || !has_criteria) {
-			error = "Expected [con_id=N] focus, or focus output ...";
+			error = "Expected [con_id=N] focus, focus next|prev, or focus output ...";
 			goto parse_error;
 		}
 		ws_view(target->ws);
@@ -561,6 +623,114 @@ ipc_run_command(char *cmd, int *quit_after)
 		ws_rename(from, to);
 		return ipc_json_success(1, NULL);
 	}
+	if (!has_criteria && ipc_take(&cmd, "exec")) {
+		if (!*cmd) {
+			error = "exec needs a command";
+			goto parse_error;
+		}
+		if (ipc_exec(cmd) < 0)
+			return ipc_json_success(0, "Can't start the command");
+		return ipc_json_success(1, NULL);
+	}
+	if (ipc_take(&cmd, "floating")) {
+		int floating;
+		if ((floating = ipc_switch(cmd, target ? target->isfloating : 0, 0)) < 0) {
+			error = "Expected floating enable|disable|toggle";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to float");
+		/* As dwl's togglefloating does, leave a fullscreen window be */
+		if (target->isfullscreen)
+			return ipc_json_success(0, "A fullscreen window can't float or tile");
+		if (floating != target->isfloating)
+			setfloating(target, floating);
+		return ipc_json_success(1, NULL);
+	}
+	if (ipc_take(&cmd, "fullscreen")) {
+		int fullscreen;
+		if ((fullscreen = ipc_switch(cmd, target ? target->isfullscreen : 0, 1)) < 0) {
+			error = "Expected fullscreen [enable|disable|toggle]";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to make fullscreen");
+		if (fullscreen != target->isfullscreen)
+			setfullscreen(target, fullscreen);
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own, after dwl's functions: the focused monitor's layout */
+	if (!has_criteria && ipc_take(&cmd, "layout")) {
+		static const struct { const char *name; void (*arrange)(Monitor *); } names[] = {
+			{"tile", tile}, {"floating", NULL}, {"monocle", monocle},
+		};
+		size_t i, j;
+		if (!selmon)
+			return ipc_json_success(0, "No output");
+		if (!strcasecmp(cmd, "toggle")) {
+			setlayout(&(const Arg){0}); /* back to the previous one */
+			return ipc_json_success(1, NULL);
+		}
+		for (i = 0; i < LENGTH(names); i++) {
+			if (strcasecmp(cmd, names[i].name))
+				continue;
+			for (j = 0; j < LENGTH(layouts); j++) {
+				if (layouts[j].arrange == names[i].arrange) {
+					setlayout(&(const Arg){.v = &layouts[j]});
+					return ipc_json_success(1, NULL);
+				}
+			}
+			return ipc_json_success(0, "That layout isn't in config.h's layouts");
+		}
+		error = "Expected layout tile|floating|monocle|toggle";
+		goto parse_error;
+	}
+	if (!has_criteria && ipc_take(&cmd, "nmaster")) {
+		float n;
+		int relative;
+		if (!ipc_number(cmd, &n, &relative) || n != roundf(n) || fabsf(n) > 1000) {
+			error = "Expected nmaster N, +N or -N";
+			goto parse_error;
+		}
+		if (!selmon)
+			return ipc_json_success(0, "No output");
+		incnmaster(&(const Arg){.i = relative ? (int)n : (int)n - selmon->nmaster});
+		return ipc_json_success(1, NULL);
+	}
+	if (!has_criteria && ipc_take(&cmd, "mfact")) {
+		float f;
+		int relative;
+		if (!ipc_number(cmd, &f, &relative)) {
+			error = "Expected mfact F, +F or -F";
+			goto parse_error;
+		}
+		if (!selmon)
+			return ipc_json_success(0, "No output");
+		if (!selmon->lt[selmon->sellt]->arrange)
+			return ipc_json_success(0, "The floating layout has no master area");
+		if (relative)
+			f += selmon->mfact;
+		if (f < 0.1f || f > 0.9f)
+			return ipc_json_success(0, "mfact must stay between 0.1 and 0.9");
+		selmon->mfact = f;
+		arrange(selmon);
+		return ipc_json_success(1, NULL);
+	}
+	if (!has_criteria && !strcasecmp(cmd, "zoom")) {
+		zoom(NULL);
+		return ipc_json_success(1, NULL);
+	}
+	if (!has_criteria && ipc_take(&cmd, "chvt")) {
+		unsigned int vt;
+		char extra;
+		if (sscanf(cmd, "%u%c", &vt, &extra) != 1 || !vt) {
+			error = "Expected chvt N";
+			goto parse_error;
+		}
+		if (!session || !wlr_session_change_vt(session, vt))
+			return ipc_json_success(0, "Can't switch VTs: tidewm has no session, or the switch failed");
+		return ipc_json_success(1, NULL);
+	}
 	/* tidewm's own: a persistent workspace stays when it's empty */
 	persist = has_criteria ? -1 : ipc_take(&cmd, "persist") ? 1
 		: ipc_take(&cmd, "unpersist") ? 0 : -1;
@@ -583,14 +753,34 @@ parse_error:
 	return result;
 }
 
+/* The next command in *p, ended at a ;, or for exec at the end: exec's
+ * command goes to the shell as written, ; and all, so a shell's quoting
+ * never has to be read here. Moves *p past the command, or returns NULL
+ * once there are no more. */
+static char *
+ipc_next_command(char **p)
+{
+	char *cmd = *p, *semi;
+	if (!cmd)
+		return NULL;
+	if (ipc_is_exec(cmd) || !(semi = strchr(cmd, ';'))) {
+		*p = NULL;
+		return cmd;
+	}
+	*semi = '\0';
+	*p = semi + 1;
+	return cmd;
+}
+
 static int
 ipc_handle_command(IpcClient *cl, char *payload)
 {
 	struct json_object *results = json_object_new_array();
-	char *saveptr = NULL, *cmd;
+	char *rest = payload, *cmd;
 	int quit_after = 0, r;
-	for (cmd = strtok_r(payload, ";", &saveptr); cmd; cmd = strtok_r(NULL, ";", &saveptr))
-		json_object_array_add(results, ipc_run_command(cmd, &quit_after));
+	while ((cmd = ipc_next_command(&rest)))
+		if (cmd[strspn(cmd, " \t\n")]) /* as strtok did, skip empty ones */
+			json_object_array_add(results, ipc_run_command(cmd, &quit_after));
 	if (!json_object_array_length(results))
 		json_object_array_add(results, ipc_run_command(payload, &quit_after));
 	r = ipc_send_json(cl, IpcCommand, results);
