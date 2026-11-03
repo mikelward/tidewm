@@ -180,6 +180,8 @@ typedef struct {
 	int isfloating, isurgent, isfullscreen;
 	int held; /* how the focus guard holds it from focus: FgFree, FgWaiting, FgPopup */
 	unsigned long focus_seq; /* when it last had focus, in the guard's count; 0 for never */
+	unsigned long urgent_seq; /* when it was last marked urgent, in marks so far */
+	int hint_urgent; /* an X11 window's urgency hint, as it last was */
 	unsigned long ipc_id; /* the IPC's container id, set on first use */
 	int ipc_announced; /* its "new" event is out, so others may follow */
 } Client;
@@ -400,6 +402,7 @@ static void updatemons(struct wl_listener *listener, void *data);
 static void updatetitle(struct wl_listener *listener, void *data);
 static void urgent(struct wl_listener *listener, void *data);
 static void requestactivate(Client *c);
+static void seturgent(Client *c, int urgent);
 static void viewws(const Arg *arg);
 static void viewprevws(const Arg *arg);
 static void movews(const Arg *arg);
@@ -413,6 +416,7 @@ static void zoom(const Arg *arg);
 /* variables */
 static pid_t child_pid = -1;
 static int locked;
+static unsigned long urgent_count; /* windows marked urgent so far, for Client.urgent_seq */
 static Client *focused_client;
 static struct wl_display *dpy;
 static struct wl_event_loop *event_loop;
@@ -1573,10 +1577,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		wl_list_insert(&fstack, &c->flink);
 		selmon = c->mon;
 		c->held = FgFree;
-		if (c->isurgent) {
-			c->isurgent = 0;
-			ws_update_urgency(c->ws);
-		}
+		seturgent(c, 0);
 
 		/* Don't change border color if there is an exclusive focus or we are
 		 * handling a drag operation */
@@ -3299,16 +3300,31 @@ requestactivate(Client *c)
 	/* A grant is used even by the window you're in, so it's one-shot */
 	if (fg_activate(c) || c == focustop(selmon))
 		return;
+	seturgent(c, 1);
+}
 
-	c->isurgent = 1;
+/* Marks c urgent, making it the most recent mark even if it was already,
+ * or takes its mark away: its flag and border, its urgent event, and its
+ * workspace's urgency. A window not mapped yet, or with no surface yet,
+ * gets its border and event as it maps; an unmanaged one, a menu, has no
+ * border to show it. */
+void
+seturgent(Client *c, int urgent)
+{
+	struct wlr_surface *surface = client_surface(c);
+	if (!urgent && !c->isurgent)
+		return;
+	c->isurgent = urgent;
+	if (urgent)
+		c->urgent_seq = ++urgent_count;
 	printstatus();
-
-	/* An X11 window may have no surface yet */
-	if (client_surface(c) && client_surface(c)->mapped) {
-		client_set_border_color(c, urgentcolor);
-		ipc_event_window(c, "urgent");
-		ws_update_urgency(c->ws);
-	}
+	if (!surface || !surface->mapped)
+		return;
+	if (c->border[0])
+		client_set_border_color(c, urgent ? urgentcolor
+				: c == focused_client ? focuscolor : bordercolor);
+	ipc_event_window(c, "urgent");
+	ws_update_urgency(c->ws);
 }
 
 void
@@ -3493,19 +3509,17 @@ void
 sethints(struct wl_listener *listener, void *data)
 {
 	Client *c = wl_container_of(listener, c, set_hints);
-	struct wlr_surface *surface = client_surface(c);
-	if (c == focustop(selmon) || !c->surface.xwayland->hints)
+	int urgent;
+	if (!c->surface.xwayland->hints)
 		return;
 
-	c->isurgent = xcb_icccm_wm_hints_get_urgency(c->surface.xwayland->hints);
-	printstatus();
-
-	if (surface && surface->mapped) {
-		ipc_event_window(c, "urgent");
-		ws_update_urgency(c->ws);
-	}
-	if (c->isurgent && surface && surface->mapped)
-		client_set_border_color(c, urgentcolor);
+	/* A mark when the hint comes on, even on a window marked another way,
+	 * but not each time the hints change; it goes as the hint does. The
+	 * focused window isn't marked, but its hint is still followed. */
+	urgent = !!xcb_icccm_wm_hints_get_urgency(c->surface.xwayland->hints);
+	if (urgent != c->hint_urgent && c != focustop(selmon))
+		seturgent(c, urgent);
+	c->hint_urgent = urgent;
 }
 
 void

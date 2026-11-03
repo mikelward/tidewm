@@ -529,8 +529,10 @@ fg_open(Client *c)
 			|| (fg_active && fg_class_in(c, portal_classes, LENGTH(portal_classes)))
 			|| (fg_prompt_may_focus() && fg_class_in(c, prompt_classes, LENGTH(prompt_classes))))
 		return NULL;
+	/* Marked, its border and event coming as it maps: it has no border yet */
 	c->held = FgWaiting;
 	c->isurgent = 1;
+	c->urgent_seq = ++urgent_count;
 	return NULL;
 }
 

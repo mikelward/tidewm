@@ -12,7 +12,10 @@
  * never be managed.
  *
  * A line "activate" on stdin asks for the window to be activated, with a
- * _NET_ACTIVE_WINDOW message to the root, as an application does.
+ * _NET_ACTIVE_WINDOW message to the root, as an application does. Lines
+ * "urgent on" and "urgent off" set and clear its WM_HINTS urgency hint,
+ * and "title TEXT" sets its title, which a window manager hears of after
+ * any change before it.
  *
  * Usage: x11client CLASS TITLE
  */
@@ -92,6 +95,26 @@ activate(xcb_connection_t *conn, xcb_window_t root, xcb_window_t win)
 	xcb_flush(conn);
 }
 
+/* One line from stdin: activate, urgent on|off, or title TEXT */
+static void
+command(xcb_connection_t *conn, xcb_window_t root, xcb_window_t win, const char *line)
+{
+	xcb_icccm_wm_hints_t hints = {0};
+	if (!strcmp(line, "activate")) {
+		activate(conn, root, win);
+	} else if (!strcmp(line, "urgent on") || !strcmp(line, "urgent off")) {
+		xcb_icccm_wm_hints_set_urgency(&hints);
+		if (!strcmp(line, "urgent off"))
+			hints.flags &= ~(uint32_t)XCB_ICCCM_WM_HINT_X_URGENCY;
+		xcb_icccm_set_wm_hints(conn, win, &hints);
+		xcb_flush(conn);
+	} else if (!strncmp(line, "title ", 6)) {
+		xcb_icccm_set_wm_name(conn, win, XCB_ATOM_STRING, 8,
+				(uint32_t)strlen(line + 6), line + 6);
+		xcb_flush(conn);
+	}
+}
+
 /* Waits until the X server has handled every request so far. */
 static void
 sync_server(xcb_connection_t *conn)
@@ -109,7 +132,8 @@ main(int argc, char *argv[])
 	size_t len;
 	xcb_generic_event_t *event;
 	struct pollfd fds[2];
-	char line[64];
+	char buf[256], *line, *nl;
+	size_t buflen = 0;
 	ssize_t n;
 
 	if (argc != 3)
@@ -145,13 +169,21 @@ main(int argc, char *argv[])
 			return 0;
 		if (fds[1].revents) {
 			/* At the end of stdin, only the X server is left to read */
-			if ((n = read(STDIN_FILENO, line, sizeof(line) - 1)) <= 0) {
+			if ((n = read(STDIN_FILENO, buf + buflen, sizeof(buf) - 1 - buflen)) <= 0) {
 				fds[1].fd = -1;
 				continue;
 			}
-			line[n] = '\0';
-			if (!strcmp(line, "activate\n"))
-				activate(conn, screen->root, win);
+			buflen += (size_t)n;
+			buf[buflen] = '\0';
+			/* Each whole line, in order: one read may bring several */
+			for (line = buf; (nl = strchr(line, '\n')); line = nl + 1) {
+				*nl = '\0';
+				command(conn, screen->root, win, line);
+			}
+			buflen = strlen(line);
+			memmove(buf, line, buflen + 1);
+			if (buflen == sizeof(buf) - 1)
+				buflen = 0; /* a line too long to be a command */
 		}
 	}
 }
