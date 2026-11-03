@@ -91,6 +91,8 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |
 | `unpersist workspace NAME` | tidewm's own: lets it go once it's empty and not current |
 | `grant [--pid PID] [--key KEY] [--workspace NAME] [APP ...]` | tidewm's own: a one-shot grant for the focus guard ([`config.md`](config.md)). The first new window of one of the `APP`s takes focus, or of any app for `*`, which stands alone; `APP`s match ignoring case and a `.desktop`, and a bare name matches a qualified ID's last part, as `files` matches `org.example.Files`. With `--pid`, a window whose process descends from `PID` takes it too, and `APP` may be left out. `--workspace` takes the window to that workspace, made if it's new, with focus. `--key` names the grant for `grant extend`. Options take `--opt VALUE` or `--opt=VALUE` |
+| `grant --or-recent APP ...` | tidewm's own: a notification's click, as tide's shell grants one. The same one-shot grant for the `APP`s, which, if it lapses unused and you've done nothing else, brings up the most recently focused window of any of them, wherever it is (or, with none ever focused, any of them) |
+| `focus recent APP ...` | tidewm's own: brings up the most recently focused window of any of the `APP`s at once, as a notification center's entry does once its notification is gone. It's you moving on, so it cancels every grant. It fails for an app with no window |
 | `grant extend --key KEY [--pid PID] APP ID ...` | tidewm's own: adds `ID`s to the grant made with that `KEY`, `PID` and first `APP`, if it still holds, for the app IDs a slow lookup finds; nothing, if it's gone |
 
 ### Layouts

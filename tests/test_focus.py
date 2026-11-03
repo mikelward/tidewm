@@ -385,6 +385,144 @@ class RuleTest(GuardTest):
         self.assertEqual(self.focused(), [other])
 
 
+class NotificationTest(GuardTest):
+    """A notification's click grants its app, which, if the grant lapses
+    unused, brings up the app's most recent window (tide's SPEC §9). The
+    lapse is short, so the tests focus their windows by id, not grants."""
+
+    CONFIG = ('focus_guard enable\nfocus_guard grant_seconds 0.05\n'
+              'for_window [title="Elsewhere"] move to workspace three\n')
+
+    def focus(self, con_id):
+        """Focuses the window, and takes its focus event, so later waits
+        see only what follows."""
+        self.command(self.connect(), f"[con_id={con_id}] focus")
+        self.focused_on(con_id)
+
+    def focused_on(self, con_id):
+        """Waits for the window's focus event."""
+        self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "focus"
+                            and e["container"]["id"] == con_id)
+
+    def focus_events_until(self, con_id):
+        """The windows focused, in order, until con_id is."""
+        seen = []
+
+        def record(e):
+            if e["change"] == "focus":
+                seen.append(e["container"]["id"])
+            return e["change"] == "focus" and e["container"]["id"] == con_id
+        self.ipc.next_event(EVENT_WINDOW, record)
+        return seen
+
+    def test_a_lapsed_notification_grant_brings_up_the_apps_most_recent_window(self):
+        first, _ = self.open("test.a", "First")
+        second, _ = self.open("test.a", "Second")
+        other, _ = self.open("test.x")
+        for con in (second, first, other):
+            self.focus(con)
+        self.grant("--or-recent test.a")
+        self.focused_on(first)
+        self.assertEqual(self.focused(), [first])
+
+    def test_with_none_ever_focused_any_of_the_apps_windows_comes_up(self):
+        window, _ = self.open("test.a")
+        other, _ = self.open("test.x")
+        self.focus(other)
+        self.grant("--or-recent test.a")
+        self.focused_on(window)
+        self.assertEqual(self.focused(), [window])
+
+    def test_a_notification_grant_can_name_several_apps(self):
+        one, _ = self.open("test.one")
+        two, _ = self.open("test.two")
+        other, _ = self.open("test.x")
+        for con in (one, two, other):
+            self.focus(con)
+        self.grant("--or-recent test.one test.two")
+        self.focused_on(two)
+        self.assertEqual(self.focused(), [two])
+
+    # In the next two, a later notification's grant is a clock: lapses
+    # come in order, so a wrong one would show up before it
+
+    def test_a_notification_grant_a_new_window_used_brings_nothing_up(self):
+        # The window uses the grant but opens elsewhere, unfocused, so a
+        # fallback would show as its focus
+        other, _ = self.open("test.x")
+        clock, _ = self.open("test.y")
+        self.focus(other)
+        self.grant("--or-recent test.a")
+        window, _ = self.open("test.a", "Elsewhere")
+        self.assertEqual(self.windows()[window]["workspace"], "three")
+        self.grant("--or-recent test.y")
+        self.assertEqual(self.focus_events_until(clock), [clock])
+
+    def test_a_notification_grant_you_moved_on_from_brings_nothing_up(self):
+        window, _ = self.open("test.a")
+        other, _ = self.open("test.x")
+        clock, _ = self.open("test.y")
+        self.focus(window)
+        self.focus(other)
+        self.grant("--or-recent test.a")
+        self.press("x")
+        self.grant("--or-recent test.y")
+        self.assertEqual(self.focus_events_until(clock), [clock])
+
+    def test_an_app_with_no_window_gets_nothing_and_its_said(self):
+        other, _ = self.open("test.x")
+        self.focus(self.open("test.y")[0])
+        self.grant("--or-recent test.none")
+        self.grant("--or-recent test.x")
+        self.focused_on(other)
+        self.wm.log.seek(0)
+        self.assertIn("no window of test.none to bring up", self.wm.log.read())
+
+    def test_focus_recent_brings_up_the_apps_most_recent_window_at_once(self):
+        first, _ = self.open("test.a", "First")
+        second, _ = self.open("test.a", "Second")
+        other, _ = self.open("test.x")
+        for con in (first, other):
+            self.focus(con)
+        self.command(self.connect(), "focus recent test.a")
+        self.assertEqual(self.focused(), [first])
+
+    def test_focus_recent_is_you_moving_on(self):
+        window, _ = self.open("test.a")
+        self.grant("test.late")
+        self.command(self.connect(), "focus recent test.a")
+        late, _ = self.open("test.late")
+        self.assertEqual(self.state(late), (False, True))
+
+    def test_focus_recent_with_no_window_fails(self):
+        self.assertIn("No window of test.none", self.fails("focus recent test.none"))
+
+    def test_the_commands_reject_what_they_cant_take(self):
+        for command, error in [
+            ("grant --or-recent", "grant needs an app id"),
+            ("grant --or-recent *", "--or-recent takes app ids alone"),
+            (f"grant --or-recent --pid {os.getpid()} test.a", "--or-recent takes app ids alone"),
+            ("grant --or-recent --workspace two test.a", "--or-recent takes app ids alone"),
+            ("focus recent", "focus recent needs an app id"),
+            ("focus recent *", "focus recent: expected app ids"),
+        ]:
+            self.assertIn(error, self.fails(command), command)
+
+
+class ReloadedLapseTest(GuardTest):
+    CONFIG = "focus_guard enable\nfocus_guard grant_seconds 30\n"
+
+    def test_a_reload_moves_a_notification_grants_lapse(self):
+        window, _ = self.open("test.a")
+        other, _ = self.open("test.x")
+        self.command(self.connect(), f"[con_id={other}] focus")
+        self.grant("--or-recent test.a")
+        self.wm.write_config("focus_guard enable\nfocus_guard grant_seconds 0.05\n")
+        self.command(self.connect(), "reload")
+        self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "focus"
+                            and e["container"]["id"] == window)
+
+
 class LapseTest(GuardTest):
     # A microsecond: the window maps after the grant, from a process
     # started after it, which always takes longer

@@ -247,7 +247,10 @@ focuses it.
   coming back to the window you were in, as when a launcher closes; focus
   a grant gave, even once a launcher that held the keyboard closes; and
   focus moving as an output goes.
-- **A grant lapses** after `grant_seconds`.
+- **A grant lapses** after `grant_seconds`. A notification's grant,
+  `grant --or-recent`, then brings up the app's most recent window,
+  unless a window or an activation used it or you moved on; with no
+  window, tidewm says so on stderr.
 
 An activation, xdg-activation's or X11's `_NET_ACTIVE_WINDOW`, marks the
 window urgent rather than focusing it, unless a grant names its app, with

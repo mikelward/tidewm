@@ -130,6 +130,7 @@ static struct json_object *settings_errors; /* the last load's, as strings */
 static size_t settings_mode; /* the current mode, in settings->modes */
 static int settings_apply_outputs(const OutputConfig *only);
 static int settings_apply_inputs(const InputConfig *only);
+static void fg_arm(void);
 static void settings_group_register(KeyboardGroup *group);
 static void settings_free_input(InputConfig *ic);
 /* A release binding's key, while it's down and no other key has been */
@@ -1156,6 +1157,8 @@ settings_load(void)
 		return 0;
 	settings_free(settings);
 	settings = loaded;
+	/* A notification's grant lapses by the new grant_seconds */
+	fg_arm();
 	/* Outputs and inputs take the new lines at once; at startup, there are
 	 * none yet. One that refuses them is an error, but the rest stands */
 	refused = settings_apply_outputs(NULL) < 0;
