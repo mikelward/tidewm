@@ -3,18 +3,9 @@ and spanning every monitor (tide's SPEC.md, section 6.5)."""
 
 import unittest
 
-from harness import (EVENT_TICK, EVENT_WINDOW, GET_OUTPUTS, GET_WORKSPACES,
-                     RUN_COMMAND, SEND_TICK, TIMEOUT, TidewmTest)
-
-EVENT_WORKSPACE = 0x80000000
-
-
-def is_urgency(event):
-    return event["change"] == "urgent"
-
-
-def urgency(event):
-    return event["current"]["name"], event["current"]["urgent"]
+from harness import (EVENT_TICK, EVENT_WINDOW, EVENT_WORKSPACE, GET_OUTPUTS,
+                     GET_WORKSPACES, RUN_COMMAND, SEND_TICK, TIMEOUT, TidewmTest,
+                     is_urgency, urgency)
 
 
 class WorkspaceTest(TidewmTest):
@@ -161,19 +152,6 @@ class WorkspaceTest(TidewmTest):
         self.assertEqual(self.workspace_names(), ["home", "elsewhere"])
         self.command(ipc, "unpersist workspace home")
         self.assertEqual(self.workspace_names(), ["elsewhere"])
-
-    def urgent_window_on(self, ipc, workspace):
-        """Opens a window on a persistent workspace, not the current one,
-        and has it ask to be activated, which makes it urgent. ipc must be
-        subscribed to window and workspace events."""
-        client = self.wm.open_window("test.urgent", "Urgent", stdin=True)
-        con = ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new")["container"]
-        self.command(self.connect(), f"persist workspace {workspace}")
-        self.command(self.connect(), f"[con_id={con['id']}] move to workspace {workspace}")
-        client.stdin.write(b"activate\n")
-        client.stdin.flush()
-        self.assertEqual(urgency(ipc.next_event(EVENT_WORKSPACE, is_urgency)), (workspace, True))
-        return client, con
 
     def test_an_urgent_window_takes_its_urgency_to_another_workspace(self):
         ipc = self.connect()

@@ -30,6 +30,7 @@
 #include <wlr/types/wlr_ext_image_capture_source_v1.h>
 #include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
+#include <wlr/types/wlr_ext_workspace_v1.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
@@ -121,6 +122,7 @@ typedef struct {
 	int persistent;
 	int urgent; /* a window on it is urgent, as last announced */
 	unsigned long ipc_id; /* the IPC's workspace id, set on first use */
+	struct wlr_ext_workspace_handle_v1 *ext; /* its ext-workspace handle */
 } Workspace;
 
 typedef struct {
@@ -781,6 +783,7 @@ void
 cleanup(void)
 {
 	ipc_finish();
+	ws_protocol_finish();
 	cleanuplisteners();
 #ifdef XWAYLAND
 	wlr_xwayland_destroy(xwayland);
@@ -828,6 +831,7 @@ cleanupmon(struct wl_listener *listener, void *data)
 	if (m->lock_surface)
 		destroylocksurface(&m->destroy_lock_surface, NULL);
 	m->wlr_output->data = NULL;
+	wlr_ext_workspace_group_handle_v1_output_leave(ws_group, m->wlr_output);
 	wlr_output_layout_remove(output_layout, m->wlr_output);
 	wlr_scene_output_destroy(m->scene_output);
 
@@ -1216,6 +1220,7 @@ createmon(struct wl_listener *listener, void *data)
 	 * output (such as DPI, scale factor, manufacturer, etc).
 	 */
 	m->scene_output = wlr_scene_output_create(scene, wlr_output);
+	wlr_ext_workspace_group_handle_v1_output_enter(ws_group, wlr_output);
 	if (m->m.x == -1 && m->m.y == -1)
 		wlr_output_layout_add_auto(output_layout, wlr_output);
 	else
@@ -2773,7 +2778,9 @@ setup(void)
 	 * https://drewdevault.com/2018/07/29/Wayland-shells.html
 	 */
 	wl_list_init(&clients);
+	ws_protocol_init();
 	curws = ws_get("1");
+	ws_set_active(curws, 1);
 	wl_list_init(&fstack);
 
 	xdg_shell = wlr_xdg_shell_create(dpy, 6);
