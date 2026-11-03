@@ -271,6 +271,7 @@ class LockTest(KeysTest):
         locker = subprocess.Popen([LOCKER], env=self.wm.env, stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE)
         self.wm.clients.append(locker)
+        self.addCleanup(locker.stdout.close)
         self.assertTrue(select.select([locker.stdout], [], [], TIMEOUT)[0], "the lock didn't take")
         self.assertEqual(locker.stdout.readline(), b"locked\n")
         return locker
