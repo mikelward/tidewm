@@ -5,7 +5,7 @@ whole pixels that cover the window area exactly."""
 import math
 import unittest
 
-from harness import EVENT_WINDOW, GET_OUTPUTS, TidewmTest
+from harness import EVENT_LAYOUT, GET_OUTPUTS, GET_TREE, GET_WORKSPACES, TidewmTest, power
 
 
 def edge(start, length, frac):
@@ -129,6 +129,169 @@ class LayoutTest(TidewmTest):
         self.command(self.connect(), "layout toggle")  # back to tile, then on to twocol
         self.command(self.connect(), "layout toggle")
         self.assertEqual(self.box(master), self.column(0, 0.72))
+
+
+class WorkspaceLayoutTest(TidewmTest):
+    """Each workspace's part on a monitor keeps its own layout, mfact and
+    nmaster, as tide's SPEC §6.1 has it."""
+
+    def layouts(self):
+        return {w["name"]: w["layout"] for w in self.connect().request(GET_WORKSPACES)}
+
+    def test_each_workspace_keeps_its_own_layout(self):
+        # Empty, they'd go when not current, and take their layouts with them
+        self.command(self.connect(), "persist workspace 1")
+        self.command(self.connect(), "layout threecol")
+        self.command(self.connect(), "persist workspace two")
+        self.command(self.connect(), "workspace two")
+        self.assertEqual(self.layouts(), {"1": "threecol", "two": "tile"})
+        self.command(self.connect(), "layout monocle")
+        self.command(self.connect(), "workspace 1")
+        self.assertEqual(self.layouts(), {"1": "threecol", "two": "monocle"})
+        # Its toggle is its own too: back to 1's tile, not two's
+        self.command(self.connect(), "layout toggle")
+        self.assertEqual(self.layouts()["1"], "tile")
+
+    def test_mfact_is_each_workspaces_own(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        width = self.connect().request(GET_OUTPUTS)[0]["rect"]["width"]
+        master = [self.open_window(ipc, f"test.one{i}")[1] for i in range(2)][0]
+        self.command(self.connect(), "mfact 0.6")
+        self.command(self.connect(), "workspace two")
+        other = [self.open_window(ipc, f"test.two{i}")[1] for i in range(2)][0]
+        self.assertEqual(self.windows()[other["id"]]["rect"]["width"], edge(0, width, 0.55))
+        self.command(self.connect(), "workspace 1")
+        self.assertEqual(self.windows()[master["id"]]["rect"]["width"], edge(0, width, 0.6))
+
+    def test_a_workspace_made_again_starts_from_the_defaults(self):
+        self.command(self.connect(), "workspace gone")
+        self.command(self.connect(), "layout monocle")
+        self.command(self.connect(), "workspace 1")  # gone goes: it's empty
+        self.assertNotIn("gone", self.layouts())
+        self.command(self.connect(), "workspace gone")
+        self.assertEqual(self.layouts()["gone"], "tile")
+
+    def test_an_ultrawide_monitors_new_parts_start_in_threecol(self):
+        self.command(self.connect(), "persist workspace 1")
+        self.command(self.connect(), "output HEADLESS-1 mode 3440x1440")
+        self.command(self.connect(), "workspace wide")
+        self.assertEqual(self.layouts(), {"1": "tile", "wide": "threecol"})
+
+    def test_the_layout_event_says_when_a_parts_layout_changes(self):
+        ipc = self.connect()
+        ipc.subscribe("layout")
+        self.command(self.connect(), "layout twocol")
+        self.assertEqual(ipc.next_event(EVENT_LAYOUT), {
+            "change": "layout", "workspace": "1", "output": "HEADLESS-1",
+            "layout": "twocol", "symbol": "||="})
+        self.command(self.connect(), "workspace two")
+        event = ipc.next_event(EVENT_LAYOUT)
+        self.assertEqual((event["workspace"], event["layout"]), ("two", "tile"))
+
+    def test_the_layout_event_has_monocles_count_on_coming_back(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        self.command(self.connect(), "layout monocle")
+        for i in range(2):
+            self.open_window(ipc, f"test.w{i}")
+        self.command(self.connect(), "workspace two")
+        events = self.connect()
+        events.subscribe("layout")
+        self.command(self.connect(), "workspace 1")
+        event = events.next_event(EVENT_LAYOUT)
+        self.assertEqual((event["workspace"], event["layout"], event["symbol"]),
+                         ("1", "monocle", "[2]"))
+
+    def test_a_sleeping_outputs_layout_event_waits_until_it_wakes(self):
+        # Powered off, it keeps its geometry but can't be arranged, so it
+        # can't count monocle's windows yet
+        self.command(self.connect(), "persist workspace 1")
+        ipc = self.connect()
+        ipc.subscribe("window")
+        self.command(self.connect(), "layout monocle")
+        for i in range(2):
+            self.open_window(ipc, f"test.w{i}")
+        power(self.wm, "HEADLESS-1", "off")
+        self.command(self.connect(), "workspace two")
+        events = self.connect()
+        events.subscribe("layout")
+        self.command(self.connect(), "workspace 1")
+        power(self.wm, "HEADLESS-1", "on")
+        event = events.next_event(EVENT_LAYOUT)
+        self.assertEqual((event["workspace"], event["layout"], event["symbol"]),
+                         ("1", "monocle", "[2]"))
+
+    def test_a_layout_set_while_its_output_sleeps_is_announced_on_waking(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        for i in range(2):
+            self.open_window(ipc, f"test.w{i}")
+        power(self.wm, "HEADLESS-1", "off")
+        events = self.connect()
+        events.subscribe("layout")
+        self.command(self.connect(), "layout monocle")
+        power(self.wm, "HEADLESS-1", "on")
+        event = events.next_event(EVENT_LAYOUT)
+        self.assertEqual((event["layout"], event["symbol"]), ("monocle", "[2]"))
+
+    def test_the_layout_event_counts_windows_an_output_takes_back(self):
+        # Disabled, the only output leaves its windows with none; enabled
+        # after a switch, it takes back its part and its windows
+        self.command(self.connect(), "persist workspace 1")
+        ipc = self.connect()
+        ipc.subscribe("window")
+        self.command(self.connect(), "layout monocle")
+        for i in range(2):
+            self.open_window(ipc, f"test.w{i}")
+        self.command(self.connect(), "output HEADLESS-1 disable")
+        self.command(self.connect(), "workspace two")
+        self.command(self.connect(), "workspace 1")
+        events = self.connect()
+        events.subscribe("layout")
+        self.command(self.connect(), "output HEADLESS-1 enable")
+        event = events.next_event(EVENT_LAYOUT)
+        self.assertEqual((event["workspace"], event["layout"], event["symbol"]),
+                         ("1", "monocle", "[2]"))
+
+
+class TwoMonitorLayoutTest(TidewmTest):
+    OUTPUTS = 2
+
+    def test_each_monitors_part_of_a_workspace_has_its_own_layout(self):
+        self.command(self.connect(), "focus output HEADLESS-1")
+        self.command(self.connect(), "layout threecol")
+        tree = self.connect().request(GET_TREE)
+        parts = {o["name"]: [w["layout"] for w in o["nodes"] if w["name"] == "1"][0]
+                 for o in tree["nodes"]}
+        self.assertEqual(parts, {"HEADLESS-1": "threecol", "HEADLESS-2": "tile"})
+
+    def parts(self, workspace):
+        return {o["name"]: w["layout"] for o in self.connect().request(GET_TREE)["nodes"]
+                for w in o["nodes"] if w["name"] == workspace}
+
+    def test_a_disabled_monitor_takes_its_new_parts_defaults_once_enabled(self):
+        # Disabled, it has no geometry to tell it's ultrawide by
+        self.command(self.connect(), "output HEADLESS-2 mode 3440x1440")
+        self.command(self.connect(), "output HEADLESS-2 disable")
+        self.command(self.connect(), "workspace wide")
+        events = self.connect()
+        events.subscribe("layout")
+        self.command(self.connect(), "output HEADLESS-2 enable")
+        self.assertEqual(self.parts("wide"), {"HEADLESS-1": "tile", "HEADLESS-2": "threecol"})
+        event = events.next_event(EVENT_LAYOUT)
+        self.assertEqual((event["workspace"], event["output"], event["layout"]),
+                         ("wide", "HEADLESS-2", "threecol"))
+
+    def test_a_disabled_monitor_gets_its_kept_part_back_once_enabled(self):
+        self.command(self.connect(), "persist workspace 1")
+        self.command(self.connect(), "focus output HEADLESS-2")
+        self.command(self.connect(), "layout twocol")
+        self.command(self.connect(), "output HEADLESS-2 disable")
+        self.command(self.connect(), "workspace two")
+        self.command(self.connect(), "workspace 1")
+        self.command(self.connect(), "output HEADLESS-2 enable")
+        self.assertEqual(self.parts("1"), {"HEADLESS-1": "tile", "HEADLESS-2": "twocol"})
 
 
 if __name__ == "__main__":

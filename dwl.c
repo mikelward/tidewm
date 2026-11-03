@@ -115,6 +115,13 @@ typedef struct {
 
 typedef struct Monitor Monitor;
 
+/* A layout's mfact and nmaster, kept while another is in force */
+typedef struct {
+	const void *lt;
+	float mfact;
+	int nmaster;
+} LayoutMode;
+
 /* A workspace spans every monitor; see workspace.h */
 typedef struct {
 	struct wl_list link;
@@ -240,8 +247,11 @@ struct Monitor {
 	unsigned long ipc_id; /* the IPC's output id, set on first use */
 	int want_pos, want_x, want_y; /* where it goes in the layout when enabled, if anywhere */
 	int want_mode, want_width, want_height, want_refresh; /* its mode once enabled, if given while off */
-	struct { const Layout *lt; float mfact; int nmaster; } modes[16]; /* each layout's, but the current one's */
-	float rule_mfact; /* config.h's monitor rule's, for a layout without defaults of its own */
+	LayoutMode modes[16]; /* each layout's, but the current one's */
+	const Layout *rule_lt; /* config.h's monitor rule's */
+	int lt_settled; /* its layout fields hold the current workspace's part */
+	int lt_pending; /* its layout event waits until it's arranged */
+	float rule_mfact; /* the rule's, for a layout without defaults of its own */
 	int rule_nmaster;
 };
 
@@ -794,6 +804,7 @@ cleanup(void)
 {
 	ipc_finish();
 	settings_finish();
+	lt_finish();
 	ws_protocol_finish();
 	cleanuplisteners();
 #ifdef XWAYLAND
@@ -829,6 +840,8 @@ cleanupmon(struct wl_listener *listener, void *data)
 	LayerSurface *l, *tmp;
 	size_t i;
 
+	/* Its part of the current workspace, for when it's plugged in again */
+	lt_unplug(m);
 	/* m->layers[i] are intentionally not unlinked */
 	for (i = 0; i < LENGTH(m->layers); i++) {
 		wl_list_for_each_safe(l, tmp, &m->layers[i], link)
@@ -1189,7 +1202,7 @@ createmon(struct wl_listener *listener, void *data)
 			m->m.y = r->y;
 			m->mfact = m->rule_mfact = r->mfact;
 			m->nmaster = m->rule_nmaster = r->nmaster;
-			m->lt[0] = r->lt;
+			m->lt[0] = m->rule_lt = r->lt;
 			m->lt[1] = &layouts[LENGTH(layouts) > 1 && r->lt != &layouts[1]];
 			strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
 			wlr_output_state_set_scale(&state, r->scale);
@@ -2624,6 +2637,7 @@ setlayout(const Arg *arg)
 	strncpy(selmon->ltsymbol, selmon->lt[selmon->sellt]->symbol, LENGTH(selmon->ltsymbol));
 	arrange(selmon);
 	printstatus();
+	lt_event(selmon);
 }
 
 /* arg > 1.0 will set mfact absolutely */
@@ -3139,6 +3153,8 @@ updatemons(struct wl_listener *listener, void *data)
 		/* Get the effective monitor geometry to use for surfaces */
 		wlr_output_layout_get_box(output_layout, m->wlr_output, &m->m);
 		m->w = m->m;
+		/* The current workspace's part here, kept or from the defaults */
+		lt_settle(m);
 		wlr_scene_output_set_position(m->scene_output, m->m.x, m->m.y);
 
 		wlr_scene_node_set_position(&m->fullscreen_bg->node, m->m.x, m->m.y);
@@ -3182,6 +3198,8 @@ updatemons(struct wl_listener *listener, void *data)
 			client_activate_surface(selmon->lock_surface->surface, 1);
 		}
 	}
+	/* The layout of each monitor that took its part, now its windows are placed */
+	lt_flush();
 
 	/* FIXME: figure out why the cursor image is at 0,0 after turning all
 	 * the monitors on.
