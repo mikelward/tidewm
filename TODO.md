@@ -47,6 +47,8 @@ lands with a test.
   three-column and two columns + stack beside tile and monocle, with
   tide's geometry; a layout, mfact and nmaster per workspace part, from
   its monitor's aspect; the `layout` event.
+- **Urgency marks** (#24): `urgent_order` in the tree, most recent mark
+  highest, and sway's `urgent enable|disable` for the shell's own marks.
 - **Notification grants** (#23): `grant --or-recent`, which lapsing
   unused brings up the app's most recent window, and `focus recent`,
   which does at once.
@@ -134,6 +136,11 @@ lands with a test.
   `urgent` in the tree and in events, so a restarted shell reads the
   marks there, with no `tide-attention` event or `announce_waiting`.
   Reversible.
+- **The marks' order is a field** (#24): tidewm's own `urgent_order`
+  on each window, a sequence, rather than a list of marked windows, so
+  the tree stays sway's shape. A mark on a window already marked makes it
+  the most recent, as tide's guard re-announces it. Reversible before
+  tide's shell reads it.
 - **Notification grants' names** (#23): `grant --or-recent` and `focus
   recent APP`, tidewm's own for tide's `grant_or_recent` and
   `focus_recent`. sway's `[app_id=...] focus` focuses every match rather
@@ -152,11 +159,10 @@ lands with a test.
 
 ## Plan
 
-1. **The focus guard's rest**: the marks' order, most recent first, and
-   the shell's own marks, from notifications; the last key or click and
-   its window, for the shell's polkit agent; a notice when no shell runs.
-   The guard, grants and activation came with #22, notification grants
-   with #23.
+1. **The focus guard's rest**: the last key or click and its window, for
+   the shell's polkit agent; a notice when no shell runs. The guard,
+   grants and activation came with #22, notification grants with #23,
+   the marks' order and the shell's own marks with #24.
 2. **Window states**: maximize, ending when another window on the
    workspace takes focus; fullscreen on open, applied with the grant.
 3. **Dialogs and floating**: centered on the parent, capped at 80% of the

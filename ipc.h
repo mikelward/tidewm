@@ -305,6 +305,9 @@ ipc_json_window(Client *c)
 	json_object_object_add(obj, "pid", json_object_new_int(ipc_client_pid(c)));
 	json_object_object_add(obj, "focused", json_object_new_boolean(c == focused_client));
 	json_object_object_add(obj, "urgent", json_object_new_boolean(c->isurgent));
+	/* tidewm's own: the marks' order, most recent highest, for an attention list */
+	json_object_object_add(obj, "urgent_order", json_object_new_uint64(
+			c->isurgent ? c->urgent_seq : 0));
 	json_object_object_add(obj, "visible", json_object_new_boolean(c->mon && VISIBLEON(c, c->mon)));
 	json_object_object_add(obj, "fullscreen_mode", json_object_new_int(c->isfullscreen));
 	json_object_object_add(obj, "rect", ipc_json_box(c->geom));
@@ -778,6 +781,22 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			return ipc_json_success(0, "No window to make fullscreen");
 		if (fullscreen != target->isfullscreen)
 			setfullscreen(target, fullscreen);
+		return ipc_json_success(1, NULL);
+	}
+	/* As sway's, for the shell's own marks, as from a notification: a mark
+	 * enabled again is the most recent */
+	if (ipc_take(&cmd, "urgent")) {
+		int urgent;
+		if (!strcasecmp(cmd, "allow") || !strcasecmp(cmd, "deny"))
+			return ipc_json_success(0, "urgent allow and deny aren't supported: "
+					"every window may be marked");
+		if ((urgent = ipc_switch(cmd, target ? target->isurgent : 0, 0)) < 0) {
+			error = "Expected urgent enable|disable";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to mark");
+		seturgent(target, urgent);
 		return ipc_json_success(1, NULL);
 	}
 	/* tidewm's own, after dwl's functions: the focused monitor's layout */

@@ -90,6 +90,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD` |
 | `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |
 | `unpersist workspace NAME` | tidewm's own: lets it go once it's empty and not current |
+| `urgent enable\|disable` | Marks the window urgent, as the most recent mark, or takes its mark away, as in sway. sway's `allow` and `deny` aren't supported: every window may be marked |
 | `grant [--pid PID] [--key KEY] [--workspace NAME] [APP ...]` | tidewm's own: a one-shot grant for the focus guard ([`config.md`](config.md)). The first new window of one of the `APP`s takes focus, or of any app for `*`, which stands alone; `APP`s match ignoring case and a `.desktop`, and a bare name matches a qualified ID's last part, as `files` matches `org.example.Files`. With `--pid`, a window whose process descends from `PID` takes it too, and `APP` may be left out. `--workspace` takes the window to that workspace, made if it's new, with focus. `--key` names the grant for `grant extend`. Options take `--opt VALUE` or `--opt=VALUE` |
 | `grant --or-recent APP ...` | tidewm's own: a notification's click, as tide's shell grants one. The same one-shot grant for the `APP`s, which, if it lapses unused and you've done nothing else, brings up the most recently focused window of any of them, wherever it is (or, with none ever focused, any of them) |
 | `focus recent APP ...` | tidewm's own: brings up the most recently focused window of any of the `APP`s at once, as a notification center's entry does once its notification is gone. It's you moving on, so it cancels every grant. It fails for an app with no window |
@@ -121,10 +122,18 @@ window's activation marks it urgent, with or without the guard, unless a
 grant names its app. With only windows the guard holds on the focused
 monitor, `focus next|prev` goes to one.
 
+A window is marked urgent by its activation, the focus guard holding it,
+X11's urgency hint coming on, or `urgent enable`, which a shell uses for
+its own marks, as from a notification. Each mark is the most recent, even
+on a window already marked, so a shell can list marked windows most
+recent first by `urgent_order`. Focusing a window, or `urgent disable`,
+takes its mark away. Either way, the window has an `urgent` event.
+
 A window in the tree or in an event is a container: `id` (unique for
 tidewm's life), `type` (`con`, or `floating_con`), `name` (the title),
 `app_id`, `pid`, `shell` (`xdg_shell` or `xwayland`), `focused`, `urgent`,
-`visible`, `fullscreen_mode` (0 or 1), `rect` (in layout coordinates, border
+`urgent_order` (tidewm's own: higher for a more recent mark, 0 if it has
+none), `visible`, `fullscreen_mode` (0 or 1), `rect` (in layout coordinates, border
 included), `workspace` and `output` (tidewm's own: where it is) and
 `foreign_toplevel_identifier`, the ext-foreign-toplevel-list
 identifier `grim -T` takes. An X11 window has `app_id` null and its class,
