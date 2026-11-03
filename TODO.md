@@ -32,6 +32,9 @@ lands with a test.
 - **A config file** (#12): `bindsym` and `set` in sway's syntax, from `-c`
   or `~/.config/tidewm/config`, reread by `reload`, its errors in
   `GET_CONFIG` (`docs/config.md`).
+- **Submaps** (#13): sway's `mode NAME { ... }` blocks and `mode`
+  command, with the `mode` event, `GET_BINDING_MODES` and
+  `GET_BINDING_STATE`.
 
 ## Decisions needing review
 
@@ -63,7 +66,7 @@ lands with a test.
 ## Plan
 
 1. **The rest of the runtime config**, in steps:
-   1. locked and release bindings, and submaps;
+   1. locked and release bindings;
    2. window rules, testing that two matching rules make only the last
       one's workspace (#8);
    3. outputs;

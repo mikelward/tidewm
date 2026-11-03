@@ -19,9 +19,16 @@ typedef struct {
 	char *command;
 } Binding;
 
+/* A submap: bindings in force while it's the current mode */
 typedef struct {
+	char *name;
 	Binding *bindings;
 	size_t nbindings;
+} Mode;
+
+typedef struct {
+	Mode *modes; /* modes[0] is "default", the file's top level */
+	size_t nmodes;
 	char *text; /* the file, as read, for GET_CONFIG */
 } Settings;
 
@@ -33,18 +40,23 @@ typedef struct {
 static char settings_path[PATH_MAX];
 static Settings *settings; /* NULL: config.h's keys */
 static struct json_object *settings_errors; /* the last load's, as strings */
+static size_t settings_mode; /* the current mode, in settings->modes */
 
 static void
 settings_free(Settings *s)
 {
-	size_t i;
+	size_t i, j;
 	if (!s)
 		return;
-	for (i = 0; i < s->nbindings; i++) {
-		free(s->bindings[i].keys);
-		free(s->bindings[i].command);
+	for (i = 0; i < s->nmodes; i++) {
+		for (j = 0; j < s->modes[i].nbindings; j++) {
+			free(s->modes[i].bindings[j].keys);
+			free(s->modes[i].bindings[j].command);
+		}
+		free(s->modes[i].bindings);
+		free(s->modes[i].name);
 	}
-	free(s->bindings);
+	free(s->modes);
 	free(s->text);
 	free(s);
 }
@@ -166,7 +178,7 @@ settings_word(char **p)
 }
 
 static int
-settings_add_binding(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_object *errors)
 {
 	char *combo, *spec;
 	const char *bad = NULL;
@@ -195,19 +207,19 @@ settings_add_binding(Settings *s, char *rest, unsigned int line, struct json_obj
 		return 0;
 	}
 	/* A later binding of the same keys replaces an earlier one */
-	for (i = 0; i < s->nbindings; i++) {
-		b = &s->bindings[i];
+	for (i = 0; i < mode->nbindings; i++) {
+		b = &mode->bindings[i];
 		if (b->mods == mods && b->sym == sym) {
 			free(b->keys);
 			free(b->command);
 			break;
 		}
 	}
-	if (i == s->nbindings) {
-		if (!(b = realloc(s->bindings, (s->nbindings + 1) * sizeof(*b))))
+	if (i == mode->nbindings) {
+		if (!(b = realloc(mode->bindings, (mode->nbindings + 1) * sizeof(*b))))
 			die("out of memory reading the config");
-		s->bindings = b;
-		b = &s->bindings[s->nbindings++];
+		mode->bindings = b;
+		b = &mode->bindings[mode->nbindings++];
 	}
 	b->mods = mods;
 	b->sym = sym;
@@ -254,6 +266,40 @@ settings_escaped(const char *s, size_t i)
 	return n % 2;
 }
 
+/* A mode's name: a word, or text in double quotes, as sway takes it.
+ * Moves *p past it. Returns NULL for an empty name or an unclosed quote. */
+static char *
+settings_mode_name(char **p)
+{
+	char *name = *p, *close;
+	if (*name != '"')
+		return *(name = settings_word(p)) ? name : NULL;
+	if (!(close = strchr(++name, '"')) || close == name)
+		return NULL;
+	*close = '\0';
+	*p = close + 1;
+	while (isspace((unsigned char)**p))
+		(*p)++;
+	return name;
+}
+
+/* The index of the mode called name, made if it's new. */
+static size_t
+settings_add_mode(Settings *s, const char *name)
+{
+	Mode *m;
+	size_t i;
+	for (i = 0; i < s->nmodes; i++)
+		if (!strcmp(s->modes[i].name, name))
+			return i;
+	if (!(m = realloc(s->modes, (s->nmodes + 1) * sizeof(*m))))
+		die("out of memory reading the config");
+	s->modes = m;
+	memset(&s->modes[s->nmodes], 0, sizeof(*m));
+	s->modes[s->nmodes].name = settings_strdup(name, strlen(name));
+	return s->nmodes++;
+}
+
 /* Parses text, which it keeps, into new settings, or returns NULL and
  * adds each error to errors. */
 static Settings *
@@ -261,12 +307,13 @@ settings_parse(char *text, struct json_object *errors)
 {
 	Settings *s = ecalloc(1, sizeof(*s));
 	SettingsVar *vars = NULL;
-	size_t nvars = 0, i, len;
-	unsigned int line = 0;
-	char *start, *end, *raw, *expanded, *p, *word;
+	size_t nvars = 0, i, len, mode = 0;
+	unsigned int line = 0, mode_line = 0;
+	char *start, *end, *raw, *expanded, *p, *word, *name;
 	int ok = 1;
 
 	s->text = text;
+	settings_add_mode(s, "default");
 	for (start = text; *start; start = *end ? end + 1 : end) {
 		line++;
 		end = strchr(start, '\n');
@@ -284,7 +331,6 @@ settings_parse(char *text, struct json_object *errors)
 		}
 		/* set's own name isn't substituted, only its value */
 		if (!strncasecmp(p, "set", 3) && isspace((unsigned char)p[3])) {
-			char *name;
 			p += 3;
 			while (isspace((unsigned char)*p))
 				p++;
@@ -298,14 +344,43 @@ settings_parse(char *text, struct json_object *errors)
 		expanded = settings_substitute(p, vars, nvars);
 		p = expanded;
 		word = settings_word(&p);
-		if (!strcasecmp(word, "bindsym"))
-			ok &= settings_add_binding(s, p, line, errors);
-		else {
+		if (!strcasecmp(word, "bindsym")) {
+			ok &= settings_add_binding(&s->modes[mode], p, line, errors);
+		} else if (!strcasecmp(word, "mode")) {
+			if (mode) {
+				settings_error(errors, line, "mode %s is still open: modes don't nest",
+						s->modes[mode].name);
+				ok = 0;
+			} else if (!(name = settings_mode_name(&p)) || strcmp(p, "{")) {
+				settings_error(errors, line, "mode needs a name, then {");
+				ok = 0;
+			} else if (!strcmp(name, "default")) {
+				settings_error(errors, line, "default is the top level, not a mode to open");
+				ok = 0;
+			} else if (strchr(name, ';')) {
+				/* The mode command couldn't name it: ; ends a command */
+				settings_error(errors, line, "mode %s: a mode's name can't hold ;", name);
+				ok = 0;
+			} else {
+				mode = settings_add_mode(s, name);
+				mode_line = line;
+			}
+		} else if (!strcmp(word, "}")) {
+			if (!mode) {
+				settings_error(errors, line, "} closes no mode");
+				ok = 0;
+			}
+			mode = 0;
+		} else {
 			settings_error(errors, line, "no setting is called %s", word);
 			ok = 0;
 		}
 		free(expanded);
 		free(raw);
+	}
+	if (mode) {
+		settings_error(errors, mode_line, "mode %s has no }", s->modes[mode].name);
+		ok = 0;
 	}
 	for (i = 0; i < nvars; i++) {
 		free(vars[i].name);
@@ -363,6 +438,11 @@ settings_load(void)
 		return 0;
 	settings_free(settings);
 	settings = loaded;
+	/* As sway does, a load starts at the top level */
+	if (settings_mode) {
+		settings_mode = 0;
+		ipc_event_mode("default");
+	}
 	return 1;
 }
 
@@ -440,17 +520,18 @@ static int
 settings_run_binding(uint32_t mods, xkb_keysym_t sym)
 {
 	struct json_object *results, *result, *error;
+	const Mode *mode = &settings->modes[settings_mode];
 	char *command, *combo;
 	size_t i;
 	int quit = 0;
-	for (i = 0; i < settings->nbindings; i++)
-		if (settings->bindings[i].mods == CLEANMASK(mods) && settings->bindings[i].sym == sym)
+	for (i = 0; i < mode->nbindings; i++)
+		if (mode->bindings[i].mods == CLEANMASK(mods) && mode->bindings[i].sym == sym)
 			break;
-	if (i == settings->nbindings)
+	if (i == mode->nbindings)
 		return 0;
-	/* Copies, since the commands may reload the settings */
-	command = settings_strdup(settings->bindings[i].command, strlen(settings->bindings[i].command));
-	combo = settings_strdup(settings->bindings[i].keys, strlen(settings->bindings[i].keys));
+	/* Copies, since the commands may reload the settings or change mode */
+	command = settings_strdup(mode->bindings[i].command, strlen(mode->bindings[i].command));
+	combo = settings_strdup(mode->bindings[i].keys, strlen(mode->bindings[i].keys));
 	results = ipc_run_commands(command, &quit);
 	for (i = 0; i < json_object_array_length(results); i++) {
 		result = json_object_array_get_idx(results, i);
@@ -466,11 +547,56 @@ settings_run_binding(uint32_t mods, xkb_keysym_t sym)
 	return 1;
 }
 
+/* The mode command: makes name's bindings the ones in force. Returns 0 if
+ * there's no such mode. "default" is always there, as the top level. */
+static int
+settings_enter_mode(char *name)
+{
+	size_t i;
+	char *p = name;
+	if (*p == '"' && (name = settings_mode_name(&p)) && *p)
+		return 0; /* something after the quoted name */
+	if (!name)
+		return 0;
+	for (i = 0; settings && i < settings->nmodes; i++)
+		if (!strcmp(settings->modes[i].name, name))
+			break;
+	if (strcmp(name, "default") && (!settings || i == settings->nmodes))
+		return 0;
+	if (!settings)
+		return 1; /* config.h's keys have only the top level */
+	if (i != settings_mode) {
+		settings_mode = i;
+		ipc_event_mode(settings->modes[i].name);
+	}
+	return 1;
+}
+
+static const char *
+settings_mode_now(void)
+{
+	return settings ? settings->modes[settings_mode].name : "default";
+}
+
+/* GET_BINDING_MODES's reply: every mode's name, default first. */
+static struct json_object *
+settings_json_modes(void)
+{
+	struct json_object *list = json_object_new_array();
+	size_t i;
+	if (!settings)
+		json_object_array_add(list, json_object_new_string("default"));
+	for (i = 0; settings && i < settings->nmodes; i++)
+		json_object_array_add(list, json_object_new_string(settings->modes[i].name));
+	return list;
+}
+
 static void
 settings_finish(void)
 {
 	settings_free(settings);
 	settings = NULL;
+	settings_mode = 0;
 	json_object_put(settings_errors);
 	settings_errors = NULL;
 }
