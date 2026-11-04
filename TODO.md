@@ -17,6 +17,8 @@ lands with a test.
 
 ## Done
 
+- **Dialogs follow their parent** (#29): a dialog stays above its parent
+  and goes with it to another workspace or output.
 - **Picture-in-picture** (#30): a window titled `Picture-in-Picture`, or
   so, floats sticky in the bottom right corner; sway's `sticky` command.
 - **Dialog placement** (#28): a window that floats as it opens goes in
@@ -239,10 +241,9 @@ lands with a test.
 
 ## Plan
 
-1. **Dialogs and floating**: a dialog kept above its parent and following
-   it to another workspace or output; a hand-floated window's size
-   remembered. Placement and modal came with #28, picture-in-picture with
-   #30.
+1. **Dialogs and floating**: a hand-floated window's size remembered.
+   Placement and modal came with #28, following the parent with #29,
+   picture-in-picture with #30.
 2. **Dimming** of every window but the focused one, with tide's
    exceptions.
 3. **Input**: a tap-Super event, which `--release Super_L` nearly is, once

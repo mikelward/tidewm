@@ -194,9 +194,9 @@ ws_view_to(Workspace *ws, Client *c)
 	prevws = old;
 	curws = ws;
 	/* A sticky floating window, such as picture-in-picture, comes along,
-	 * and any urgency with it */
+	 * with its dialogs, and any urgency with it */
 	wl_list_for_each(w, &clients, link) {
-		if (w->issticky && w->isfloating && w->ws == old) {
+		if (w->ws == old && stickybelow(w, NULL)) {
 			w->ws = ws;
 			ipc_event_window(w, "move");
 		}
@@ -239,6 +239,7 @@ ws_move(Client *c, Workspace *ws)
 		return;
 	c->ws = ws;
 	ws_to_end(c);
+	dialogsfollow(c, old); /* its dialogs go with it */
 	if (c->mon)
 		arrange(c->mon);
 	focusclient(focustop(selmon), NULL, 1);

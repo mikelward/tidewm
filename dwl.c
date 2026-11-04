@@ -181,6 +181,7 @@ typedef struct {
 	int isfloating, isurgent, isfullscreen;
 	int ismaximized; /* covers its monitor's window area, above the other tiles */
 	int issticky; /* floating, it's on every workspace, as sway's sticky */
+	int recenter; /* it followed its parent: to its middle once laid out */
 	int wantsfullscreen; /* asked for fullscreen while held, so waits for focus */
 	struct wlr_box unmaximized; /* its place before it was maximized; none if it opened so */
 	int held; /* how the focus guard holds it from focus: FgFree, FgWaiting, FgPopup */
@@ -391,6 +392,11 @@ static void placefloating(Client *c, struct wlr_box asked);
 static void setfloating(Client *c, int floating);
 static void setfullscreen(Client *c, int fullscreen);
 static int fullscreenwanted(Client *c);
+static int dialogdepth(Client *d, Client *c);
+static int descendsfrom(Client *d, Client *c);
+static int stickybelow(Client *c, Client *top);
+static void movemon(Client *c, Monitor *m, Workspace *ws);
+static void dialogsfollow(Client *c, Workspace *from);
 static int laidout(Client *c);
 static void raisewithdialogs(Client *c);
 static void setmaximized(Client *c, int maximized);
@@ -585,7 +591,8 @@ applyrules(Client *c)
 void
 arrange(Monitor *m)
 {
-	Client *c;
+	Client *c, *p;
+	int recentered;
 
 	if (!m->wlr_output->enabled)
 		return;
@@ -630,6 +637,20 @@ arrange(Monitor *m)
 				raisewithdialogs(c);
 		}
 	}
+	/* A dialog that followed its parent goes to its middle, now that the
+	 * parent is laid out here: each after its own parent */
+	do {
+		recentered = 0;
+		wl_list_for_each(c, &clients, link) {
+			if (!c->recenter || !VISIBLEON(c, m) || ((p = client_get_parent(c))
+					&& p->recenter && VISIBLEON(p, m)))
+				continue;
+			c->recenter = 0;
+			recentered = 1;
+			if (c->isfloating && !c->isfullscreen)
+				placefloating(c, c->geom);
+		}
+	} while (recentered);
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
 }
@@ -777,7 +798,7 @@ buttonpress(struct wl_listener *listener, void *data)
 			motionnotify(0, NULL, 0, 0, 0, 0);
 			/* Drop the window off on its new monitor */
 			selmon = xytomon(cursor->x, cursor->y);
-			setmon(grabc, selmon, 0);
+			movemon(grabc, selmon, 0);
 			grabc = NULL;
 			return;
 		}
@@ -1589,9 +1610,9 @@ focusclient(Client *c, LayerSurface *l, int lift)
 	if (locked)
 		return;
 
-	/* Raise client in stacking order if requested */
+	/* Raise client in stacking order if requested, its dialogs above it */
 	if (c && lift)
-		wlr_scene_node_raise_to_top(&c->scene->node);
+		raisewithdialogs(c);
 
 	if (c && client_surface(c) == old)
 		return;
@@ -2160,18 +2181,124 @@ laidout(Client *c)
 	return lt ? lt->arrange != NULL : c->mon->lt[c->mon->sellt]->arrange != NULL;
 }
 
+/* How many parents d goes up to reach c: 1 for c's own dialog, 2 for its
+ * dialog's, and 0 for a window that's neither */
+int
+dialogdepth(Client *d, Client *c)
+{
+	Client *p;
+	int n = 1;
+	for (p = client_get_parent(d); p; p = client_get_parent(p), n++)
+		if (p == c)
+			return n;
+	return 0;
+}
+
+/* Whether d is c's dialog, or its dialog's, and so on */
+int
+descendsfrom(Client *d, Client *c)
+{
+	return dialogdepth(d, c) > 0;
+}
+
+/* Whether c, or a parent of it short of top, is sticky and floating: on
+ * every workspace, where its dialogs stay with it */
+int
+stickybelow(Client *c, Client *top)
+{
+	for (; c && c != top; c = client_get_parent(c))
+		if (c->issticky && c->isfloating)
+			return 1;
+	return 0;
+}
+
+/* Moves c to m, on ws, as a command, a key or a drag moves a window: its
+ * dialogs go with it */
+void
+movemon(Client *c, Monitor *m, Workspace *ws)
+{
+	setmon(c, m, ws);
+	dialogsfollow(c, NULL);
+}
+
+/* c moved, from the workspace from, which its caller tidies: its dialogs
+ * go with it, to its workspace and monitor, and to the middle of it again
+ * once it's laid out there (tide's SPEC §6.4). A sticky one stays, with its own
+ * dialogs: it's on every workspace. A workspace a dialog leaves goes if
+ * nothing else keeps it, and says whether it's still urgent, as c's says
+ * whether it now is. */
+void
+dialogsfollow(Client *c, Workspace *from)
+{
+	Client *d, **follow;
+	Workspace **left, *was;
+	size_t n = 0, i, j, nleft = 0;
+	int depth, deepest = 0;
+	wl_list_for_each(d, &fstack, flink)
+		n++;
+	follow = ecalloc(n ? n : 1, sizeof(*follow));
+	left = ecalloc(n ? n : 1, sizeof(*left));
+	/* Gathered first: moving one changes the lists */
+	n = 0;
+	wl_list_for_each(d, &fstack, flink) {
+		if (d != c && descendsfrom(d, c) && !stickybelow(d, c)
+				&& (d->mon != c->mon || d->ws != c->ws)) {
+			follow[n++] = d;
+			deepest = MAX(deepest, dialogdepth(d, c));
+		}
+	}
+	/* Each dialog after its parent, so it's centered where its parent is */
+	for (depth = 1; depth <= deepest; depth++) for (i = 0; i < n; i++) {
+		d = follow[i];
+		if (dialogdepth(d, c) != depth)
+			continue;
+		if ((was = d->ws) && was != c->ws && was != from) {
+			for (j = 0; j < nleft && left[j] != was; j++)
+				;
+			if (j == nleft)
+				left[nleft++] = was;
+		}
+		/* To c's middle, or its own parent's, once they're laid out
+		 * where they're shown: arrange() sees to it */
+		d->recenter = 1;
+		if (d->mon != c->mon) {
+			setmon(d, c->mon, c->ws); /* which says it moved, and arranges */
+		} else {
+			d->ws = c->ws;
+			ipc_event_window(d, "move");
+		}
+	}
+	/* One that changed workspace alone shows, or goes, once it's arranged,
+	 * and brings any urgency to c's workspace */
+	if (n && c->mon)
+		arrange(c->mon);
+	if (n)
+		ws_update_urgency(c->ws);
+	for (i = 0; i < nleft; i++)
+		if (!ws_prune(left[i]))
+			ws_update_urgency(left[i]);
+	free(left);
+	free(follow);
+}
+
 /* Raises c to the top of its layer, then its dialogs over it, the one
  * focused last on top: in the floating layout, they share its layer */
 static void
 raisewithdialogs(Client *c)
 {
-	Client *d, *p;
+	Client *d;
+	int depth, deeper = 1, k;
 	wlr_scene_node_raise_to_top(&c->scene->node);
-	wl_list_for_each_reverse(d, &fstack, flink) {
-		for (p = client_get_parent(d); p && p != c; p = client_get_parent(p))
-			;
-		if (p)
-			wlr_scene_node_raise_to_top(&d->scene->node);
+	/* Each dialog over its parent, and among dialogs of one depth, the one
+	 * focused last on top */
+	for (depth = 1; deeper; depth++) {
+		deeper = 0;
+		wl_list_for_each_reverse(d, &fstack, flink) {
+			if ((k = dialogdepth(d, c)) == depth)
+				wlr_scene_node_raise_to_top(&d->scene->node);
+			else if (k > depth)
+				deeper = 1;
+		}
 	}
 }
 
@@ -2211,14 +2338,10 @@ setmaximized(Client *c, int maximized)
 static void
 uncoverfor(Client *c)
 {
-	Client *w, *p;
+	Client *w;
 	wl_list_for_each(w, &clients, link) {
 		if (w == c || (!w->ismaximized && !w->isfullscreen)
-				|| w->mon != c->mon || w->ws != c->ws)
-			continue;
-		for (p = client_get_parent(c); p && p != w; p = client_get_parent(p))
-			;
-		if (p)
+				|| w->mon != c->mon || w->ws != c->ws || descendsfrom(c, w))
 			continue;
 		if (w->isfullscreen)
 			setfullscreen(w, 0);
@@ -3235,7 +3358,7 @@ tagmon(const Arg *arg)
 {
 	Client *sel = focustop(selmon);
 	if (sel)
-		setmon(sel, dirtomon(arg->i), sel->ws);
+		movemon(sel, dirtomon(arg->i), sel->ws);
 }
 
 void
