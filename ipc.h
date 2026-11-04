@@ -789,13 +789,14 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 	}
 	if (ipc_take(&cmd, "fullscreen")) {
 		int fullscreen;
-		if ((fullscreen = ipc_switch(cmd, target ? target->isfullscreen : 0, 1)) < 0) {
+		/* A held window's request, waiting for focus, counts as made */
+		if ((fullscreen = ipc_switch(cmd, target ? fullscreenwanted(target) : 0, 1)) < 0) {
 			error = "Expected fullscreen [enable|disable|toggle]";
 			goto parse_error;
 		}
 		if (!target)
 			return ipc_json_success(0, "No window to make fullscreen");
-		if (fullscreen != target->isfullscreen)
+		if (fullscreen != fullscreenwanted(target))
 			setfullscreen(target, fullscreen);
 		return ipc_json_success(1, NULL);
 	}

@@ -237,6 +237,12 @@ an app ID nor a title, such as Chrome's own notification, is a status
 popup: it's held too, but never marked, and only the pointer or a click
 focuses it.
 
+A held window leaves the window you're in as it is: one that's fullscreen
+stays so until you go to the held window. A held window that asks for fullscreen, as a game or `mpv
+--fullscreen` does as it opens, or later, opens as it would otherwise and
+goes fullscreen once you go to it, unless it takes the request back
+first. So does one a `fullscreen` command or rule makes fullscreen.
+
 - **A grant is used once:** by the first window that matches, or by an
   activation of a window its app already had. One that names an app is
   used before a wildcard.

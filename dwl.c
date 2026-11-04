@@ -179,6 +179,7 @@ typedef struct {
 	Workspace *ws;
 	int isfloating, isurgent, isfullscreen;
 	int ismaximized; /* covers its monitor's window area, above the other tiles */
+	int wantsfullscreen; /* asked for fullscreen while held, so waits for focus */
 	struct wlr_box unmaximized; /* its place before it was maximized; none if it opened so */
 	int held; /* how the focus guard holds it from focus: FgFree, FgWaiting, FgPopup */
 	unsigned long focus_seq; /* when it last had focus, in the guard's count; 0 for never */
@@ -385,10 +386,11 @@ static void setcursor(struct wl_listener *listener, void *data);
 static void setcursorshape(struct wl_listener *listener, void *data);
 static void setfloating(Client *c, int floating);
 static void setfullscreen(Client *c, int fullscreen);
+static int fullscreenwanted(Client *c);
 static int laidout(Client *c);
 static void raisewithdialogs(Client *c);
 static void setmaximized(Client *c, int maximized);
-static void unmaximizefor(Client *c);
+static void uncoverfor(Client *c);
 static void setlayout(const Arg *arg);
 static void setmfact(const Arg *arg);
 static void setmon(Client *c, Monitor *m, Workspace *ws);
@@ -1602,7 +1604,10 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		wl_list_insert(&fstack, &c->flink);
 		selmon = c->mon;
 		c->held = FgFree;
-		unmaximizefor(c);
+		uncoverfor(c);
+		/* Held no more, it goes fullscreen if it asked to while held */
+		if (c->wantsfullscreen)
+			setfullscreen(c, 1);
 		seturgent(c, 0);
 
 		/* Don't change border color if there is an exclusive focus or we are
@@ -2005,6 +2010,12 @@ mapnotify(struct wl_listener *listener, void *data)
 		goto unset_fullscreen;
 	}
 
+#ifdef XWAYLAND
+	/* An X11 window says it's fullscreen in _NET_WM_STATE before it maps,
+	 * which wlroots reads but doesn't announce */
+	if (client_is_x11(c))
+		c->isfullscreen = client_wants_fullscreen(c);
+#endif
 	/* The focus guard's say, before its border shows whether it's urgent */
 	grant_ws = fg_open(c);
 	for (i = 0; i < 4; i++) {
@@ -2064,6 +2075,9 @@ mapnotify(struct wl_listener *listener, void *data)
 	fg_opened(c, grant_ws);
 
 unset_fullscreen:
+	/* One the focus guard holds leaves the window you're in as it is */
+	if (c->held)
+		return;
 	m = c->mon ? c->mon : xytomon(c->geom.x, c->geom.y);
 	wl_list_for_each(w, &clients, link) {
 		if (w != c && w != p && w->isfullscreen && m == w->mon && w->ws == c->ws)
@@ -2148,7 +2162,7 @@ raisewithdialogs(Client *c)
 
 /* Maximizes c, over its monitor's window area with the bar showing, or
  * gives it its place back, telling the client either way. Another window
- * on its workspace taking focus ends it (unmaximizefor). */
+ * on its workspace taking focus ends it (uncoverfor). */
 void
 setmaximized(Client *c, int maximized)
 {
@@ -2174,18 +2188,25 @@ setmaximized(Client *c, int maximized)
 	ipc_event_window(c, "maximize");
 }
 
-/* Focus went to c: any other maximized window on its workspace there is
- * maximized no more, unless c is its dialog */
+/* Focus went to c: no other window on its workspace there covers it, so
+ * one maximized or fullscreen is so no more, unless c is its dialog. Focus
+ * a command or a notification gives a window, even one the focus guard
+ * held, is never on a window you can't see. */
 static void
-unmaximizefor(Client *c)
+uncoverfor(Client *c)
 {
 	Client *w, *p;
 	wl_list_for_each(w, &clients, link) {
-		if (w == c || !w->ismaximized || w->mon != c->mon || w->ws != c->ws)
+		if (w == c || (!w->ismaximized && !w->isfullscreen)
+				|| w->mon != c->mon || w->ws != c->ws)
 			continue;
 		for (p = client_get_parent(c); p && p != w; p = client_get_parent(p))
 			;
-		if (!p)
+		if (p)
+			continue;
+		if (w->isfullscreen)
+			setfullscreen(w, 0);
+		if (w->ismaximized)
 			setmaximized(w, 0);
 	}
 }
@@ -2741,10 +2762,27 @@ setfloating(Client *c, int floating)
 	printstatus();
 }
 
+/* Whether c is fullscreen, or asked to be and will be once it has focus */
+int
+fullscreenwanted(Client *c)
+{
+	return c->isfullscreen || c->wantsfullscreen;
+}
+
 void
 setfullscreen(Client *c, int fullscreen)
 {
-	int changed = c->isfullscreen != fullscreen;
+	int changed;
+	/* One the focus guard holds goes fullscreen once it has focus
+	 * (focusclient), rather than cover the window you're in. Before it
+	 * maps, nothing holds it yet. */
+	c->wantsfullscreen = fullscreen && c->held && c->mon && client_surface(c)->mapped;
+	if (c->wantsfullscreen) {
+		c->isfullscreen = 0;
+		client_set_fullscreen(c, 0); /* the request's answer, for now */
+		return;
+	}
+	changed = c->isfullscreen != fullscreen;
 	c->isfullscreen = fullscreen;
 	if (!c->mon || !client_surface(c)->mapped)
 		return;
@@ -2756,9 +2794,11 @@ setfullscreen(Client *c, int fullscreen)
 	if (fullscreen) {
 		c->prev = c->geom;
 		resize(c, c->mon->m, 0);
-	} else {
+	} else if (changed) {
 		/* restore previous size instead of arrange for floating windows since
-		 * client positions are set by the user and cannot be recalculated */
+		 * client positions are set by the user and cannot be recalculated.
+		 * One that wasn't fullscreen, as one whose request a cancel took
+		 * back while the focus guard held it, stays where it is. */
 		resize(c, c->prev, 0);
 	}
 	arrange(c->mon);
@@ -2818,7 +2858,8 @@ setmon(Client *c, Monitor *m, Workspace *ws)
 		/* Make sure window actually overlaps with the monitor */
 		resize(c, c->geom, 0);
 		c->ws = ws ? ws : curws; /* the current workspace, unless told */
-		setfullscreen(c, c->isfullscreen); /* This will call arrange(c->mon) */
+		/* This will call arrange(c->mon), and keeps a request waiting */
+		setfullscreen(c, fullscreenwanted(c));
 		setfloating(c, c->isfloating);
 		/* An X11 window can be urgent before it maps */
 		ws_update_urgency(c->ws);
@@ -3212,6 +3253,7 @@ unmapnotify(struct wl_listener *listener, void *data)
 		focused_client = NULL;
 	/* Mapping again, it's maximized only if it asks again */
 	c->ismaximized = 0;
+	c->wantsfullscreen = 0;
 	c->unmaximized = (struct wlr_box){0};
 
 	if (!client_is_unmanaged(c)) {

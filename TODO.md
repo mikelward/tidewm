@@ -47,6 +47,10 @@ lands with a test.
   three-column and two columns + stack beside tile and monocle, with
   tide's geometry; a layout, mfact and nmaster per workspace part, from
   its monitor's aspect; the `layout` event.
+- **Fullscreen on open** (#27): a window the focus guard holds goes
+  fullscreen once you go to it, and leaves a fullscreen window you're in
+  as it is until then; focus ends a fullscreen that would hide it; an X11
+  window fullscreen as it maps opens fullscreen.
 - **Maximize** (#26): tidewm's own `maximize` command, `maximized` field
   and `maximize` event, and apps' own requests: one window over its
   monitor's window area, above the other tiles, until it's turned off,
@@ -148,6 +152,15 @@ lands with a test.
   urgency, where tide's Lua guard showed a Hyprland notification. tidewm
   draws no text, and the shell is the notification daemon, so there's no
   one to send a notification to. Reversible, if a fallback is wanted.
+- **Focus ends a fullscreen that would hide it** (#27): a window taking
+  focus, by a command, a notification or going to a held window, ends
+  another's fullscreen on its workspace there, as it ends a maximize,
+  unless it's that one's dialog. dwl left the fullscreen window covering
+  it, so the keyboard went to a window you couldn't see. Reversible.
+- **A held window's fullscreen waits** (#27): any request to make a
+  window the guard holds fullscreen, its app's or a command's or rule's,
+  waits until it has focus, so it never covers the window you're in. The
+  alternative was to refuse it, leaving the app to ask again. Reversible.
 - **Maximize is tidewm's own** (#26): sway has no maximize, so the
   `maximize [enable|disable|toggle]` command, the `maximized` field and
   the `maximize` window event are tidewm's, named as `fullscreen`'s are.
@@ -181,6 +194,21 @@ lands with a test.
 
 ## Known bugs
 
+- **A race in wlroots loses an X11 window's state set before it maps**:
+  wlroots' window manager watches a window's properties only once it has
+  handled the window's creation, and mapping the window writes its own
+  idea of `_NET_WM_STATE` over the window's. So an X11 app that says it's
+  fullscreen right after making its window may open as it would otherwise.
+  An EWMH message, rather than the property, isn't lost. A fix belongs in
+  wlroots: read the property at the map request.
+- **An X11 window sometimes never maps in the tests**: about one run in
+  130 of a pair of X11 tests, on `main` too. The X client maps its window
+  and Xwayland makes its surface, but never commits a buffer to it, so
+  tidewm never sees it map. Part of it is wlroots': pairing a window with
+  its surface reads properties synchronously, which leaves X events that
+  arrive meanwhile in xcb's queue with nothing to wake its window manager
+  for them. Waking it there gets the window paired, but the commit still
+  doesn't come. Not found yet.
 - **A leak in dwl's output management**: LeakSanitizer finds 136 bytes
   from `wlr_output_swapchain_manager_prepare()` in
   `outputmgrapplyortest()` after wlr-randr applies a configuration. It's
@@ -188,33 +216,28 @@ lands with a test.
 
 ## Plan
 
-1. **Window states**: fullscreen on open, applied with the grant. A
-   window the focus guard holds ends another's fullscreen as it maps, and
-   its own fullscreen request covers the window you're in: it should
-   leave fullscreen be, and wait to go fullscreen until it has focus.
-   Maximize came with #26.
-2. **Dialogs and floating**: centered on the parent, capped at 80% of the
+1. **Dialogs and floating**: centered on the parent, capped at 80% of the
    monitor, following it; modal; a picture-in-picture rule; a hand-floated
    window's size remembered.
-3. **Dimming** of every window but the focused one, with tide's
+2. **Dimming** of every window but the focused one, with tide's
    exceptions.
-4. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
+3. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
    a pointer button also ends the tap; `scroll_factor`; the `input`
    event's `xkb_layout`, when the active layout switches, for a layout
    indicator. Per-device settings came with the runtime config (#17).
-5. **Outputs**: a single-window width; the lid switch. Mode, scale,
+4. **Outputs**: a single-window width; the lid switch. Mode, scale,
    position and hotplug came with the runtime config (#16).
-6. **Lock and keyboard**: a command that drops a dead lock, no pointer
+5. **Lock and keyboard**: a command that drops a dead lock, no pointer
    events while locked; on-demand layers keep the keyboard.
-7. **Capture**: window identifiers over the IPC; capture start and stop
+6. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
-8. **Outside clicks**: a focus-grab protocol or click event for the
+7. **Outside clicks**: a focus-grab protocol or click event for the
    notification center.
-9. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+8. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
    client starts Xwayland, and a window it maps before wlroots' window
    manager watches the root is never managed (the tests' client waits
    for it): start Xwayland ahead of clients, or take on windows already
    there.
-10. **Session**: the entry and wrapper tide starts it with.
+9. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

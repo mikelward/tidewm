@@ -11,16 +11,18 @@
  *           prints "activated" once the compositor has had the request.
  * maximize, unmaximize
  *           asks to be maximized, or not.
+ * fullscreen, unfullscreen
+ *           asks to be fullscreen, or not.
  * dialog    opens a dialog, a second toplevel whose parent is the window,
  *           with the app ID APP_ID.dialog.
  *
  * It prints "maximized" or "unmaximized" when the compositor says it's
- * maximized, or no longer.
+ * maximized, or no longer, and "fullscreen" or "unfullscreen" likewise.
  *
  * With MAPPED_APP_ID, it changes its app ID to that after its first commit,
  * before it maps. With MIN_SIZE=WxH in its environment, it asks to be at
  * least that big, and with MAX_SIZE=WxH, at most that big. With MAXIMIZED
- * set, it asks to be maximized before it maps.
+ * or FULLSCREEN set, it asks to be maximized or fullscreen before it maps.
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -47,7 +49,8 @@ static const char *app_id, *title; /* as it was last given them */
 static struct wl_surface *surface, *dialog_surface;
 static struct wl_display *display;
 static int32_t width = 100, height = 100;
-static int maximized, configured_maximized; /* as last drawn, and as configured */
+/* Its states, as last drawn and as configured */
+static int maximized, configured_maximized, fullscreen, configured_fullscreen;
 
 static void
 die(const char *msg)
@@ -109,6 +112,11 @@ xdg_surface_configure(void *data, struct xdg_surface *xsurface, uint32_t serial)
 		printf(maximized ? "maximized\n" : "unmaximized\n");
 		fflush(stdout);
 	}
+	if (configured_fullscreen != fullscreen) {
+		fullscreen = configured_fullscreen;
+		printf(fullscreen ? "fullscreen\n" : "unfullscreen\n");
+		fflush(stdout);
+	}
 	if (mapped_app_id) {
 		xdg_toplevel_set_app_id(window, mapped_app_id);
 		app_id = mapped_app_id;
@@ -130,10 +138,13 @@ toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t w,
 		width = w;
 	if (h > 0)
 		height = h;
-	configured_maximized = 0;
-	wl_array_for_each(state, states)
+	configured_maximized = configured_fullscreen = 0;
+	wl_array_for_each(state, states) {
 		if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED)
 			configured_maximized = 1;
+		else if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN)
+			configured_fullscreen = 1;
+	}
 }
 
 static void
@@ -277,12 +288,41 @@ static const struct wl_registry_listener registry_listener = {
 	.global_remove = registry_global_remove,
 };
 
+/* One line from stdin */
+static void
+command(const char *line)
+{
+	if (!strcmp(line, "remap")) {
+		/* Unmap, then commit again, as a new surface's first commit,
+		 * so the compositor configures it and it maps again. */
+		wl_surface_attach(surface, NULL, 0, 0);
+		wl_surface_commit(surface);
+		xdg_toplevel_set_app_id(window, app_id);
+		xdg_toplevel_set_title(window, title);
+		wl_surface_commit(surface);
+	} else if (!strcmp(line, "activate")) {
+		activate();
+	} else if (!strcmp(line, "maximize")) {
+		xdg_toplevel_set_maximized(window);
+	} else if (!strcmp(line, "unmaximize")) {
+		xdg_toplevel_unset_maximized(window);
+	} else if (!strcmp(line, "fullscreen")) {
+		xdg_toplevel_set_fullscreen(window, NULL);
+	} else if (!strcmp(line, "unfullscreen")) {
+		xdg_toplevel_unset_fullscreen(window);
+	} else if (!strcmp(line, "dialog")) {
+		open_dialog();
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
 	struct xdg_surface *xsurface;
 	const char *min = getenv("MIN_SIZE"), *max = getenv("MAX_SIZE");
 	int hint_width, hint_height;
+	char buf[256];
+	size_t buflen = 0;
 
 	if (argc != 3 && argc != 4)
 		die("usage: client APP_ID TITLE [MAPPED_APP_ID]");
@@ -309,6 +349,8 @@ main(int argc, char *argv[])
 		xdg_toplevel_set_max_size(window, hint_width, hint_height);
 	if (getenv("MAXIMIZED"))
 		xdg_toplevel_set_maximized(window);
+	if (getenv("FULLSCREEN"))
+		xdg_toplevel_set_fullscreen(window, NULL);
 	wl_surface_commit(surface);
 
 	for (int input = STDIN_FILENO;;) {
@@ -316,7 +358,8 @@ main(int argc, char *argv[])
 			{.fd = wl_display_get_fd(display), .events = POLLIN},
 			{.fd = input, .events = POLLIN}, /* poll skips -1 */
 		};
-		char line[64];
+		char *line, *nl;
+		ssize_t n;
 		if (wl_display_flush(display) < 0)
 			die("lost the compositor");
 		if (poll(fds, 2, -1) < 0)
@@ -327,26 +370,20 @@ main(int argc, char *argv[])
 			return 0;
 		if (!(fds[1].revents & (POLLIN | POLLHUP)))
 			continue;
-		if (!fgets(line, sizeof(line), stdin)) {
+		if ((n = read(input, buf + buflen, sizeof(buf) - 1 - buflen)) <= 0) {
 			input = -1; /* stdin closed: just stay mapped */
 			continue;
 		}
-		if (!strcmp(line, "remap\n")) {
-			/* Unmap, then commit again, as a new surface's first commit,
-			 * so the compositor configures it and it maps again. */
-			wl_surface_attach(surface, NULL, 0, 0);
-			wl_surface_commit(surface);
-			xdg_toplevel_set_app_id(window, app_id);
-			xdg_toplevel_set_title(window, title);
-			wl_surface_commit(surface);
-		} else if (!strcmp(line, "activate\n")) {
-			activate();
-		} else if (!strcmp(line, "maximize\n")) {
-			xdg_toplevel_set_maximized(window);
-		} else if (!strcmp(line, "unmaximize\n")) {
-			xdg_toplevel_unset_maximized(window);
-		} else if (!strcmp(line, "dialog\n")) {
-			open_dialog();
+		buflen += (size_t)n;
+		buf[buflen] = '\0';
+		/* Each whole line, in order: one read may bring several */
+		for (line = buf; (nl = strchr(line, '\n')); line = nl + 1) {
+			*nl = '\0';
+			command(line);
 		}
+		buflen = strlen(line);
+		memmove(buf, line, buflen + 1);
+		if (buflen == sizeof(buf) - 1)
+			buflen = 0; /* a line too long to be a command */
 	}
 }
