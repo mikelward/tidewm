@@ -14,6 +14,11 @@ lands with a test.
   work against it.
 - **Config** (maintainer, 2026-11-03): sway's syntax, so a binding's action
   is an IPC command and one parser serves both.
+- **Hiding the shell from capture waits** (maintainer, 2026-11-04): tide's
+  launcher and notifications showing black to the far end of a share is
+  deferred, below the Plan. It's large and has no sway model: an output
+  source rendered from a second scene without them, which must follow
+  every window, or wlr-screencopy dropped, which breaks its clients.
 
 ## Done
 
@@ -331,14 +336,16 @@ lands with a test.
 
 ## Plan
 
-1. **Capture**: tide's launcher and notifications hidden from capture.
-2. **Outside clicks**: a focus-grab protocol or click event for the
+1. **Outside clicks**: a focus-grab protocol or click event for the
    notification center.
-3. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+2. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
    client starts Xwayland, and a window it maps before wlroots' window
    manager watches the root is never managed (the tests' client waits
    for it): start Xwayland ahead of clients, or take on windows already
    there.
-4. **Session**: the entry and wrapper tide starts it with.
+3. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.
+
+Deferred: tide's launcher and notifications hidden from capture (Decided,
+above).
