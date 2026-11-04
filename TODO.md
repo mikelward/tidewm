@@ -17,6 +17,9 @@ lands with a test.
 
 ## Done
 
+- **Layout switches** (#36): the `input` event's `xkb_layout` says when a
+  keyboard's active layout switches, and sway's `xkb_switch_layout`
+  switches it.
 - **Scroll factor** (#35): sway's `scroll_factor` input setting scales a
   pointer's scrolls, a client's virtual pointer's too.
 - **Tap Super** (#34): a `--release` binding is a tap only with no pointer
@@ -280,22 +283,19 @@ lands with a test.
 
 ## Plan
 
-1. **Input**: the `input` event's `xkb_layout`, when the active layout
-   switches, for a layout indicator. Per-device settings came with the
-   runtime config (#17), tap Super with #34, `scroll_factor` with #35.
-2. **Outputs**: a single-window width; the lid switch. Mode, scale,
+1. **Outputs**: a single-window width; the lid switch. Mode, scale,
    position and hotplug came with the runtime config (#16).
-3. **Lock and keyboard**: a command that drops a dead lock, no pointer
+2. **Lock and keyboard**: a command that drops a dead lock, no pointer
    events while locked; on-demand layers keep the keyboard.
-4. **Capture**: window identifiers over the IPC; capture start and stop
+3. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
-5. **Outside clicks**: a focus-grab protocol or click event for the
+4. **Outside clicks**: a focus-grab protocol or click event for the
    notification center.
-6. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+5. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
    client starts Xwayland, and a window it maps before wlroots' window
    manager watches the root is never managed (the tests' client waits
    for it): start Xwayland ahead of clients, or take on windows already
    there.
-7. **Session**: the entry and wrapper tide starts it with.
+6. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

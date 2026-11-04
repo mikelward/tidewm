@@ -16,6 +16,7 @@ from harness import (EVENT_INPUT, EVENT_WINDOW, GET_CONFIG, GET_INPUTS, GET_OUTP
                      RUN_COMMAND, TIMEOUT, Tidewm, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
+KEYBOARD = os.path.join(ROOT, "tests", "keyboard")
 
 
 class InputTest(TidewmTest):
@@ -90,6 +91,19 @@ input * events enabled
         for command in ("input", "input type:mouse tap enabled", "input * tap",
                         "input * tap maybe", "input * brightness 5"):
             self.assertTrue(self.fails(command)["parse_error"], command)
+
+
+class VirtualKeyboardTest(InputTest):
+    def test_a_virtual_keyboards_layout_switch_is_an_input_event(self):
+        ipc = self.connect()
+        ipc.subscribe("input")
+        # As an on-screen keyboard switches to its second layout
+        keyboard = subprocess.Popen([KEYBOARD, "1"], env=dict(self.wm.env, XKB_LAYOUT="us,de"),
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.wm.clients.append(keyboard)
+        device = ipc.next_event(EVENT_INPUT, lambda e: e["change"] == "xkb_layout")["input"]
+        self.assertEqual((device["type"], device["xkb_active_layout_index"],
+                          device["xkb_active_layout_name"]), ("keyboard", 1, "German"))
 
 
 class ScrollTest(InputTest):
@@ -218,6 +232,28 @@ input type:pointer repeat_delay 100
         keyboard = self.keyboard()
         self.assertEqual((keyboard["xkb_layout_names"], keyboard["repeat_delay"]),
                          (["English (US)", "German"], 600))
+
+    def test_switching_the_active_layout_is_an_input_event(self):
+        identifier = self.keyboard()["identifier"]
+        ipc = self.connect()
+        ipc.subscribe("input")
+
+        def switched(command):
+            self.command(self.connect(), command)
+            keyboard = ipc.next_event(EVENT_INPUT, lambda e: e["change"] == "xkb_layout")["input"]
+            return keyboard["xkb_active_layout_index"], keyboard["xkb_active_layout_name"]
+        self.assertEqual(switched(f"input {identifier} xkb_switch_layout next"), (1, "German"))
+        self.assertEqual(switched("input type:keyboard xkb_switch_layout next"),
+                         (0, "English (US)"))
+        self.assertEqual(switched("input * xkb_switch_layout prev"), (1, "German"))
+        self.assertEqual(switched("input type:keyboard xkb_switch_layout 0"), (0, "English (US)"))
+        self.assertEqual(self.keyboard()["xkb_active_layout_index"], 0)
+
+    def test_xkb_switch_layout_takes_next_prev_or_an_index_the_keymap_has(self):
+        self.keyboard()
+        for value in ["sideways", "-1", "2", ""]:
+            self.fails(f"input type:keyboard xkb_switch_layout {value}")
+        self.assertEqual(self.keyboard()["xkb_active_layout_index"], 0)
 
     def test_the_input_command_fails_for_a_layout_xkb_lacks(self):
         self.keyboard()
