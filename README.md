@@ -158,6 +158,13 @@ the window area's bottom right corner, and is sticky, on every workspace.
 A sticky window's dialogs stay with it, and a sticky dialog stays shown
 when its parent moves.
 
+Floating a window by hand, by a key or the `floating` command, puts it
+where one of its app's floating windows last opened, moved or was resized
+to, size and position, for as long as tidewm runs; the first time, it
+stays where it was tiled. Dialogs, fixed-size windows and
+picture-in-picture place themselves, so their places aren't kept for
+their app.
+
 ### IPC
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so

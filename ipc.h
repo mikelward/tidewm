@@ -68,6 +68,8 @@ static struct json_object *fg_json_last_input(void);
 static int fg_focus_recent(char *args, char *err, size_t errsize, int *parse);
 /* layout.h, included after this file */
 static const Layout *lt_part_layout(Workspace *ws, Monitor *m);
+/* floating.h, likewise */
+static void fl_by_hand(Client *c, int floating);
 
 /* config.h's layouts' names over the IPC: tide's modes, and dwl's floating */
 static const struct { const char *name; void (*arrange)(Monitor *); } ipc_layouts[] = {
@@ -784,8 +786,12 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		/* As dwl's togglefloating does, leave a fullscreen window be */
 		if (target->isfullscreen)
 			return ipc_json_success(0, "A fullscreen window can't float or tile");
-		if (floating != target->isfloating)
+		/* A for_window rule's floating isn't by hand: the window is
+		 * opening, and placefloating() places it */
+		if (floating != target->isfloating && window)
 			setfloating(target, floating);
+		else if (floating != target->isfloating)
+			fl_by_hand(target, floating);
 		return ipc_json_success(1, NULL);
 	}
 	/* tidewm's own, as tide's SPEC §6.3 has it */
