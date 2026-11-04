@@ -637,7 +637,7 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 				return ipc_json_success(0, "No window to move");
 			if (!(m = ipc_find_output(cmd)))
 				return ipc_json_success(0, "No such output");
-			setmon(target, m, target->ws); /* which says it moved */
+			movemon(target, m, target->ws); /* which says it moved */
 			return ipc_json_success(1, NULL);
 		}
 		error = "Expected move [container] [to] workspace|output ...";

@@ -16,9 +16,11 @@
  * dialog [TITLE]
  *           opens a dialog, a second toplevel whose parent is the window,
  *           with the app ID APP_ID.dialog and the title TITLE, or Dialog.
+ *           It goes when the compositor closes it.
  * retitled-dialog TITLE
  *           opens one titled Dialog that takes the title TITLE after its
  *           first commit, before it maps.
+ * subdialog opens that dialog's own dialog, APP_ID.dialog.dialog.
  *
  * It prints "maximized" or "unmaximized" when the compositor says it's
  * maximized, or no longer, and "fullscreen" or "unfullscreen" likewise.
@@ -55,7 +57,7 @@ static struct xdg_wm_dialog_v1 *wm_dialog;
 static struct xdg_toplevel *window;
 static const char *mapped_app_id;
 static const char *app_id, *title; /* as it was last given them */
-static struct wl_surface *surface, *dialog_surface;
+static struct wl_surface *surface;
 static struct wl_display *display;
 static int32_t width = 100, height = 100;
 /* Its states, as last drawn and as configured */
@@ -181,19 +183,26 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 	.wm_capabilities = toplevel_wm_capabilities,
 };
 
-/* The dialog's title to take before it maps, after its first commit */
-static const char *dialog_retitle;
+/* Its dialogs: the window's, and that one's own, each with the title to
+ * take before it maps, after its first commit */
+static struct dialog {
+	struct wl_surface *surface;
+	struct xdg_surface *xsurface;
+	struct xdg_toplevel *toplevel;
+	char *retitle;
+} dialogs[2];
 
 static void
 dialog_surface_configure(void *data, struct xdg_surface *xsurface, uint32_t serial)
 {
-	struct xdg_toplevel *dialog = data;
+	struct dialog *d = data;
 	xdg_surface_ack_configure(xsurface, serial);
-	if (dialog_retitle) {
-		xdg_toplevel_set_title(dialog, dialog_retitle);
-		dialog_retitle = NULL;
+	if (d->retitle) {
+		xdg_toplevel_set_title(d->toplevel, d->retitle);
+		free(d->retitle);
+		d->retitle = NULL;
 	}
-	paint(dialog_surface, 100, 100);
+	paint(d->surface, 100, 100);
 }
 
 static const struct xdg_surface_listener dialog_surface_listener = {
@@ -209,6 +218,12 @@ dialog_configure(void *data, struct xdg_toplevel *toplevel, int32_t w,
 static void
 dialog_close(void *data, struct xdg_toplevel *toplevel)
 {
+	struct dialog *d = data;
+	xdg_toplevel_destroy(d->toplevel);
+	xdg_surface_destroy(d->xsurface);
+	wl_surface_destroy(d->surface);
+	free(d->retitle);
+	*d = (struct dialog){0};
 }
 
 static const struct xdg_toplevel_listener dialog_listener = {
@@ -218,25 +233,30 @@ static const struct xdg_toplevel_listener dialog_listener = {
 	.wm_capabilities = toplevel_wm_capabilities,
 };
 
-/* A dialog of the window, at 100x100, as a file chooser is */
+/* A dialog, at 100x100, as a file chooser is: the window's, or, as
+ * level 1, that dialog's own. It's titled dialog_title, then retitle, if
+ * given, before it maps. */
 static void
-open_dialog(const char *dialog_title)
+open_dialog(int level, const char *dialog_title, const char *retitle)
 {
-	struct xdg_surface *xsurface;
-	struct xdg_toplevel *dialog;
+	struct dialog *d = &dialogs[level];
 	char name[256];
-	if (dialog_surface)
+	if (d->surface)
 		die("there's a dialog already");
-	dialog_surface = wl_compositor_create_surface(compositor);
-	xsurface = xdg_wm_base_get_xdg_surface(wm_base, dialog_surface);
-	dialog = xdg_surface_get_toplevel(xsurface);
-	xdg_surface_add_listener(xsurface, &dialog_surface_listener, dialog);
-	xdg_toplevel_add_listener(dialog, &dialog_listener, NULL);
-	xdg_toplevel_set_parent(dialog, window);
-	snprintf(name, sizeof(name), "%s.dialog", app_id);
-	xdg_toplevel_set_app_id(dialog, name);
-	xdg_toplevel_set_title(dialog, dialog_title);
-	wl_surface_commit(dialog_surface);
+	if (level && !dialogs[0].surface)
+		die("there's no dialog to open a dialog of");
+	if (retitle && !(d->retitle = strdup(retitle)))
+		die("can't copy the dialog's title");
+	d->surface = wl_compositor_create_surface(compositor);
+	d->xsurface = xdg_wm_base_get_xdg_surface(wm_base, d->surface);
+	xdg_surface_add_listener(d->xsurface, &dialog_surface_listener, d);
+	d->toplevel = xdg_surface_get_toplevel(d->xsurface);
+	xdg_toplevel_add_listener(d->toplevel, &dialog_listener, d);
+	xdg_toplevel_set_parent(d->toplevel, level ? dialogs[0].toplevel : window);
+	snprintf(name, sizeof(name), level ? "%s.dialog.dialog" : "%s.dialog", app_id);
+	xdg_toplevel_set_app_id(d->toplevel, name);
+	xdg_toplevel_set_title(d->toplevel, dialog_title);
+	wl_surface_commit(d->surface);
 }
 
 static void
@@ -330,12 +350,13 @@ command(const char *line)
 	} else if (!strcmp(line, "unfullscreen")) {
 		xdg_toplevel_unset_fullscreen(window);
 	} else if (!strcmp(line, "dialog")) {
-		open_dialog("Dialog");
+		open_dialog(0, "Dialog", NULL);
 	} else if (!strncmp(line, "dialog ", 7)) {
-		open_dialog(line + 7);
+		open_dialog(0, line + 7, NULL);
 	} else if (!strncmp(line, "retitled-dialog ", 16)) {
-		dialog_retitle = strdup(line + 16);
-		open_dialog("Dialog");
+		open_dialog(0, "Dialog", line + 16);
+	} else if (!strcmp(line, "subdialog")) {
+		open_dialog(1, "Dialog", NULL);
 	}
 }
 

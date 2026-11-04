@@ -2,11 +2,18 @@
 when it has a parent, is modal, asks for a fixed size, or has neither an
 app ID nor a title; one that floats as it opens, by those or a rule, goes
 in the middle of its parent, or of its monitor's window area without one,
-as big as it asks but no more than 80% of the monitor."""
+as big as it asks but no more than 80% of the monitor. A dialog stays above
+its parent and follows it; picture-in-picture floats sticky in a corner."""
 
+import os
+import shutil
+import subprocess
 import unittest
 
-from harness import EVENT_WINDOW, EVENT_WORKSPACE, GET_OUTPUTS, GET_WORKSPACES, TidewmTest
+from harness import (EVENT_WINDOW, EVENT_WORKSPACE, GET_OUTPUTS, GET_SEATS, GET_WORKSPACES,
+                     ROOT, TIMEOUT, TidewmTest)
+
+POINTER = os.path.join(ROOT, "tests", "pointer")
 
 
 class DialogHelpers(TidewmTest):
@@ -24,12 +31,27 @@ class DialogHelpers(TidewmTest):
                                   and e["container"]["app_id"] == app_id)["container"]
         return con["id"], client
 
-    def dialog(self, client, app_id):
-        client.stdin.write(b"dialog\n")
+    def dialog(self, client, app_id, sub=False, title=None):
+        """Opens the window's dialog, titled title, or with sub, that
+        dialog's own."""
+        client.stdin.write(b"subdialog\n" if sub else
+                           b"dialog\n" if title is None else f"dialog {title}\n".encode())
         client.stdin.flush()
+        name = app_id + (".dialog.dialog" if sub else ".dialog")
         return self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new"
-                                   and e["container"]["app_id"] == app_id + ".dialog"
-                                   )["container"]["id"]
+                                   and e["container"]["app_id"] == name)["container"]["id"]
+
+    def clicked(self, con_id):
+        """The window a click over con_id goes to: whichever is on top."""
+        outputs = self.connect().request(GET_OUTPUTS)
+        rect = self.window(con_id)["rect"]
+        size = (max(o["rect"]["x"] + o["rect"]["width"] for o in outputs),
+                max(o["rect"]["y"] + o["rect"]["height"] for o in outputs))
+        subprocess.run([POINTER, "move", str(rect["x"] + 50), str(rect["y"] + 50),
+                        str(size[0]), str(size[1]), "click"],
+                       env=self.wm.env, check=True, timeout=TIMEOUT)
+        seat, = self.connect().request(GET_SEATS)
+        return seat["last_input"]["window"]
 
     def window(self, con_id):
         return self.windows()[con_id]
@@ -102,7 +124,6 @@ class PlacementTest(DialogHelpers):
         self.assertEqual(self.window(window)["type"], "con")
 
     CONFIG = 'for_window [app_id="^test.float$"] floating enable\n'
-
 
 
 class PipTest(DialogHelpers):
@@ -193,6 +214,173 @@ class TwoOutputStickyTest(DialogHelpers):
             if event["change"] == "urgent":
                 changes[event["current"]["name"]] = event["current"]["urgent"]
         self.assertEqual(changes, {"1": False, "two": True})
+
+
+class FollowTest(DialogHelpers):
+    CONFIG = 'for_window [app_id="^test.float$"] floating enable\n'
+
+    def test_a_dialog_follows_its_parent_to_another_workspace(self):
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        self.command(self.connect(), f"[con_id={parent}] move to workspace two")
+        self.assertEqual(self.window(dialog)["workspace"], "two")
+
+    def test_a_dialog_follows_to_the_middle_of_its_parents_new_tile(self):
+        self.open("test.other")  # so the parent is half the area here
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        self.command(self.connect(), f"[con_id={parent}] move to workspace two")
+        self.command(self.connect(), "workspace two")
+        windows = self.windows()
+        self.assertEqual(windows[parent]["rect"], self.area())
+        self.assertCenteredOn(windows[dialog]["rect"], windows[parent]["rect"])
+
+    def test_a_workspace_a_following_dialog_leaves_goes_when_its_empty(self):
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        self.command(self.connect(), f"[con_id={dialog}] move to workspace b")
+        self.command(self.connect(), f"[con_id={parent}] move to workspace c")
+        self.assertEqual(self.window(dialog)["workspace"], "c")
+        self.assertNotIn("b", [w["name"] for w in self.connect().request(GET_WORKSPACES)])
+
+    def test_a_sticky_dialog_stays_on_the_shown_workspace_when_its_parent_moves(self):
+        parent, client = self.open("test.app")
+        pip = self.dialog(client, "test.app", title="Picture-in-Picture")
+        self.assertTrue(self.window(pip)["sticky"])
+        self.command(self.connect(), f"[con_id={parent}] move to workspace two")
+        self.assertEqual(self.window(pip)["workspace"], "1")
+
+    def test_a_sticky_windows_dialog_comes_along_to_another_workspace(self):
+        parent, client = self.open("test.float", size="600x400")
+        dialog = self.dialog(client, "test.float")
+        self.command(self.connect(), f"[con_id={parent}] sticky enable")
+        self.command(self.connect(), "workspace two")
+        windows = self.windows()
+        self.assertEqual((windows[parent]["workspace"], windows[dialog]["workspace"]),
+                         ("two", "two"))
+
+    def test_a_dialog_stays_above_its_floating_parent(self):
+        parent, client = self.open("test.float", size="600x400")
+        dialog = self.dialog(client, "test.float")
+        self.command(self.connect(), f"[con_id={parent}] focus")  # raises the parent
+        self.assertEqual(self.clicked(dialog), dialog)
+
+    def test_a_dialogs_dialog_stays_above_it_when_their_parent_is_raised(self):
+        parent, client = self.open("test.float", size="600x400")
+        dialog = self.dialog(client, "test.float")
+        inner = self.dialog(client, "test.float", sub=True)
+        self.command(self.connect(), f"[con_id={dialog}] focus")
+        self.command(self.connect(), f"[con_id={parent}] focus")  # raises all three
+        self.assertEqual(self.clicked(inner), inner)
+
+    def test_closing_a_dialog_gives_its_parent_focus_back(self):
+        self.open("test.other")
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        self.assertTrue(self.window(dialog)["focused"])
+        self.command(self.connect(), f"[con_id={dialog}] kill")
+        self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "close"
+                            and e["container"]["id"] == dialog)
+        self.assertTrue(self.window(parent)["focused"])
+
+
+class TwoOutputFollowTest(DialogHelpers):
+    OUTPUTS = 2
+    CONFIG = ('for_window [app_id="^test.float$"] floating enable\n'
+              'bindsym Mod1+x persist workspace held\n')
+
+    def other(self, con_id):
+        """The output con_id isn't on, and the layout's size."""
+        outputs = self.connect().request(GET_OUTPUTS)
+        other, = [o for o in outputs if o["name"] != self.window(con_id)["output"]]
+        size = (max(o["rect"]["x"] + o["rect"]["width"] for o in outputs),
+                max(o["rect"]["y"] + o["rect"]["height"] for o in outputs))
+        return other, size
+
+    def test_a_dialogs_dialog_follows_to_the_middle_of_its_own_parent(self):
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        inner = self.dialog(client, "test.app", sub=True)
+        other, _ = self.other(parent)
+        # A window there already, so the parent goes off the area's middle
+        self.command(self.connect(), f"focus output {other['name']}")
+        self.open("test.there")
+        self.command(self.connect(), f"[con_id={parent}] move to output {other['name']}")
+        windows = self.windows()
+        self.assertNotEqual(windows[parent]["rect"], self.area())
+        self.assertEqual({windows[i]["output"] for i in (parent, dialog, inner)}, {other["name"]})
+        self.assertCenteredOn(windows[dialog]["rect"], windows[parent]["rect"])
+        self.assertCenteredOn(windows[inner]["rect"], windows[dialog]["rect"])
+
+    def test_a_dialog_follows_its_parent_dragged_to_another_output(self):
+        self.need(shutil.which("wtype"), "holding a key needs wtype")
+        parent, client = self.open("test.float", size="600x400")
+        dialog = self.dialog(client, "test.float")
+        other, (width, height) = self.other(parent)
+        workspaces = self.connect()
+        workspaces.subscribe("workspace")
+        # wtype holds Alt down while it waits on its input; its binding
+        # says when it has
+        typist = subprocess.Popen(["wtype", "-M", "alt", "-k", "x", "-"], env=self.wm.env,
+                                  stdin=subprocess.PIPE)
+        self.wm.clients.append(typist)
+        workspaces.next_event(EVENT_WORKSPACE, lambda e: e["change"] == "init"
+                              and e["current"]["name"] == "held")
+        rect = self.window(parent)["rect"]
+        # Alt+drag from the parent's corner, clear of its dialog
+        subprocess.run([POINTER, "move", str(rect["x"] + 20), str(rect["y"] + 20),
+                        str(width), str(height), "press", "left",
+                        "move", str(other["rect"]["x"] + other["rect"]["width"] // 2),
+                        str(other["rect"]["y"] + other["rect"]["height"] // 2),
+                        str(width), str(height), "release", "left"],
+                       env=self.wm.env, check=True, timeout=TIMEOUT)
+        typist.stdin.close()
+        typist.wait(TIMEOUT)
+        windows = self.windows()
+        self.assertEqual((windows[parent]["output"], windows[dialog]["output"]),
+                         (other["name"], other["name"]))
+
+    def test_a_dialog_on_a_hidden_workspace_shows_once_it_follows(self):
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        other, _ = self.other(parent)
+        self.command(self.connect(), f"[con_id={dialog}] move to output {other['name']}")
+        self.command(self.connect(), f"[con_id={dialog}] move to workspace hidden")
+        self.command(self.connect(), f"[con_id={parent}] move to output {other['name']}")
+        self.assertEqual(self.window(dialog)["workspace"], "1")
+        self.assertEqual(self.clicked(dialog), dialog)
+
+    def test_an_urgent_dialogs_urgency_goes_with_it_when_it_follows(self):
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        other, _ = self.other(parent)
+        # The parent on hidden workspace a, its dialog on hidden b on the
+        # other output, and urgent
+        self.command(self.connect(), f"[con_id={parent}] move to workspace a")
+        self.command(self.connect(), f"[con_id={dialog}] move to output {other['name']}")
+        self.command(self.connect(), f"[con_id={dialog}] move to workspace b")
+        self.command(self.connect(), f"[con_id={dialog}] urgent enable")
+        workspaces = self.connect()
+        workspaces.subscribe("workspace")
+        self.command(self.connect(), f"[con_id={parent}] move to output {other['name']}")
+        # A new workspace's event comes after the move's
+        self.command(self.connect(), "persist workspace end")
+        changes = {}
+        while (event := workspaces.next_event(EVENT_WORKSPACE))["change"] != "init":
+            if event["change"] == "urgent":
+                changes[event["current"]["name"]] = event["current"]["urgent"]
+        self.assertEqual(self.window(dialog)["workspace"], "a")
+        self.assertEqual(changes, {"a": True})
+
+    def test_a_dialog_follows_its_parent_to_another_output_to_its_middle(self):
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        other, _ = self.other(parent)
+        self.command(self.connect(), f"[con_id={parent}] move to output {other['name']}")
+        windows = self.windows()
+        self.assertEqual((windows[parent]["output"], windows[dialog]["output"]),
+                         (other["name"], other["name"]))
+        self.assertCenteredOn(windows[dialog]["rect"], windows[parent]["rect"])
 
 
 if __name__ == "__main__":
