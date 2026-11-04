@@ -17,6 +17,10 @@ lands with a test.
 
 ## Done
 
+- **On-demand layers keep the keyboard** (#40): a notification's reply
+  field takes the keyboard when clicked, and keeps it while a window opens
+  or closes or the pointer crosses one, until a click, a key binding or a
+  command moves it, or the launcher or the lock takes it.
 - **A dead lock** (#39): the IPC's `unlock` drops a lock whose locker has
   gone, from a TTY, keeping the session; a new locker takes it over with
   no window shown or focused between. No pointer event reached a window
@@ -106,6 +110,12 @@ lands with a test.
 
 ## Decisions needing review
 
+- **Hovering no longer focuses an on-demand layer** (#40): dwl gave one
+  the keyboard when the pointer crossed it, under focus-follows-mouse;
+  now only a click does, as tide's SPEC §14.1 has a notification's reply
+  field, and as wlr-layer-shell allows ("requiring a click even if focus
+  follows the mouse"). Otherwise moving the pointer over a notification
+  would take your typing and keep it. Reversible.
 - **The command is `unlock`** (#39), tidewm's own, as sway has none:
   Hyprland's is `hl.clear_crashed_lockscreen()`. It fails, doing nothing,
   while a locker holds the lock, so it never unlocks a working lock
@@ -310,16 +320,15 @@ lands with a test.
 
 ## Plan
 
-1. **Keyboard**: on-demand layers keep the keyboard.
-2. **Capture**: window identifiers over the IPC; capture start and stop
+1. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
-3. **Outside clicks**: a focus-grab protocol or click event for the
+2. **Outside clicks**: a focus-grab protocol or click event for the
    notification center.
-4. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+3. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
    client starts Xwayland, and a window it maps before wlroots' window
    manager watches the root is never managed (the tests' client waits
    for it): start Xwayland ahead of clients, or take on windows already
    there.
-5. **Session**: the entry and wrapper tide starts it with.
+4. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

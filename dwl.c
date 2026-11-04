@@ -456,6 +456,10 @@ static pid_t child_pid = -1;
 static int locked;
 static unsigned long urgent_count; /* windows marked urgent so far, for Client.urgent_seq */
 static Client *focused_client;
+/* Focus moving now was asked for, by a click, a key, button or scroll
+ * binding, a command or the lock: only then does an on-demand layer give
+ * up the keyboard */
+static int focus_asked;
 /* tidewm's own switch device, made the first time the switch command
  * moves it, as if a real switch had: for a test, which has no lid, or a
  * lid the hardware doesn't report */
@@ -768,7 +772,9 @@ axisnotify(struct wl_listener *listener, void *data)
 		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
 		for (a = axes; a < END(axes); a++) {
 			if (CLEANMASK(mods) == CLEANMASK(a->mod) && adir == a->dir && a->func) {
+				focus_asked++;
 				a->func(&a->arg);
+				focus_asked--;
 				return;
 			}
 		}
@@ -809,18 +815,22 @@ buttonpress(struct wl_listener *listener, void *data)
 		/* Change focus if the button was _pressed_ over a client
 		   or a layer surface with on-demand keyboard interactivity */
 		xytonode(cursor->x, cursor->y, NULL, &c, &l, NULL, NULL);
+		focus_asked++;
 		if (c && (!client_is_unmanaged(c) || client_wants_focus(c))) {
 			focusclient(c, NULL, 1);
 		} else if (l && l->layer_surface->current.keyboard_interactive) {
 			focusclient(NULL, l, 0);
 		}
+		focus_asked--;
 
 		keyboard = wlr_seat_get_keyboard(seat);
 		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
 		for (b = buttons; b < END(buttons); b++) {
 			if (CLEANMASK(mods) == CLEANMASK(b->mod) &&
 					event->button == b->button && b->func) {
+				focus_asked++;
 				b->func(&b->arg);
+				focus_asked--;
 				return;
 			}
 		}
@@ -1697,6 +1707,9 @@ focusclient(Client *c, LayerSurface *l, int lift)
 			&& old_l->layer_surface->current.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP
 			&& old_l->layer_surface->current.keyboard_interactive == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE)
 		return;
+	/* Nor one with on-demand focus you're typing in, unless you ask */
+	if (old_client_type == LayerShell && fg_layer_keeps(old_l, l))
+		return;
 
 	if (focused_client && focused_client != c && !(c && client_is_unmanaged(c))) {
 		struct wlr_surface *s = client_surface(focused_client);
@@ -2084,7 +2097,9 @@ locksession(struct wl_listener *listener, void *data)
 		return;
 	}
 	lock = session_lock->data = ecalloc(1, sizeof(*lock));
+	focus_asked++;
 	focusclient(NULL, NULL, 0);
+	focus_asked--;
 
 	lock->scene = wlr_scene_tree_create(layers[LyrBlock]);
 	cur_lock = lock->lock = session_lock;
@@ -2721,10 +2736,13 @@ pointerfocus(Client *c, LayerSurface *l, struct wlr_surface *surface, double sx,
 {
 	struct timespec now;
 
+	/* An on-demand layer, such as a notification's reply field, takes the
+	 * keyboard only when it's clicked, as tide's SPEC §14.1 has it */
 	if (surface != seat->pointer_state.focused_surface && sloppyfocus && time) {
 		if (c && (!client_is_unmanaged(c) || client_wants_focus(c))) {
 			focusclient(c, NULL, 0);
-		} else if (l && l->layer_surface->current.keyboard_interactive) {
+		} else if (l && l->layer_surface->current.keyboard_interactive
+				== ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
 			focusclient(NULL, l, 0);
 		}
 	}
@@ -2954,7 +2972,9 @@ runbinding(uint32_t mods, xkb_keysym_t sym)
 	/* config.h's keys are all off on the lock screen */
 	if (locked || !(key = keybinding(mods, sym)))
 		return 0;
+	focus_asked++;
 	key->func(&key->arg);
+	focus_asked--;
 	return 1;
 }
 

@@ -9,6 +9,8 @@
  *   press BUTTON              press left, middle or right
  *   release BUTTON            release it
  *   move X Y WIDTH HEIGHT     move to X,Y, in a layout WIDTH by HEIGHT
+ *   cross X Y WIDTH HEIGHT    move there as a mouse does, with a time, which
+ *                             focus follows; a move, with none, jumps there
  *   scroll [up]               scroll down a step, or up
  */
 #include <linux/input-event-codes.h>
@@ -33,7 +35,7 @@ static void
 usage(void)
 {
 	die("usage: pointer click | press BUTTON | release BUTTON | move X Y WIDTH HEIGHT "
-			"| scroll [up] ...");
+			"| cross X Y WIDTH HEIGHT | scroll [up] ...");
 }
 
 static void
@@ -124,13 +126,21 @@ main(int argc, char *argv[])
 			zwlr_virtual_pointer_v1_axis(pointer, 0, WL_POINTER_AXIS_VERTICAL_SCROLL,
 					wl_fixed_from_int(up ? -15 : 15));
 			zwlr_virtual_pointer_v1_frame(pointer);
-		} else if (!strcmp(argv[i], "move") && i + 4 < argc) {
+		} else if ((!strcmp(argv[i], "move") || !strcmp(argv[i], "cross")) && i + 4 < argc) {
 			uint32_t x = number(argv[i + 1]), y = number(argv[i + 2]);
 			uint32_t width = number(argv[i + 3]), height = number(argv[i + 4]);
-			i += 4;
 			/* Time 0, as a virtual pointer's, warps the cursor there */
-			zwlr_virtual_pointer_v1_motion_absolute(pointer, 0, x, y, width, height);
+			uint32_t time = !strcmp(argv[i], "cross");
+			i += 4;
+			zwlr_virtual_pointer_v1_motion_absolute(pointer, time, x, y, width, height);
 			zwlr_virtual_pointer_v1_frame(pointer);
+			/* dwl finds what's under the pointer before moving it, so a
+			 * mouse's next motion, there already, is what crosses */
+			if (time) {
+				zwlr_virtual_pointer_v1_motion_absolute(pointer, time + 1, x, y,
+						width, height);
+				zwlr_virtual_pointer_v1_frame(pointer);
+			}
 		} else {
 			usage();
 		}
