@@ -17,6 +17,10 @@
  * and "title TEXT" sets its title, which a window manager hears of after
  * any change before it.
  *
+ * With FULLSCREEN set in its environment, it says it's fullscreen in
+ * _NET_WM_STATE before it maps, as an X11 game or video player does, once
+ * wlroots' window manager watches the window (wait_for_watch).
+ *
  * Usage: x11client CLASS TITLE
  */
 #include <poll.h>
@@ -70,6 +74,55 @@ wait_for_wm(xcb_connection_t *conn, xcb_window_t root)
 	free(atom);
 	mask = 0;
 	xcb_change_window_attributes(conn, root, XCB_CW_EVENT_MASK, &mask);
+}
+
+static xcb_atom_t
+intern(xcb_connection_t *conn, const char *name)
+{
+	xcb_intern_atom_reply_t *reply;
+	xcb_atom_t atom;
+	if (!(reply = xcb_intern_atom_reply(conn,
+			xcb_intern_atom(conn, 0, (uint16_t)strlen(name), name), NULL)))
+		die("can't intern an atom");
+	atom = reply->atom;
+	free(reply);
+	return atom;
+}
+
+/* Waits until wlroots' window manager watches win's properties, as it does
+ * once it has handled win's creation. Until then it misses a change, and
+ * mapping win writes its own idea of _NET_WM_STATE over the window's
+ * (TODO.md, Known bugs). A _NET_WM_STATE message for a state nothing here
+ * uses makes it write that property, and win, watching its own
+ * properties, hears it: the window manager handles events in order, so
+ * it has handled win's creation by then. */
+static void
+wait_for_watch(xcb_connection_t *conn, xcb_window_t root, xcb_window_t win)
+{
+	xcb_atom_t state = intern(conn, "_NET_WM_STATE");
+	uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
+	xcb_client_message_event_t msg = {0};
+	xcb_generic_event_t *event;
+	int heard = 0;
+	xcb_change_window_attributes(conn, win, XCB_CW_EVENT_MASK, &mask);
+	msg.response_type = XCB_CLIENT_MESSAGE;
+	msg.format = 32;
+	msg.window = win;
+	msg.type = state;
+	msg.data.data32[0] = 1; /* _NET_WM_STATE_ADD */
+	msg.data.data32[1] = intern(conn, "_NET_WM_STATE_SKIP_PAGER");
+	xcb_send_event(conn, 0, root, XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT
+			| XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, (const char *)&msg);
+	xcb_flush(conn);
+	while (!heard) {
+		if (!(event = xcb_wait_for_event(conn)))
+			die("the X server went before the window manager watched the window");
+		heard = (event->response_type & ~0x80) == XCB_PROPERTY_NOTIFY
+				&& ((xcb_property_notify_event_t *)event)->atom == state;
+		free(event);
+	}
+	mask = 0;
+	xcb_change_window_attributes(conn, win, XCB_CW_EVENT_MASK, &mask);
 }
 
 /* Asks the window manager to activate win, as an application does: source
@@ -155,6 +208,12 @@ main(int argc, char *argv[])
 	/* A title change while unmapped */
 	xcb_icccm_set_wm_name(conn, win, XCB_ATOM_STRING, 8,
 			(uint32_t)strlen(argv[2]), argv[2]);
+	if (getenv("FULLSCREEN")) {
+		xcb_atom_t fullscreen = intern(conn, "_NET_WM_STATE_FULLSCREEN");
+		wait_for_watch(conn, screen->root, win);
+		xcb_change_property(conn, XCB_PROP_MODE_REPLACE, win, intern(conn, "_NET_WM_STATE"),
+				XCB_ATOM_ATOM, 32, 1, &fullscreen);
+	}
 	sync_server(conn);
 	xcb_map_window(conn, win);
 	xcb_flush(conn);
