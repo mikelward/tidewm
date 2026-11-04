@@ -25,6 +25,15 @@
  *           opens one titled Dialog that takes the title TITLE after its
  *           first commit, before it maps.
  * subdialog opens that dialog's own dialog, APP_ID.dialog.dialog.
+ * menu      opens a menu, an xdg popup of 50x50 by the window's top left
+ *           corner, and prints "menu" once the compositor has it, and
+ *           "menu closed" if the compositor closes it.
+ * grab      grabs focus for the window, over hyprland-focus-grab-v1, as
+ *           Quickshell's HyprlandFocusGrab does, and prints "grabbing" once
+ *           the compositor has the grab, and "cleared" when it ends it.
+ * grab menu grabs focus for its menu alone, likewise.
+ * ping      prints "pong" once the compositor has answered, so anything
+ *           it said before then has been printed.
  *
  * It prints "maximized" or "unmaximized" when the compositor says it's
  * maximized, or no longer, and "fullscreen" or "unfullscreen" likewise.
@@ -39,7 +48,9 @@
  * its content is that, over wp-content-type-v1. With SCROLLS set, it
  * prints "pointing" once the compositor has its wl_pointer, which waits
  * for the seat to have a pointer, "scroll AMOUNT" for each vertical
- * scroll it gets, and "button" for each button pressed on it.
+ * scroll it gets, and "button" for each button pressed on it. With
+ * GRAB_FIRST set, it grabs focus for itself, as the grab command does,
+ * before it first commits, so before it maps.
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -53,6 +64,7 @@
 #include <unistd.h>
 #include <wayland-client.h>
 
+#include "hyprland-focus-grab-v1-client-protocol.h"
 #include "xdg-activation-v1-client-protocol.h"
 #include "content-type-v1-client-protocol.h"
 #include "xdg-dialog-v1-client-protocol.h"
@@ -64,6 +76,10 @@ static struct xdg_wm_base *wm_base;
 static struct xdg_activation_v1 *activation;
 static struct xdg_wm_dialog_v1 *wm_dialog;
 static struct wp_content_type_manager_v1 *content_types;
+static struct hyprland_focus_grab_manager_v1 *grabs;
+static struct xdg_surface *window_xdg; /* the window's */
+static struct wl_surface *menu_surface;
+static int menu_configured;
 static struct wl_seat *seat;
 static struct wl_pointer *pointer;
 static struct xdg_toplevel *window;
@@ -285,6 +301,87 @@ static const struct wl_callback_listener synced_listener = {
 };
 
 static void
+menu_configure(void *data, struct xdg_surface *xs, uint32_t serial)
+{
+	xdg_surface_ack_configure(xs, serial);
+	if (menu_configured)
+		return;
+	menu_configured = 1;
+	paint(menu_surface, 50, 50);
+	wl_callback_add_listener(wl_display_sync(display), &synced_listener, (void *)"menu");
+}
+
+static const struct xdg_surface_listener menu_listener = {
+	.configure = menu_configure,
+};
+
+static void
+popup_configure(void *data, struct xdg_popup *popup, int32_t x, int32_t y, int32_t w,
+		int32_t h)
+{
+}
+
+static void
+popup_done(void *data, struct xdg_popup *popup)
+{
+	printf("menu closed\n");
+	fflush(stdout);
+}
+
+static void
+popup_repositioned(void *data, struct xdg_popup *popup, uint32_t token)
+{
+}
+
+static const struct xdg_popup_listener popup_listener = {
+	.configure = popup_configure,
+	.popup_done = popup_done,
+	.repositioned = popup_repositioned,
+};
+
+static void
+open_menu(void)
+{
+	struct xdg_surface *menu_xdg;
+	struct xdg_positioner *positioner;
+	struct xdg_popup *popup;
+	menu_surface = wl_compositor_create_surface(compositor);
+	menu_xdg = xdg_wm_base_get_xdg_surface(wm_base, menu_surface);
+	xdg_surface_add_listener(menu_xdg, &menu_listener, NULL);
+	positioner = xdg_wm_base_create_positioner(wm_base);
+	xdg_positioner_set_size(positioner, 50, 50);
+	xdg_positioner_set_anchor_rect(positioner, 0, 0, 1, 1);
+	popup = xdg_surface_get_popup(menu_xdg, window_xdg, positioner);
+	xdg_popup_add_listener(popup, &popup_listener, NULL);
+	xdg_positioner_destroy(positioner);
+	wl_surface_commit(menu_surface);
+}
+
+static void
+grab_cleared(void *data, struct hyprland_focus_grab_v1 *grab)
+{
+	printf("cleared\n");
+	fflush(stdout);
+}
+
+static const struct hyprland_focus_grab_v1_listener grab_listener = {
+	.cleared = grab_cleared,
+};
+
+static void
+grab_surface(struct wl_surface *s)
+{
+	struct hyprland_focus_grab_v1 *grab;
+	if (!grabs || !s)
+		die("the compositor lacks hyprland_focus_grab_manager_v1, or there's no menu");
+	grab = hyprland_focus_grab_manager_v1_create_grab(grabs);
+	hyprland_focus_grab_v1_add_listener(grab, &grab_listener, NULL);
+	hyprland_focus_grab_v1_add_surface(grab, s);
+	hyprland_focus_grab_v1_commit(grab);
+	wl_callback_add_listener(wl_display_sync(display), &synced_listener, (void *)"grabbing");
+}
+
+static void
 pointer_enter(void *data, struct wl_pointer *p, uint32_t serial, struct wl_surface *s,
 		wl_fixed_t x, wl_fixed_t y)
 {
@@ -420,6 +517,8 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 	else if (!strcmp(interface, wp_content_type_manager_v1_interface.name))
 		content_types = wl_registry_bind(registry, name,
 				&wp_content_type_manager_v1_interface, 1);
+	else if (!strcmp(interface, hyprland_focus_grab_manager_v1_interface.name))
+		grabs = wl_registry_bind(registry, name, &hyprland_focus_grab_manager_v1_interface, 1);
 	else if (!strcmp(interface, wl_seat_interface.name) && getenv("SCROLLS") && !seat) {
 		seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 5 ? version : 5);
 		wl_seat_add_listener(seat, &seat_listener, NULL);
@@ -473,13 +572,20 @@ command(const char *line)
 		open_dialog(0, "Dialog", line + 16);
 	} else if (!strcmp(line, "subdialog")) {
 		open_dialog(1, "Dialog", NULL);
+	} else if (!strcmp(line, "menu")) {
+		open_menu();
+	} else if (!strcmp(line, "grab")) {
+		grab_surface(surface);
+	} else if (!strcmp(line, "grab menu")) {
+		grab_surface(menu_surface);
+	} else if (!strcmp(line, "ping")) {
+		wl_callback_add_listener(wl_display_sync(display), &synced_listener, (void *)"pong");
 	}
 }
 
 int
 main(int argc, char *argv[])
 {
-	struct xdg_surface *xsurface;
 	const char *min = getenv("MIN_SIZE"), *max = getenv("MAX_SIZE"), *size = getenv("SIZE");
 	const char *content;
 	int hint_width, hint_height;
@@ -499,9 +605,9 @@ main(int argc, char *argv[])
 	xdg_wm_base_add_listener(wm_base, &wm_base_listener, NULL);
 
 	surface = wl_compositor_create_surface(compositor);
-	xsurface = xdg_wm_base_get_xdg_surface(wm_base, surface);
-	xdg_surface_add_listener(xsurface, &xdg_surface_listener, NULL);
-	window = xdg_surface_get_toplevel(xsurface);
+	window_xdg = xdg_wm_base_get_xdg_surface(wm_base, surface);
+	xdg_surface_add_listener(window_xdg, &xdg_surface_listener, NULL);
+	window = xdg_surface_get_toplevel(window_xdg);
 	xdg_toplevel_add_listener(window, &toplevel_listener, NULL);
 	xdg_toplevel_set_app_id(window, app_id = argv[1]);
 	xdg_toplevel_set_title(window, title = argv[2]);
@@ -533,6 +639,8 @@ main(int argc, char *argv[])
 		xdg_toplevel_set_maximized(window);
 	if (getenv("FULLSCREEN"))
 		xdg_toplevel_set_fullscreen(window, NULL);
+	if (getenv("GRAB_FIRST"))
+		grab_surface(surface);
 	wl_surface_commit(surface);
 
 	for (int input = STDIN_FILENO;;) {

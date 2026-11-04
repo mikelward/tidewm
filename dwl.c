@@ -85,6 +85,7 @@
 #endif
 
 #include "xdg-shell-protocol.h"
+#include "hyprland-focus-grab-v1-protocol.h"
 #include "util.h"
 
 /* macros */
@@ -576,6 +577,7 @@ static struct wlr_xwayland *xwayland;
 #include "settings.h"
 #include "layout.h"
 #include "focus.h"
+#include "grab.h"
 #include "floating.h"
 #include "dim.h"
 #include "capture.h"
@@ -799,6 +801,7 @@ buttonpress(struct wl_listener *listener, void *data)
 	uint32_t mods;
 	Client *c = NULL;
 	LayerSurface *l = NULL;
+	struct wlr_surface *surface = NULL;
 	const Button *b;
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
@@ -816,12 +819,17 @@ buttonpress(struct wl_listener *listener, void *data)
 
 		/* Change focus if the button was _pressed_ over a client
 		   or a layer surface with on-demand keyboard interactivity */
-		xytonode(cursor->x, cursor->y, NULL, &c, &l, NULL, NULL);
+		xytonode(cursor->x, cursor->y, &surface, &c, &l, NULL, NULL);
+		/* A click outside a focus grab ends it, and goes no further */
+		if (grab_click(surface, event->button))
+			return;
 		focus_asked++;
-		if (c && (!client_is_unmanaged(c) || client_wants_focus(c))) {
-			focusclient(c, NULL, 1);
-		} else if (l && l->layer_surface->current.keyboard_interactive) {
-			focusclient(NULL, l, 0);
+		/* Inside a focus grab, the keyboard stays where the grab has it */
+		if (!grab_has_keyboard()) {
+			if (c && (!client_is_unmanaged(c) || client_wants_focus(c)))
+				focusclient(c, NULL, 1);
+			else if (l && l->layer_surface->current.keyboard_interactive)
+				focusclient(NULL, l, 0);
 		}
 		focus_asked--;
 
@@ -838,6 +846,10 @@ buttonpress(struct wl_listener *listener, void *data)
 		}
 		break;
 	case WL_POINTER_BUTTON_STATE_RELEASED:
+		if (grab_release(event->button)) {
+			cursor_mode = CurNormal;
+			return;
+		}
 		/* If you released any buttons, we exit interactive move/resize mode. */
 		if (!locked && cursor_mode != CurNormal && cursor_mode != CurPressed) {
 			cursor_mode = CurNormal;
@@ -911,6 +923,7 @@ cleanup(void)
 {
 	ipc_finish();
 	fg_finish();
+	grab_finish();
 	fl_finish();
 	if (ownswitch) {
 		wlr_switch_finish(ownswitch);
@@ -1065,6 +1078,7 @@ commitlayersurfacenotify(struct wl_listener *listener, void *data)
 	struct wlr_layer_surface_v1 *layer_surface = l->layer_surface;
 	struct wlr_scene_tree *scene_layer = layers[layermap[layer_surface->current.layer]];
 	struct wlr_layer_surface_v1_state old_state;
+	int mapping;
 
 	if (l->layer_surface->initial_commit) {
 		client_set_scale(layer_surface->surface, l->mon->wlr_output->scale);
@@ -1080,6 +1094,7 @@ commitlayersurfacenotify(struct wl_listener *listener, void *data)
 
 	if (layer_surface->current.committed == 0 && l->mapped == layer_surface->surface->mapped)
 		return;
+	mapping = !l->mapped && layer_surface->surface->mapped;
 	l->mapped = layer_surface->surface->mapped;
 
 	if (scene_layer != l->scene->node.parent) {
@@ -1091,6 +1106,9 @@ commitlayersurfacenotify(struct wl_listener *listener, void *data)
 	}
 
 	arrangelayers(l->mon);
+	/* A focus grab that names it may give it the keyboard now (grab.h) */
+	if (mapping)
+		grab_mapped(layer_surface->surface);
 }
 
 void
@@ -1675,7 +1693,18 @@ focusclient(Client *c, LayerSurface *l, int lift)
 	if (c && client_surface(c) == old)
 		return;
 
-	if ((old_client_type = toplevel_from_wlr_surface(old, &old_c, &old_l)) == XDGShell) {
+	/* A focus grab that keeps the keyboard, unless you ask, keeps its
+	 * windows' menus open, and the window it holds the selected one, though
+	 * a new one went atop the focus stack as it mapped (grab.h) */
+	old_client_type = toplevel_from_wlr_surface(old, &old_c, &old_l);
+	if (grab_keeps(c, l)) {
+		if (old_c && !client_is_unmanaged(old_c)) {
+			wl_list_remove(&old_c->flink);
+			wl_list_insert(&fstack, &old_c->flink);
+		}
+		return;
+	}
+	if (old_client_type == XDGShell) {
 		struct wlr_xdg_popup *popup, *tmp;
 		wl_list_for_each_safe(popup, tmp, &old_c->surface.xdg->popups, link)
 			wlr_xdg_popup_destroy(popup);
@@ -2227,6 +2256,8 @@ mapnotify(struct wl_listener *listener, void *data)
 	if (c == focused_client)
 		ipc_event_window(c, "focus");
 	fg_opened(c, grant_ws);
+	/* A focus grab that names it may give it the keyboard now (grab.h) */
+	grab_mapped(client_surface(c));
 
 unset_fullscreen:
 	/* One the focus guard holds leaves the window you're in as it is */
@@ -2738,6 +2769,13 @@ pointerfocus(Client *c, LayerSurface *l, struct wlr_surface *surface, double sx,
 		uint32_t time)
 {
 	struct timespec now;
+
+	/* While a focus grab holds, the pointer enters only its surfaces */
+	if (!grab_accepts(surface)) {
+		c = NULL;
+		l = NULL;
+		surface = NULL;
+	}
 
 	/* An on-demand layer, such as a notification's reply field, takes the
 	 * keyboard only when it's clicked, as tide's SPEC §14.1 has it */
@@ -3311,6 +3349,7 @@ setup(void)
 	wlr_export_dmabuf_manager_v1_create(dpy);
 	wlr_screencopy_manager_v1_create(dpy);
 	capture_init(wlr_ext_image_copy_capture_manager_v1_create(dpy, 1));
+	grab_init();
 	wlr_ext_output_image_capture_source_manager_v1_create(dpy, 1);
 	wlr_data_control_manager_v1_create(dpy);
 	wlr_ext_data_control_manager_v1_create(dpy, 1);

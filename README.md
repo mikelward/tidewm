@@ -152,6 +152,14 @@ run a command, or the launcher or the lock takes it, as tide's SPEC §14.1
 has it. A window opening or closing, or the pointer crossing one, doesn't
 take it.
 
+A notification center's focus grab, over hyprland-focus-grab-v1, which
+Quickshell's `HyprlandFocusGrab` speaks, closes it on a click outside,
+as tide's SPEC §9 has it. While the grab holds, the keyboard stays with
+the center and the pointer enters only it, so crossing away doesn't end
+it. The click that ends it goes no further, as one outside a menu
+doesn't. A key binding or command that moves focus, the launcher or the
+lock end it too.
+
 ### A lone window
 
 A tiled window alone on its monitor is centered at 80% of the window
