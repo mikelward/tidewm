@@ -305,6 +305,71 @@ bindsym Mod1+z workspace marker
         self.assertEqual(self.pointer_with_super("scroll"), "marker")
 
 
+class BindSwitchTest(KeysTest):
+    """sway's bindswitch, for the lid, with the switch command moving
+    tidewm's own switch device, as the headless backend has none."""
+    CONFIG = """bindswitch lid:on output HEADLESS-1 disable
+bindswitch --locked lid:off output HEADLESS-1 enable
+bindswitch tablet:toggle nop tablet
+"""
+
+    def test_switch_bindings_load(self):
+        config = self.connect().request(GET_CONFIG)
+        self.assertEqual((config["config"], config["errors"]), (self.CONFIG, []))
+
+    def test_bad_switch_bindings_are_errors(self):
+        for text, error in [
+            ("bindswitch lid:open nop\n", ":1: bindswitch lid:open: a switch is lid or tablet, "
+             "and its state on, off or toggle"),
+            ("bindswitch hinge:on nop\n", ":1: bindswitch hinge:on: a switch is lid or tablet, "
+             "and its state on, off or toggle"),
+            ("bindswitch lid nop\n", ":1: bindswitch lid: a switch is lid or tablet, "
+             "and its state on, off or toggle"),
+            ("bindswitch lid:on\n", ":1: bindswitch needs a switch and a command"),
+            ("bindswitch --reload lid:on nop\n", ":1: bindswitch has no flag --reload"),
+            ("mode m {\nbindswitch lid:on nop\n}\n", ":2: bindswitch can't be in a mode"),
+        ]:
+            self.wm.write_config(text)
+            self.assertIn(error, self.fails("reload")["error"], text)
+        self.assertEqual(self.connect().request(GET_CONFIG)["config"], self.CONFIG)
+
+
+class SwitchTest(KeysTest):
+    CONFIG = """bindswitch lid:on workspace closed
+bindswitch lid:off workspace opened
+bindswitch tablet:toggle workspace tablet
+"""
+
+    def test_a_switch_runs_the_binding_for_its_state(self):
+        ipc = self.workspaces_ipc()
+        self.command(self.connect(), "switch lid on")
+        self.assertEqual(self.shown(ipc), "closed")
+        self.command(self.connect(), "switch lid off")
+        self.assertEqual(self.shown(ipc), "opened")
+
+    def test_toggle_runs_for_either_state(self):
+        ipc = self.workspaces_ipc()
+        self.command(self.connect(), "switch tablet on")
+        self.assertEqual(self.shown(ipc), "tablet")
+        self.command(self.connect(), "workspace 1")
+        self.assertEqual(self.shown(ipc), "1")
+        self.command(self.connect(), "switch tablet off")
+        self.assertEqual(self.shown(ipc), "tablet")
+
+    def test_a_switch_binding_that_runs_says_so(self):
+        ipc = self.connect()
+        ipc.subscribe("binding")
+        self.command(self.connect(), "switch lid on")
+        self.assertEqual(ipc.next_event(EVENT_BINDING), {"change": "run", "binding": {
+            "command": "workspace closed", "event_state_mask": [], "input_code": 0,
+            "symbol": None, "input_type": "switch"}})
+
+    def test_the_switch_command_takes_a_switch_and_a_state(self):
+        for command in ["switch", "switch lid", "switch lid open", "switch hinge on",
+                        "switch lid on now"]:
+            self.fails(command)
+
+
 class BindingEventTest(KeysTest):
     CONFIG = """bindsym --release Super_L nop launcher
 bindsym Mod1+Shift+z nop marker
@@ -339,6 +404,19 @@ class LockTest(KeysTest):
         locker.stdin.write(b"unlock\n")
         locker.stdin.flush()
         self.assertEqual(locker.wait(TIMEOUT), 0)
+
+
+class LockedSwitchTest(LockTest):
+    CONFIG = """bindswitch lid:on workspace closed
+bindswitch --locked lid:off workspace opened
+"""
+
+    def test_only_locked_switch_bindings_run_on_the_lock_screen(self):
+        ipc = self.workspaces_ipc()
+        self.lock()
+        self.command(self.connect(), "switch lid on")  # not --locked: nothing
+        self.command(self.connect(), "switch lid off")
+        self.assertEqual(self.shown(ipc), "opened")
 
 
 class LockedTest(LockTest):

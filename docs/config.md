@@ -29,6 +29,7 @@ supported yet. In an `input` or `output` line, a name or value may be in
 |---|---|
 | `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
+| `bindswitch [--locked] SWITCH:STATE COMMANDS` | As sway's: a switch turning on, off or either (`lid:on`, `lid:off`, `lid:toggle`, and `tablet:` likewise) runs `COMMANDS`; on the lock screen, only a `--locked` one. Not in a mode. `bindswitch lid:on output eDP-1 disable` and `bindswitch --locked lid:off output eDP-1 enable` turn a laptop's panel off while its lid is closed, and its windows move over; like sway, it does so whether or not another output is on |
 | `for_window [CRITERIA] COMMANDS` | Runs `COMMANDS` on each new window `CRITERIA` match, as below |
 | `output NAME SETTINGS` | Sets up the output called `NAME`, or every output for `*`, as below |
 | `input NAME SETTING VALUE` | Sets up the input devices `NAME` names, as below; `input NAME {` … `}` takes a setting a line |

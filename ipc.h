@@ -913,6 +913,19 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		ipc_zoom(target);
 		return ipc_json_success(1, NULL);
 	}
+	/* tidewm's own: moves its own switch device, as if a switch such as
+	 * the lid had moved, which runs the config file's bindswitch lines */
+	if (!has_criteria && ipc_take(&cmd, "switch")) {
+		int type = ipc_take(&cmd, "lid") ? WLR_SWITCH_TYPE_LID
+			: ipc_take(&cmd, "tablet") ? WLR_SWITCH_TYPE_TABLET_MODE : -1;
+		int on = ipc_take(&cmd, "on") ? 1 : ipc_take(&cmd, "off") ? 0 : -1;
+		if (type < 0 || on < 0 || *cmd) {
+			error = "Expected switch lid|tablet on|off";
+			goto parse_error;
+		}
+		switchset(type, on);
+		return ipc_json_success(1, NULL);
+	}
 	if (!has_criteria && ipc_take(&cmd, "chvt")) {
 		unsigned int vt;
 		char extra;
@@ -1338,7 +1351,7 @@ ipc_event_window(Client *c, const char *change)
 /* A binding event, as sway's: the config file's binding of mods and sym
  * ran command, as a tap of Super runs tide's launcher's */
 static void
-ipc_event_binding(const char *command, uint32_t mods, xkb_keysym_t sym)
+ipc_event_binding(const char *command, uint32_t mods, xkb_keysym_t sym, const char *input_type)
 {
 	/* WLR_MODIFIER_SHIFT up to WLR_MODIFIER_MOD5, as sway names them */
 	static const char *const names[] = {
@@ -1357,9 +1370,10 @@ ipc_event_binding(const char *command, uint32_t mods, xkb_keysym_t sym)
 	json_object_object_add(binding, "command", json_object_new_string(command));
 	json_object_object_add(binding, "event_state_mask", mask);
 	json_object_object_add(binding, "input_code", json_object_new_int(0));
-	json_object_object_add(binding, "symbol", xkb_keysym_get_name(sym, symbol, sizeof(symbol)) > 0
+	json_object_object_add(binding, "symbol", sym != XKB_KEY_NoSymbol
+			&& xkb_keysym_get_name(sym, symbol, sizeof(symbol)) > 0
 			? json_object_new_string(symbol) : NULL);
-	json_object_object_add(binding, "input_type", json_object_new_string("keyboard"));
+	json_object_object_add(binding, "input_type", json_object_new_string(input_type));
 	obj = json_object_new_object();
 	json_object_object_add(obj, "change", json_object_new_string("run"));
 	json_object_object_add(obj, "binding", binding);

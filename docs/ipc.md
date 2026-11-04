@@ -91,6 +91,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `nmaster N\|+N\|-N` | tidewm's own: how many windows the master area holds on the focused monitor |
 | `mfact F\|+F\|-F` | tidewm's own: the master area's share of the focused monitor's width, from 0.1 to 0.9. Only a finite number will do |
 | `zoom` | tidewm's own: swaps the focused window with the master, or with the next window if it's the master |
+| `switch lid\|tablet on\|off` | tidewm's own: moves a switch device of tidewm's own, as if a switch such as the lid had moved, which runs the config file's `bindswitch` lines for it ([`config.md`](config.md)): for a test, which has no lid, or a lid the hardware doesn't report |
 | `chvt N` | tidewm's own: switches to virtual terminal `N`; fails without a session, as on the headless backend |
 | `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD` |
 | `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |
@@ -154,7 +155,7 @@ in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
 | `output` | `0x80000001` | An output appears or goes: `{"change": "unspecified"}` |
 | `mode` | `0x80000002` | The binding mode changes: `{"change": NAME, "pango_markup": false}` |
 | `window` | `0x80000003` | A window is `new`, `close`d, gets `focus`, changes `title`, `fullscreen_mode`, `floating` or `urgent`, is maximized or not (tidewm's own `maximize`), or moves to another workspace or output, by a command, a key or a drag (`move`): `{"change": ..., "container": ...}`. A window's first event is `new`, sent once it has an output, workspace and floating state |
-| `binding` | `0x80000005` | A config file's binding runs, as in sway: `{"change": "run", "binding": {"command": ..., "event_state_mask": [...], "input_code": 0, "symbol": ..., "input_type": "keyboard"}}`, the modifiers named `Shift`, `Lock`, `Ctrl` and `Mod1` to `Mod5`, and the symbol as the binding has it. `config.h`'s keys run no command and send none |
+| `binding` | `0x80000005` | A config file's binding runs, as in sway: `{"change": "run", "binding": {"command": ..., "event_state_mask": [...], "input_code": 0, "symbol": ..., "input_type": "keyboard"}}`, the modifiers named `Shift`, `Lock`, `Ctrl` and `Mod1` to `Mod5`, and the symbol as the binding has it. A `bindswitch` line's is `"input_type": "switch"`, with no modifiers and a null symbol. `config.h`'s keys run no command and send none |
 | `shutdown` | `0x80000006` | tidewm exits: `{"change": "exit"}` |
 | `tick` | `0x80000007` | Someone sends `SEND_TICK`: `{"first": false, "payload": ...}`. Subscribing sends one at once, with `first` true |
 | `layout` | `0x8000001e` | tidewm's own: the current workspace's part on a monitor changes layout, or the current workspace changes, or a monitor takes its part of it, as it appears, or is enabled after the workspace changed; a monitor powered off says so once it's on again: `{"change": "layout", "workspace": ..., "output": ..., "layout": ..., "symbol": ...}`, `symbol` as `config.h` gives it, or monocle's `[n]` |

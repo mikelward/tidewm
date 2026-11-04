@@ -17,6 +17,8 @@ lands with a test.
 
 ## Done
 
+- **The lid switch** (#38): sway's `bindswitch` runs a command when the
+  lid closes or opens, as `output eDP-1 disable` and `enable`.
 - **A lone window's width** (#37): a lone tiled window is centered at
   80% on an ultrawide, 60% from 3.2, by `single_window` rules.
 - **Layout switches** (#36): the `input` event's `xkb_layout` says when a
@@ -105,6 +107,14 @@ lands with a test.
   on. Its cause is in wlroots and Xwayland rather than tidewm; the
   alternative was to chase it there first. Reversible: it's the next thing
   to pick up.
+- **The lid is sway's bindswitch, and the config decides** (#38): a
+  `bindswitch lid:on output eDP-1 disable` turns the panel off whether or
+  not another output is on, as in sway, where tide's Hyprland handler acts
+  only with an external display and leaves the rest to logind. The
+  alternatives: the output command refusing to turn off the last output,
+  or a lid action of tidewm's own. Its tests move a switch device of
+  tidewm's own, by the new `switch lid|tablet on|off` command, as the
+  headless backend has none and wlroots no virtual one. Reversible.
 - **A lone window's width is by aspect, not by output** (#37), as tide's
   Layouts page sets it, from `config.h`'s tide rules, not dwl's whole
   width: tidewm's layouts already follow tide's (three-column on an
@@ -290,19 +300,17 @@ lands with a test.
 
 ## Plan
 
-1. **Outputs**: the lid switch. Mode, scale, position and hotplug came
-   with the runtime config (#16), a lone window's width with #37.
-2. **Lock and keyboard**: a command that drops a dead lock, no pointer
+1. **Lock and keyboard**: a command that drops a dead lock, no pointer
    events while locked; on-demand layers keep the keyboard.
-3. **Capture**: window identifiers over the IPC; capture start and stop
+2. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
-4. **Outside clicks**: a focus-grab protocol or click event for the
+3. **Outside clicks**: a focus-grab protocol or click event for the
    notification center.
-5. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+4. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
    client starts Xwayland, and a window it maps before wlroots' window
    manager watches the root is never managed (the tests' client waits
    for it): start Xwayland ahead of clients, or take on windows already
    there.
-6. **Session**: the entry and wrapper tide starts it with.
+5. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.
