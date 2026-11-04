@@ -11,6 +11,8 @@
  *           prints "activated" once the compositor has had the request.
  * commit    draws the window again, as it is, and prints "committed" once
  *           the compositor has had the commit.
+ * title TEXT
+ *           takes the title TEXT.
  * maximize, unmaximize
  *           asks to be maximized, or not.
  * fullscreen, unfullscreen
@@ -33,7 +35,8 @@
  * it's that big until the compositor gives it a size, rather than 100x100.
  * With MAXIMIZED or FULLSCREEN set, it asks to be maximized or fullscreen
  * before it maps, and with MODAL set, to be a modal dialog, over
- * xdg-dialog-v1.
+ * xdg-dialog-v1. With CONTENT_TYPE set to photo, video or game, it says
+ * its content is that, over wp-content-type-v1.
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -48,6 +51,7 @@
 #include <wayland-client.h>
 
 #include "xdg-activation-v1-client-protocol.h"
+#include "content-type-v1-client-protocol.h"
 #include "xdg-dialog-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -56,6 +60,7 @@ static struct wl_shm *shm;
 static struct xdg_wm_base *wm_base;
 static struct xdg_activation_v1 *activation;
 static struct xdg_wm_dialog_v1 *wm_dialog;
+static struct wp_content_type_manager_v1 *content_types;
 static struct xdg_toplevel *window;
 static const char *mapped_app_id;
 static const char *app_id, *title; /* as it was last given them */
@@ -318,6 +323,9 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 		activation = wl_registry_bind(registry, name, &xdg_activation_v1_interface, 1);
 	else if (!strcmp(interface, xdg_wm_dialog_v1_interface.name))
 		wm_dialog = wl_registry_bind(registry, name, &xdg_wm_dialog_v1_interface, 1);
+	else if (!strcmp(interface, wp_content_type_manager_v1_interface.name))
+		content_types = wl_registry_bind(registry, name,
+				&wp_content_type_manager_v1_interface, 1);
 }
 
 static void
@@ -344,6 +352,9 @@ command(const char *line)
 		wl_surface_commit(surface);
 	} else if (!strcmp(line, "activate")) {
 		activate();
+	} else if (!strncmp(line, "title ", 6)) {
+		xdg_toplevel_set_title(window, line + 6);
+		wl_surface_commit(surface);
 	} else if (!strcmp(line, "commit")) {
 		draw();
 		/* The compositor answers in order, so it has had the commit by then */
@@ -372,6 +383,7 @@ main(int argc, char *argv[])
 {
 	struct xdg_surface *xsurface;
 	const char *min = getenv("MIN_SIZE"), *max = getenv("MAX_SIZE"), *size = getenv("SIZE");
+	const char *content;
 	int hint_width, hint_height;
 	char buf[256];
 	size_t buflen = 0;
@@ -407,6 +419,17 @@ main(int argc, char *argv[])
 		if (!wm_dialog)
 			die("the compositor lacks xdg_wm_dialog_v1");
 		xdg_dialog_v1_set_modal(xdg_wm_dialog_v1_get_xdg_dialog(wm_dialog, window));
+	}
+	if ((content = getenv("CONTENT_TYPE"))) {
+		uint32_t type = !strcmp(content, "photo") ? WP_CONTENT_TYPE_V1_TYPE_PHOTO
+				: !strcmp(content, "video") ? WP_CONTENT_TYPE_V1_TYPE_VIDEO
+				: !strcmp(content, "game") ? WP_CONTENT_TYPE_V1_TYPE_GAME
+				: (die("CONTENT_TYPE is photo, video or game"), 0);
+		if (!content_types)
+			die("the compositor lacks wp_content_type_manager_v1");
+		wp_content_type_v1_set_content_type(
+				wp_content_type_manager_v1_get_surface_content_type(content_types, surface),
+				type);
 	}
 	if (getenv("MAXIMIZED"))
 		xdg_toplevel_set_maximized(window);

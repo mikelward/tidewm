@@ -175,7 +175,7 @@ class Tidewm:
 
     def open_window(self, app_id, title, stdin=False, mapped_app_id=None, min_size=None,
                     max_size=None, stdout=False, maximized=False, fullscreen=False, size=None,
-                    modal=False):
+                    modal=False, content_type=None):
         args = [app_id, title] + ([mapped_app_id] if mapped_app_id else [])
         env = dict(self.env)
         if min_size:
@@ -190,6 +190,8 @@ class Tidewm:
             env["SIZE"] = size
         if modal:
             env["MODAL"] = "1"
+        if content_type:
+            env["CONTENT_TYPE"] = content_type
         client = subprocess.Popen([CLIENT, *args], env=env,
                                   stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
                                   stdout=subprocess.PIPE if stdout else subprocess.DEVNULL)

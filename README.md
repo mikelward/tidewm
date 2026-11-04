@@ -143,6 +143,17 @@ unfocused and urgent, as tide's SPEC §14 has it. An app's activation
 marks its window urgent, unless a grant names it.
 [`docs/config.md`](docs/config.md) says how.
 
+### Dimming
+
+With `dim_inactive 0.07` in the config file, or a `dim_inactive` above 0
+in `config.h`, every window but the focused one is dimmed, by a
+translucent black layer that clicks go through, as tide's SPEC §6.2 has
+it. A monitor showing one window, or a fullscreen one, has nothing to
+tell apart, so it doesn't dim. Nor do picture-in-picture, video, by the
+app's content type (wp-content-type-v1), and a window the `dim disable`
+command exempts, as a `for_window` rule can for a screen share's preview.
+A window's menus and tooltips aren't dimmed.
+
 ### Dialogs and floating windows
 
 A window floats when it has a parent, is modal (X11's state or Wayland's

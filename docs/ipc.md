@@ -81,6 +81,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `mode NAME` | Makes the config file's mode `NAME`'s bindings the ones in force; `mode default` goes back to the top level. `NAME` may be in `"` |
 | `output NAME SETTINGS` | Sets the output `NAME`'s, or every output's for `*`, mode, scale, position, transform, or `enable` or `disable`, as the config file's output lines do ([`config.md`](config.md)), until a reload |
 | `input NAME SETTING VALUE` | Sets one setting, such as `xkb_layout` or `tap`, on the input devices `NAME` names, as the config file's input lines do ([`config.md`](config.md)), until a reload. It fails for a name no device has |
+| `dim enable\|disable\|toggle` | tidewm's own, tide's SPEC §6.2: whether the window dims when it isn't focused, as `dim_inactive` has windows do ([`config.md`](config.md)); a `for_window` rule's `dim disable` exempts a screen share's preview, say |
 | `sticky enable\|disable\|toggle` | As sway's: a sticky floating window is on every workspace, going along to the current one; a tiled one stays where it is. Picture-in-picture is sticky as it opens |
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails. Floated, it goes where one of its app's floating windows last opened, moved or was resized to, as tide's SPEC §6.4 has it, unless a `for_window` rule floats it as it opens, which puts it in the middle |
 | `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles. A window the focus guard holds goes fullscreen once it has focus ([`config.md`](config.md)), and until then its request counts as made, so `disable` or `toggle` takes it back. Another window on its workspace taking focus on that monitor ends it, as it ends a maximize, unless that's its dialog |
@@ -137,6 +138,7 @@ tidewm's life), `type` (`con`, or `floating_con`), `name` (the title),
 `app_id`, `pid`, `shell` (`xdg_shell` or `xwayland`), `focused`, `urgent`,
 `urgent_order` (tidewm's own: higher for a more recent mark, 0 if it has
 none), `visible`, `fullscreen_mode` (0 or 1), `sticky`, `maximized` (tidewm's own),
+`dim` and `dimmed` (tidewm's own: whether it dims when it isn't focused, and is dimmed now),
 `rect` (in layout coordinates, border included), `workspace` and `output` (tidewm's own: where it is) and
 `foreign_toplevel_identifier`, the ext-foreign-toplevel-list
 identifier `grim -T` takes. An X11 window has `app_id` null and its class,

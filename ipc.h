@@ -70,6 +70,9 @@ static int fg_focus_recent(char *args, char *err, size_t errsize, int *parse);
 static const Layout *lt_part_layout(Workspace *ws, Monitor *m);
 /* floating.h, likewise */
 static void fl_by_hand(Client *c, int floating);
+/* dim.h, likewise */
+static void dim_update(void);
+static void dim_update_one(Client *c);
 
 /* config.h's layouts' names over the IPC: tide's modes, and dwl's floating */
 static const struct { const char *name; void (*arrange)(Monitor *); } ipc_layouts[] = {
@@ -315,6 +318,9 @@ ipc_json_window(Client *c)
 	json_object_object_add(obj, "visible", json_object_new_boolean(c->mon && VISIBLEON(c, c->mon)));
 	json_object_object_add(obj, "fullscreen_mode", json_object_new_int(c->isfullscreen));
 	json_object_object_add(obj, "sticky", json_object_new_boolean(c->issticky));
+	/* tidewm's own: whether it dims when it isn't focused, and is now */
+	json_object_object_add(obj, "dim", json_object_new_boolean(!c->nodim));
+	json_object_object_add(obj, "dimmed", json_object_new_boolean(c->dim && c->dim->node.enabled));
 	/* tidewm's own, tide's SPEC §6.3: over the window area, the bar showing */
 	json_object_object_add(obj, "maximized", json_object_new_boolean(c->ismaximized));
 	json_object_object_add(obj, "rect", ipc_json_box(c->geom));
@@ -773,6 +779,20 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		if (!target)
 			return ipc_json_success(0, "No window to make sticky");
 		target->issticky = sticky;
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own, tide's SPEC §6.2: whether a window dims when it isn't
+	 * focused, as a for_window rule exempts a screen share's preview */
+	if (ipc_take(&cmd, "dim")) {
+		int dim;
+		if ((dim = ipc_switch(cmd, target ? !target->nodim : 1, 0)) < 0) {
+			error = "Expected dim enable|disable|toggle";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to dim");
+		target->nodim = !dim;
+		dim_update();
 		return ipc_json_success(1, NULL);
 	}
 	if (ipc_take(&cmd, "floating")) {
@@ -1303,6 +1323,9 @@ ipc_event_window(Client *c, const char *change)
 	/* A window that maps again is new again, and waits for its "new" */
 	if (!strcmp(change, "close"))
 		c->ipc_announced = 0;
+	/* Dimmed or not as it now is, whatever the event says changed, as a
+	 * title does for picture-in-picture, with a listener or without */
+	dim_update_one(c);
 	if (!ipc_subscribed(IpcEvWindow))
 		return;
 	obj = json_object_new_object();
