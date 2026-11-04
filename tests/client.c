@@ -21,8 +21,11 @@
  *
  * With MAPPED_APP_ID, it changes its app ID to that after its first commit,
  * before it maps. With MIN_SIZE=WxH in its environment, it asks to be at
- * least that big, and with MAX_SIZE=WxH, at most that big. With MAXIMIZED
- * or FULLSCREEN set, it asks to be maximized or fullscreen before it maps.
+ * least that big, and with MAX_SIZE=WxH, at most that big. With SIZE=WxH,
+ * it's that big until the compositor gives it a size, rather than 100x100.
+ * With MAXIMIZED or FULLSCREEN set, it asks to be maximized or fullscreen
+ * before it maps, and with MODAL set, to be a modal dialog, over
+ * xdg-dialog-v1.
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -37,12 +40,14 @@
 #include <wayland-client.h>
 
 #include "xdg-activation-v1-client-protocol.h"
+#include "xdg-dialog-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 static struct wl_compositor *compositor;
 static struct wl_shm *shm;
 static struct xdg_wm_base *wm_base;
 static struct xdg_activation_v1 *activation;
+static struct xdg_wm_dialog_v1 *wm_dialog;
 static struct xdg_toplevel *window;
 static const char *mapped_app_id;
 static const char *app_id, *title; /* as it was last given them */
@@ -276,6 +281,8 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 				version < 5 ? version : 5);
 	else if (!strcmp(interface, xdg_activation_v1_interface.name))
 		activation = wl_registry_bind(registry, name, &xdg_activation_v1_interface, 1);
+	else if (!strcmp(interface, xdg_wm_dialog_v1_interface.name))
+		wm_dialog = wl_registry_bind(registry, name, &xdg_wm_dialog_v1_interface, 1);
 }
 
 static void
@@ -319,7 +326,7 @@ int
 main(int argc, char *argv[])
 {
 	struct xdg_surface *xsurface;
-	const char *min = getenv("MIN_SIZE"), *max = getenv("MAX_SIZE");
+	const char *min = getenv("MIN_SIZE"), *max = getenv("MAX_SIZE"), *size = getenv("SIZE");
 	int hint_width, hint_height;
 	char buf[256];
 	size_t buflen = 0;
@@ -347,6 +354,15 @@ main(int argc, char *argv[])
 		xdg_toplevel_set_min_size(window, hint_width, hint_height);
 	if (max && sscanf(max, "%dx%d", &hint_width, &hint_height) == 2)
 		xdg_toplevel_set_max_size(window, hint_width, hint_height);
+	if (size && sscanf(size, "%dx%d", &hint_width, &hint_height) == 2) {
+		width = hint_width;
+		height = hint_height;
+	}
+	if (getenv("MODAL")) {
+		if (!wm_dialog)
+			die("the compositor lacks xdg_wm_dialog_v1");
+		xdg_dialog_v1_set_modal(xdg_wm_dialog_v1_get_xdg_dialog(wm_dialog, window));
+	}
 	if (getenv("MAXIMIZED"))
 		xdg_toplevel_set_maximized(window);
 	if (getenv("FULLSCREEN"))

@@ -64,6 +64,7 @@
 #include <wlr/types/wlr_virtual_pointer_v1.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
+#include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -384,6 +385,7 @@ static void resize(Client *c, struct wlr_box geo, int interact);
 static void run(char *startup_cmd);
 static void setcursor(struct wl_listener *listener, void *data);
 static void setcursorshape(struct wl_listener *listener, void *data);
+static void placefloating(Client *c, struct wlr_box asked);
 static void setfloating(Client *c, int floating);
 static void setfullscreen(Client *c, int fullscreen);
 static int fullscreenwanted(Client *c);
@@ -1982,6 +1984,7 @@ mapnotify(struct wl_listener *listener, void *data)
 	Client *w, *c = wl_container_of(listener, c, map);
 	Monitor *m;
 	char *grant_ws;
+	struct wlr_box asked;
 	int i;
 
 	struct wlr_ext_foreign_toplevel_handle_v1_state foreign_toplevel_state = {
@@ -2029,6 +2032,7 @@ mapnotify(struct wl_listener *listener, void *data)
 			WLR_EDGE_RIGHT);
 	c->geom.width += 2 * c->bw;
 	c->geom.height += 2 * c->bw;
+	asked = c->geom; /* for placefloating, after the rules and arrange */
 	if (client_is_x11(c)) {
 		int x = c->geom.x - (int)c->bw, y = c->geom.y - (int)c->bw;
 		c->geom.x = c->geom.x < sgeom.x ? x : MAX(x, sgeom.x);
@@ -2067,6 +2071,8 @@ mapnotify(struct wl_listener *listener, void *data)
 	/* The config file's for_window rules, whose events wait for the new one */
 	settings_apply_rules(c);
 	fg_mapping = NULL;
+	if (c->isfloating && !c->isfullscreen && c->mon)
+		placefloating(c, asked);
 	printstatus();
 	/* Now it has a monitor, workspace and floating state; its focus waited for this */
 	ipc_event_window(c, "new");
@@ -2099,6 +2105,9 @@ matchrules(Client *c, const char **wsname)
 	*wsname = NULL;
 	appid = client_get_appid(c);
 	title = client_get_title(c);
+	/* Decided afresh each time, at the first commit and at the map, as
+	 * the app ID and title may have come in between */
+	c->isfloating = 0;
 
 	/* Once a config file is loaded, its for_window rules replace these */
 	for (r = rules; !settings && r < END(rules); r++) {
@@ -2115,7 +2124,7 @@ matchrules(Client *c, const char **wsname)
 		}
 	}
 
-	c->isfloating |= client_is_float_type(c);
+	c->isfloating |= client_is_float_type(c) || fg_nameless(c);
 	return mon;
 }
 
@@ -2175,9 +2184,10 @@ setmaximized(Client *c, int maximized)
 	if (!changed || !c->mon || !client_surface(c) || !client_surface(c)->mapped)
 		return;
 	/* Placed by hand, floating or in the floating layout, where no layout
-	 * places it, on its own workspace, it takes its place back, as it leaves fullscreen if it's
-	 * fullscreen now. One that opened maximized has no place, and keeps
-	 * the area's size. */
+	 * places it, on its own workspace, it takes its place back, as it
+	 * leaves fullscreen if it's fullscreen now. A floating one that opened
+	 * maximized takes the place it would have opened in (placefloating);
+	 * one floated only later has no place, and keeps the area's size. */
 	if (!maximized && !laidout(c) && c->unmaximized.width) {
 		if (c->isfullscreen)
 			c->prev = c->unmaximized;
@@ -2741,6 +2751,39 @@ setcursorshape(struct wl_listener *listener, void *data)
 				wlr_cursor_shape_v1_name(event->shape));
 }
 
+/* A window that floats as it opens, a dialog or one a rule floats, goes
+ * in the middle of its parent, or of its monitor's window area without
+ * one, as big as it asked, border and all, but no more than 80% of its
+ * monitor, and kept in that area (tide's SPEC §6.4) */
+void
+placefloating(Client *c, struct wlr_box asked)
+{
+	Client *p = client_get_parent(c);
+	struct wlr_box area = c->mon->w, box = asked, min = {0}, max = {0};
+	struct wlr_box around = p && p->mon == c->mon ? p->geom : area;
+	int bw = 2 * (int)c->bw;
+	box.width = MIN(box.width, c->mon->m.width * 4 / 5);
+	box.height = MIN(box.height, c->mon->m.height * 4 / 5);
+	/* The size it gets, as applybounds gives it: its minimum before the
+	 * cap, so it's centered at that size */
+	client_get_size_hints(c, &max, &min);
+	box.width = MAX(box.width, min.width + bw);
+	box.height = MAX(box.height, min.height + bw);
+	if (max.width > 0 && bw <= INT_MAX - max.width)
+		box.width = MIN(box.width, max.width + bw);
+	if (max.height > 0 && bw <= INT_MAX - max.height)
+		box.height = MIN(box.height, max.height + bw);
+	box.x = around.x + (around.width - box.width) / 2;
+	box.y = around.y + (around.height - box.height) / 2;
+	box.x = MAX(area.x, MIN(box.x, area.x + area.width - box.width));
+	box.y = MAX(area.y, MIN(box.y, area.y + area.height - box.height));
+	/* One that opened maximized takes this place once it isn't */
+	if (c->ismaximized)
+		c->unmaximized = box;
+	else
+		resize(c, box, 0);
+}
+
 void
 setfloating(Client *c, int floating)
 {
@@ -2981,6 +3024,9 @@ setup(void)
 	wlr_fractional_scale_manager_v1_create(dpy, 1);
 	wlr_presentation_create(dpy, backend, 2);
 	wlr_alpha_modifier_v1_create(dpy);
+
+	/* Modal dialogs, which float (client_is_float_type) */
+	wlr_xdg_wm_dialog_v1_create(dpy, 1);
 
 	/* Initializes the interface used to implement urgency hints */
 	activation = wlr_xdg_activation_v1_create(dpy);

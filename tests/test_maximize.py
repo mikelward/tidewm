@@ -264,15 +264,21 @@ class FloatingTest(MaximizeHelpers):
         self.assertEqual(self.clicked(dialog), dialog)
         self.assertTrue(self.maximized(a))
 
-    def test_a_floating_window_that_opened_maximized_keeps_its_size(self):
-        a, a_client = self.open("test.float", maximized=True)
+    def test_a_floating_window_that_opened_maximized_gets_the_place_it_would_have(self):
+        a, a_client = self.open("test.float", maximized=True, size="300x200")
         self.told(a_client, "maximized")
         self.assertEqual(self.windows()[a]["type"], "floating_con")
         area = self.area()
         self.assertEqual(self.rect(a), area)
         self.maximize(a, "disable")
         self.changed(a, False)
-        self.assertEqual(self.rect(a), area)
+        # The asked size, border and all, in the middle of the window area
+        rect = self.rect(a)
+        border = rect["width"] - 300
+        self.assertEqual((rect["height"] - 200, rect["x"] + rect["width"] // 2,
+                          rect["y"] + rect["height"] // 2),
+                         (border, area["x"] + area["width"] // 2,
+                          area["y"] + area["height"] // 2))
 
 
 if __name__ == "__main__":

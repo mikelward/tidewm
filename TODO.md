@@ -17,6 +17,9 @@ lands with a test.
 
 ## Done
 
+- **Dialog placement** (#28): a window that floats as it opens goes in
+  the middle of its parent, or of the window area, no bigger than 80% of
+  the monitor; modal windows, by xdg-dialog-v1, and nameless ones float.
 - **IPC and a test harness** (#7): sway's i3-ipc on `SWAYSOCK`
   (`docs/ipc.md`), and `make test`, which runs tidewm headless and asserts
   over it.
@@ -77,6 +80,16 @@ lands with a test.
 
 ## Decisions needing review
 
+- **The X11 map stall waits** (autopilot, 2026-11-04): Known bugs' X11
+  window that sometimes never maps in the tests, about one run in 130 of
+  a pair of X11 tests, on `main` too, is left there while the Plan goes
+  on. Its cause is in wlroots and Xwayland rather than tidewm; the
+  alternative was to chase it there first. Reversible: it's the next thing
+  to pick up.
+- **Every window that floats as it opens is placed** (#28): dialogs, ones
+  a rule floats, and X11 ones too, which may have asked for a place of
+  their own; the cap is 80% of the monitor, and the place stays inside its
+  window area. Reversible.
 - **Workspaces over the IPC** (#8): `GET_WORKSPACES` lists each workspace
   once, its `output` the focused monitor, since a workspace spans them all;
   the tree lists every workspace under every output, holding that monitor's
@@ -173,7 +186,8 @@ lands with a test.
 - **Apps may maximize themselves** (#26): an xdg app's own maximize
   request, from its title bar's button, is honored, where dwl ignored it;
   X11 apps' requests still aren't heard. A floating window gets its place
-  back after; one that opened maximized keeps the area's size. Reversible.
+  back after; one that opened maximized gets the place it would have
+  opened in. Reversible.
 - **The last input is GET_SEATS's** (#25): tidewm's own `last_input` on
   sway's seat, rather than a request of its own. Its window is the one the
   input reached, none for a key or click a binding took, since the app
@@ -216,9 +230,10 @@ lands with a test.
 
 ## Plan
 
-1. **Dialogs and floating**: centered on the parent, capped at 80% of the
-   monitor, following it; modal; a picture-in-picture rule; a hand-floated
-   window's size remembered.
+1. **Dialogs and floating**: a dialog kept above its parent and following
+   it to another workspace or output; a picture-in-picture rule; a
+   hand-floated window's size remembered. Placement and modal came with
+   #28.
 2. **Dimming** of every window but the focused one, with tide's
    exceptions.
 3. **Input**: a tap-Super event, which `--release Super_L` nearly is, once

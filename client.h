@@ -234,6 +234,7 @@ static inline int
 client_is_float_type(Client *c)
 {
 	struct wlr_box min = {0}, max = {0};
+	struct wlr_xdg_dialog_v1 *dialog;
 	client_get_size_hints(c, &max, &min);
 
 #ifdef XWAYLAND
@@ -254,8 +255,11 @@ client_is_float_type(Client *c)
 	}
 #endif
 
-	return c->surface.xdg->toplevel->parent || (min.width > 0 && min.height > 0 &&
-			(min.width == max.width || min.height == max.height));
+	/* A modal dialog, by xdg-dialog-v1, floats as an X11 one does */
+	dialog = wlr_xdg_dialog_v1_try_from_wlr_xdg_toplevel(c->surface.xdg->toplevel);
+	return c->surface.xdg->toplevel->parent || (dialog && dialog->modal)
+			|| (min.width > 0 && min.height > 0
+			&& (min.width == max.width || min.height == max.height));
 }
 
 static inline int

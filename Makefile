@@ -65,9 +65,17 @@ tests/xdg-activation-v1-client-protocol.h:
 tests/xdg-activation-v1-protocol.c:
 	$(WAYLAND_SCANNER) private-code \
 		$(WAYLAND_PROTOCOLS)/staging/xdg-activation/xdg-activation-v1.xml $@
+tests/xdg-dialog-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		$(WAYLAND_PROTOCOLS)/staging/xdg-dialog/xdg-dialog-v1.xml $@
+tests/xdg-dialog-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/staging/xdg-dialog/xdg-dialog-v1.xml $@
 tests/client: tests/client.c tests/xdg-shell-client-protocol.h tests/xdg-shell-protocol.c \
-		tests/xdg-activation-v1-client-protocol.h tests/xdg-activation-v1-protocol.c
-	$(CC) tests/client.c tests/xdg-shell-protocol.c tests/xdg-activation-v1-protocol.c -Itests \
+		tests/xdg-activation-v1-client-protocol.h tests/xdg-activation-v1-protocol.c \
+		tests/xdg-dialog-v1-client-protocol.h tests/xdg-dialog-v1-protocol.c
+	$(CC) tests/client.c tests/xdg-shell-protocol.c tests/xdg-activation-v1-protocol.c \
+		tests/xdg-dialog-v1-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
 # tests/x11client needs XWayland's xcb libraries. The substitution makes it
