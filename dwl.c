@@ -2169,6 +2169,9 @@ mapnotify(struct wl_listener *listener, void *data)
 	char *grant_ws;
 	struct wlr_box asked;
 	int i;
+#ifdef XWAYLAND
+	int asked_width = 0, asked_height = 0; /* an X11 window's, in its own pixels */
+#endif
 
 	struct wlr_ext_foreign_toplevel_handle_v1_state foreign_toplevel_state = {
 		.app_id = client_get_appid(c),
@@ -2224,6 +2227,13 @@ mapnotify(struct wl_listener *listener, void *data)
 	c->geom.width += 2 * c->bw;
 	c->geom.height += 2 * c->bw;
 	asked = c->geom; /* for placefloating, after the rules and arrange */
+#ifdef XWAYLAND
+	/* Before its monitor configures it so */
+	if (client_is_x11(c)) {
+		asked_width = c->surface.xwayland->width;
+		asked_height = c->surface.xwayland->height;
+	}
+#endif
 	if (client_is_x11(c)) {
 		int x = c->geom.x - (int)c->bw, y = c->geom.y - (int)c->bw;
 		c->geom.x = c->geom.x < sgeom.x ? x : MAX(x, sgeom.x);
@@ -2264,8 +2274,17 @@ mapnotify(struct wl_listener *listener, void *data)
 	/* The config file's for_window rules, whose events wait for the new one */
 	settings_apply_rules(c);
 	fg_mapping = NULL;
-	if (c->isfloating && !c->isfullscreen && c->mon)
+	if (c->isfloating && !c->isfullscreen && c->mon) {
+#ifdef XWAYLAND
+		/* An X11 window's size, at the scale of the monitor it has now,
+		 * not the one its first place is on (x11.h) */
+		if (client_is_x11(c)) {
+			asked.width = (int)lroundf((float)asked_width / x11_scale(c->mon)) + 2 * (int)c->bw;
+			asked.height = (int)lroundf((float)asked_height / x11_scale(c->mon)) + 2 * (int)c->bw;
+		}
+#endif
 		placefloating(c, asked);
+	}
 	printstatus();
 	/* Now it has a monitor, workspace and floating state; its focus waited for this */
 	ipc_event_window(c, "new");
