@@ -179,6 +179,20 @@ app's content type (wp-content-type-v1), and a window the `dim disable`
 command exempts, as a `for_window` rule can for a screen share's preview.
 A window's menus and tooltips aren't dimmed.
 
+### X11 at a fractional scale
+
+With `xwayland_scaling disable` in the config file, X11 windows are in
+their outputs' own pixels, as Hyprland's `xwayland:force_zero_scaling`
+has them and tide's SPEC §17 asks: an X11 window is configured, and
+shown, one of its pixels to one of the output's, so it's sharp at a
+fractional scale. An app that scales itself, as by `GDK_SCALE`,
+`QT_SCALE_FACTOR` or `Xft.dpi`, is then the size it would be scaled; one
+that doesn't is small. Xwayland then sees each output at its own pixels,
+placed by its place in the layout spread by the largest scale, so none
+overlap, and its screen, RandR and clicks match. By default,
+`xwayland_scaling enable`, X11 windows are scaled, as in sway, and blurry
+at a fractional scale. A reload changes it at once.
+
 ### The lock
 
 A screen locker that crashes leaves the screen locked, as

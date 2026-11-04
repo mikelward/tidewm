@@ -22,6 +22,13 @@ lands with a test.
 
 ## Done
 
+- **X11 at a fractional scale** (#45): with `xwayland_scaling disable`,
+  X11 windows are in their outputs' own pixels, as with Hyprland's
+  `xwayland:force_zero_scaling`, so they're sharp at a fractional scale,
+  and Xwayland sees each output at its pixels, over an xdg-output of
+  tidewm's own. The Plan's other half, starting Xwayland ahead of
+  clients, wasn't needed: Xwayland takes no client until the window
+  manager owns WM_S0, which wlroots takes after it watches the root.
 - **Outside clicks** (#44): hyprland-focus-grab-v1, so Quickshell's
   `HyprlandFocusGrab` closes tide's notification center on a click
   outside it, but not on the pointer crossing away.
@@ -122,6 +129,16 @@ lands with a test.
 
 ## Decisions needing review
 
+- **X11 at a fractional scale is a setting, scaled by default** (#45):
+  `xwayland_scaling disable` turns the scaling off, as tide's config
+  will, and the default scales, as sway and dwl do, since an app that
+  doesn't scale itself is small unscaled. The name is in sway's config
+  style rather than Hyprland's `force_zero_scaling`. Reversible.
+- **X11's space spreads the layout by the largest scale** (#45): an
+  output's box there is its place in the layout times the largest scale,
+  at its own pixels, so none overlap and they keep their arrangement,
+  where Hyprland lays them in a row. Between outputs of different scales
+  that leaves gaps, which nothing is in. Reversible.
 - **Outside clicks are Hyprland's focus grab** (#44): tidewm takes
   hyprland-focus-grab-v1, vendored from hyprland-protocols under its
   BSD-3-Clause license, so tide's Quickshell center works as it does on
@@ -331,6 +348,10 @@ lands with a test.
 
 ## Known bugs
 
+- **An X11 app's own cursor is scaled** with `xwayland_scaling disable`:
+  Xwayland's cursor images are in X11's pixels, and the scene shows them
+  at their size in the layout, so at a fractional scale they're a little
+  big and blurry. X11 drag icons are the same.
 - **A race in wlroots loses an X11 window's state set before it maps**:
   wlroots' window manager watches a window's properties only once it has
   handled the window's creation, and mapping the window writes its own
@@ -355,21 +376,16 @@ lands with a test.
 
 ## Plan
 
-1. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
-   client starts Xwayland, and a window it maps before wlroots' window
-   manager watches the root is never managed (the tests' client waits
-   for it): start Xwayland ahead of clients, or take on windows already
-   there.
-2. **Session**: the entry and wrapper tide starts it with.
-3. **Gestures**: pointer-gestures, so a touchpad's pinch and swipe reach
+1. **Session**: the entry and wrapper tide starts it with.
+2. **Gestures**: pointer-gestures, so a touchpad's pinch and swipe reach
    apps, as Chrome's pinch to zoom.
-4. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
+3. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
    desktop can take Super and Alt+Tab.
-5. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
+4. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
    window that opened it.
-6. **Security context**: security-context, so Flatpak apps don't get the
+5. **Security context**: security-context, so Flatpak apps don't get the
    privileged protocols, such as screencopy and the virtual keyboard.
-7. **The rest of sway's**: touchscreens, drawing tablets,
+6. **The rest of sway's**: touchscreens, drawing tablets,
    wlr-foreign-toplevel-management for taskbars and docks, adaptive sync
    and tearing control, and a scratchpad.
 

@@ -17,12 +17,14 @@ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEV
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 all: dwl
-dwl: dwl.c capture.h client.h config.h dim.h floating.h focus.h grab.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
+dwl: dwl.c capture.h client.h config.h dim.h floating.h focus.h grab.h ime.h ipc.h layout.h settings.h util.h workspace.h x11.h config.mk cursor-shape-v1-protocol.h \
 	ext-image-copy-capture-v1-protocol.h hyprland-focus-grab-v1-protocol.h \
 	hyprland-focus-grab-v1-protocol.c \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
-	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h
-	$(CC) dwl.c hyprland-focus-grab-v1-protocol.c $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
+	wlr-output-power-management-unstable-v1-protocol.h xdg-output-unstable-v1-protocol.h \
+	xdg-output-unstable-v1-protocol.c xdg-shell-protocol.h
+	$(CC) dwl.c hyprland-focus-grab-v1-protocol.c xdg-output-unstable-v1-protocol.c \
+		$(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # wayland-scanner is a tool which generates C headers and rigging for Wayland
 # protocols, which are specified in XML. wlroots requires you to rig these up
@@ -51,6 +53,12 @@ wlr-layer-shell-unstable-v1-protocol.h:
 wlr-output-power-management-unstable-v1-protocol.h:
 	$(WAYLAND_SCANNER) server-header \
 		protocols/wlr-output-power-management-unstable-v1.xml $@
+xdg-output-unstable-v1-protocol.h:
+	$(WAYLAND_SCANNER) server-header \
+		$(WAYLAND_PROTOCOLS)/unstable/xdg-output/xdg-output-unstable-v1.xml $@
+xdg-output-unstable-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/unstable/xdg-output/xdg-output-unstable-v1.xml $@
 xdg-shell-protocol.h:
 	$(WAYLAND_SCANNER) server-header \
 		$(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml $@
@@ -226,7 +234,7 @@ dist: clean
 	mkdir -p dwl-$(VERSION)
 	cp -R LICENSE NOTICE Makefile CHANGELOG.md README.md client.h config.def.h \
 		config.mk protocols dwl.1 dwl.c capture.h dim.h floating.h focus.h grab.h ime.h ipc.h layout.h \
-		settings.h util.h workspace.h \
+		settings.h util.h workspace.h x11.h \
 		dwl.desktop docs tests \
 		dwl-$(VERSION)
 	tar -caf dwl-$(VERSION).tar.gz dwl-$(VERSION)

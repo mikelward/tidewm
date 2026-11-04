@@ -23,11 +23,14 @@ client_get_size_hints(Client *c, struct wlr_box *max, struct wlr_box *min)
 #ifdef XWAYLAND
 	if (client_is_x11(c)) {
 		xcb_size_hints_t *size_hints = c->surface.xwayland->size_hints;
+		/* In the window's own pixels, at its monitor's scale now, which a
+		 * window moving to it isn't configured in yet (x11.h) */
+		float scale = c->mon ? x11_scale(c->mon) : c->xscale;
 		if (size_hints) {
-			max->width = size_hints->max_width;
-			max->height = size_hints->max_height;
-			min->width = size_hints->min_width;
-			min->height = size_hints->min_height;
+			max->width = (int)lroundf((float)size_hints->max_width / scale);
+			max->height = (int)lroundf((float)size_hints->max_height / scale);
+			min->width = (int)lroundf((float)size_hints->min_width / scale);
+			min->height = (int)lroundf((float)size_hints->min_height / scale);
 		}
 		return;
 	}
@@ -168,8 +171,12 @@ client_get_clip(Client *c, struct wlr_box *clip)
 	};
 
 #ifdef XWAYLAND
-	if (client_is_x11(c))
+	/* In the window's own pixels (x11.h) */
+	if (client_is_x11(c)) {
+		clip->width = (int)lroundf((float)clip->width * c->xscale);
+		clip->height = (int)lroundf((float)clip->height * c->xscale);
 		return;
+	}
 #endif
 
 	clip->x = c->surface.xdg->geometry.x;
@@ -181,10 +188,7 @@ client_get_geometry(Client *c, struct wlr_box *geom)
 {
 #ifdef XWAYLAND
 	if (client_is_x11(c)) {
-		geom->x = c->surface.xwayland->x;
-		geom->y = c->surface.xwayland->y;
-		geom->width = c->surface.xwayland->width;
-		geom->height = c->surface.xwayland->height;
+		x11_geometry(c, geom);
 		return;
 	}
 #endif
@@ -375,8 +379,7 @@ client_set_size(Client *c, uint32_t width, uint32_t height)
 {
 #ifdef XWAYLAND
 	if (client_is_x11(c)) {
-		wlr_xwayland_surface_configure(c->surface.xwayland,
-				c->geom.x + c->bw, c->geom.y + c->bw, width, height);
+		x11_configure(c, width, height);
 		return;
 	}
 #endif
