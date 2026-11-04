@@ -36,7 +36,10 @@
  * With MAXIMIZED or FULLSCREEN set, it asks to be maximized or fullscreen
  * before it maps, and with MODAL set, to be a modal dialog, over
  * xdg-dialog-v1. With CONTENT_TYPE set to photo, video or game, it says
- * its content is that, over wp-content-type-v1.
+ * its content is that, over wp-content-type-v1. With SCROLLS set, it
+ * prints "pointing" once the compositor has its wl_pointer, which waits
+ * for the seat to have a pointer, and "scroll AMOUNT" for each vertical
+ * scroll it gets.
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -61,6 +64,8 @@ static struct xdg_wm_base *wm_base;
 static struct xdg_activation_v1 *activation;
 static struct xdg_wm_dialog_v1 *wm_dialog;
 static struct wp_content_type_manager_v1 *content_types;
+static struct wl_seat *seat;
+static struct wl_pointer *pointer;
 static struct xdg_toplevel *window;
 static const char *mapped_app_id;
 static const char *app_id, *title; /* as it was last given them */
@@ -280,6 +285,91 @@ static const struct wl_callback_listener synced_listener = {
 };
 
 static void
+pointer_enter(void *data, struct wl_pointer *p, uint32_t serial, struct wl_surface *s,
+		wl_fixed_t x, wl_fixed_t y)
+{
+}
+
+static void
+pointer_leave(void *data, struct wl_pointer *p, uint32_t serial, struct wl_surface *s)
+{
+}
+
+static void
+pointer_motion(void *data, struct wl_pointer *p, uint32_t time, wl_fixed_t x, wl_fixed_t y)
+{
+}
+
+static void
+pointer_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t time,
+		uint32_t button, uint32_t state)
+{
+}
+
+static void
+pointer_axis(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis, wl_fixed_t value)
+{
+	if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL)
+		return;
+	printf("scroll %.2f\n", wl_fixed_to_double(value));
+	fflush(stdout);
+}
+
+static void
+pointer_frame(void *data, struct wl_pointer *p)
+{
+}
+
+static void
+pointer_axis_source(void *data, struct wl_pointer *p, uint32_t source)
+{
+}
+
+static void
+pointer_axis_stop(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis)
+{
+}
+
+static void
+pointer_axis_discrete(void *data, struct wl_pointer *p, uint32_t axis, int32_t discrete)
+{
+}
+
+static const struct wl_pointer_listener pointer_listener = {
+	.enter = pointer_enter,
+	.leave = pointer_leave,
+	.motion = pointer_motion,
+	.button = pointer_button,
+	.axis = pointer_axis,
+	.frame = pointer_frame,
+	.axis_source = pointer_axis_source,
+	.axis_stop = pointer_axis_stop,
+	.axis_discrete = pointer_axis_discrete,
+};
+
+static void
+seat_capabilities(void *data, struct wl_seat *s, uint32_t caps)
+{
+	if ((caps & WL_SEAT_CAPABILITY_POINTER) && !pointer) {
+		pointer = wl_seat_get_pointer(s);
+		wl_pointer_add_listener(pointer, &pointer_listener, NULL);
+		/* The compositor answers in order, so it has the pointer by then */
+		wl_callback_add_listener(wl_display_sync(display), &synced_listener,
+				(void *)"pointing");
+	}
+}
+
+static void
+seat_name(void *data, struct wl_seat *s, const char *name)
+{
+}
+
+static const struct wl_seat_listener seat_listener = {
+	.capabilities = seat_capabilities,
+	.name = seat_name,
+};
+
+static void
 token_done(void *data, struct xdg_activation_token_v1 *token, const char *name)
 {
 	xdg_activation_v1_activate(activation, name, surface);
@@ -326,6 +416,10 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 	else if (!strcmp(interface, wp_content_type_manager_v1_interface.name))
 		content_types = wl_registry_bind(registry, name,
 				&wp_content_type_manager_v1_interface, 1);
+	else if (!strcmp(interface, wl_seat_interface.name) && getenv("SCROLLS") && !seat) {
+		seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 5 ? version : 5);
+		wl_seat_add_listener(seat, &seat_listener, NULL);
+	}
 }
 
 static void

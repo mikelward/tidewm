@@ -102,6 +102,8 @@ typedef struct {
 	int value[InLast]; /* -1: not given */
 	int has_accel;
 	double accel; /* pointer_accel, -1 to 1 */
+	int has_scroll_factor;
+	double scroll_factor; /* 0 or more */
 	unsigned int xkb_line; /* the line that last gave an XKB name */
 } InputConfig;
 
@@ -634,6 +636,18 @@ settings_parse_input_setting(InputConfig *ic, char *rest, char *err, size_t errs
 		ic->accel = d;
 		return 1;
 	}
+	if (!strcmp(word, "scroll_factor")) {
+		errno = 0;
+		d = strtod(arg, &end);
+		if (end == arg || *end || errno || !isfinite(d) || d < 0) {
+			snprintf(err, errsize, "input %s: scroll_factor %s isn't a number, 0 or more",
+					ic->name, arg);
+			return 0;
+		}
+		ic->has_scroll_factor = 1;
+		ic->scroll_factor = d;
+		return 1;
+	}
 	for (i = 0; i < InLast; i++) {
 		if (strcmp(word, settings_input_settings[i].name))
 			continue;
@@ -676,6 +690,10 @@ settings_merge_input(InputConfig *dst, const InputConfig *src)
 	if (src->has_accel) {
 		dst->has_accel = 1;
 		dst->accel = src->accel;
+	}
+	if (src->has_scroll_factor) {
+		dst->has_scroll_factor = 1;
+		dst->scroll_factor = src->scroll_factor;
 	}
 }
 
@@ -1589,6 +1607,7 @@ typedef struct {
 	KeyboardGroup *group; /* a keyboard's, unless it's virtual */
 	const char *names[InXkbLast]; /* a keyboard's XKB names now, its own copies */
 	int rate, delay;
+	double scroll_factor; /* a pointer's scroll times this */
 	struct wl_listener destroy;
 } SettingsInput;
 
@@ -1636,6 +1655,9 @@ settings_json_input(const SettingsInput *in)
 	json_object_object_add(obj, "vendor", json_object_new_int(d ? (int)libinput_device_get_id_vendor(d) : 0));
 	json_object_object_add(obj, "product", json_object_new_int(d ? (int)libinput_device_get_id_product(d) : 0));
 	json_object_object_add(obj, "type", json_object_new_string(in->type));
+	/* sway's, for a pointer or touchpad */
+	if (strcmp(in->type, "keyboard"))
+		json_object_object_add(obj, "scroll_factor", json_object_new_double(in->scroll_factor));
 	if (!strcmp(in->type, "keyboard")) {
 		kb = in->group ? &in->group->wlr_group->keyboard : wlr_keyboard_from_input_device(in->dev);
 		n = kb->keymap ? xkb_keymap_num_layouts(kb->keymap) : 0;
@@ -1774,6 +1796,8 @@ settings_input_config(const SettingsInput *in, InputConfig *out)
 	out->value[InEvents] = (int)send_events_mode;
 	out->has_accel = 1;
 	out->accel = accel_speed;
+	out->has_scroll_factor = 1;
+	out->scroll_factor = 1;
 	snprintf(type, sizeof(type), "type:%s", in->type);
 	for (pass = 0; settings && pass < 3; pass++)
 		for (i = 0; i < settings->ninputs; i++)
@@ -1956,6 +1980,7 @@ settings_track(struct wlr_input_device *dev, const char *type, int is_virtual)
 	in->identifier = settings_identifier(dev);
 	in->type = type;
 	in->is_virtual = is_virtual;
+	in->scroll_factor = 1;
 	LISTEN(&dev->events.destroy, &in->destroy, settings_input_destroyed);
 	wl_list_insert(settings_inputs.prev, &in->link);
 	return in;
@@ -1994,17 +2019,34 @@ settings_pointer_added(struct wlr_pointer *pointer)
 			? "touchpad" : "pointer", 0);
 	InputConfig ic;
 	settings_input_config(in, &ic);
+	in->scroll_factor = ic.scroll_factor;
 	settings_libinput(in, &ic);
 	settings_event_input("added", in);
 }
 
 /* A client's virtual keyboard or pointer, which GET_INPUTS lists, but
- * which keeps its own keymap and has no libinput settings */
+ * which keeps its own keymap and has no libinput settings. A pointer's
+ * scroll factor is tidewm's, so it has that. */
 static void
 settings_virtual_added(struct wlr_input_device *dev)
 {
-	settings_event_input("added", settings_track(dev,
-			dev->type == WLR_INPUT_DEVICE_KEYBOARD ? "keyboard" : "pointer", 1));
+	SettingsInput *in = settings_track(dev,
+			dev->type == WLR_INPUT_DEVICE_KEYBOARD ? "keyboard" : "pointer", 1);
+	InputConfig ic;
+	settings_input_config(in, &ic);
+	in->scroll_factor = ic.scroll_factor;
+	settings_event_input("added", in);
+}
+
+/* How much dev's scrolls count, 1 unless its input settings say */
+static double
+settings_scroll_factor(struct wlr_input_device *dev)
+{
+	SettingsInput *in;
+	wl_list_for_each(in, &settings_inputs, link)
+		if (in->dev == dev)
+			return in->scroll_factor;
+	return 1;
 }
 
 /* Whether keycode is down on kb. A group's key is until its keyboard
@@ -2070,6 +2112,8 @@ settings_apply_inputs(const InputConfig *only)
 				refused = 1;
 			}
 		}
+		if (ic.has_scroll_factor)
+			in->scroll_factor = ic.scroll_factor;
 		if (settings_libinput(in, &ic))
 			settings_event_input("libinput_config", in);
 	}

@@ -17,6 +17,8 @@ lands with a test.
 
 ## Done
 
+- **Scroll factor** (#35): sway's `scroll_factor` input setting scales a
+  pointer's scrolls, a client's virtual pointer's too.
 - **Tap Super** (#34): a `--release` binding is a tap only with no pointer
   button or scroll meanwhile, and sway's `binding` event says when one
   runs, for tide's launcher.
@@ -278,9 +280,9 @@ lands with a test.
 
 ## Plan
 
-1. **Input**: `scroll_factor`; the `input` event's `xkb_layout`, when the
-   active layout switches, for a layout indicator. Per-device settings
-   came with the runtime config (#17), tap Super with #34.
+1. **Input**: the `input` event's `xkb_layout`, when the active layout
+   switches, for a layout indicator. Per-device settings came with the
+   runtime config (#17), tap Super with #34, `scroll_factor` with #35.
 2. **Outputs**: a single-window width; the lid switch. Mode, scale,
    position and hotplug came with the runtime config (#16).
 3. **Lock and keyboard**: a command that drops a dead lock, no pointer
