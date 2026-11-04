@@ -29,7 +29,7 @@ enum { IpcCommand = 0, IpcGetWorkspaces = 1, IpcSubscribe = 2,
 /* Event numbers, as sway sends them with IPC_EVENT_BIT set */
 enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvMode = 2, IpcEvWindow = 3,
 	IpcEvBinding = 5, IpcEvShutdown = 6, IpcEvTick = 7, IpcEvInput = 21,
-	IpcEvLayout = 30 /* tidewm's own */ };
+	IpcEvLayout = 30, IpcEvCapture = 31 /* tidewm's own */ };
 
 typedef struct {
 	struct wl_list link;
@@ -1036,7 +1036,7 @@ ipc_handle_subscribe(IpcClient *cl, const char *payload)
 		{"workspace", IpcEvWorkspace}, {"output", IpcEvOutput}, {"mode", IpcEvMode},
 		{"window", IpcEvWindow}, {"binding", IpcEvBinding},
 		{"shutdown", IpcEvShutdown}, {"tick", IpcEvTick},
-		{"input", IpcEvInput}, {"layout", IpcEvLayout},
+		{"input", IpcEvInput}, {"layout", IpcEvLayout}, {"capture", IpcEvCapture},
 	};
 	struct json_object *req = json_tokener_parse(payload), *tick;
 	uint32_t events = 0;
@@ -1440,6 +1440,21 @@ ipc_event_layout(Monitor *m)
 	json_object_object_add(obj, "layout", name ? json_object_new_string(name) : NULL);
 	json_object_object_add(obj, "symbol", json_object_new_string(m->ltsymbol));
 	ipc_broadcast(IpcEvLayout, obj);
+}
+
+/* tidewm's own: a capture session starts or stops (capture.h), of the
+ * window con_id names, or of an output for 0 */
+static void
+ipc_event_capture(const char *change, unsigned long con_id)
+{
+	struct json_object *obj;
+	if (!ipc_subscribed(IpcEvCapture))
+		return;
+	obj = json_object_new_object();
+	json_object_object_add(obj, "change", json_object_new_string(change));
+	json_object_object_add(obj, "source", json_object_new_string(con_id ? "window" : "output"));
+	json_object_object_add(obj, "con_id", con_id ? json_object_new_uint64(con_id) : NULL);
+	ipc_broadcast(IpcEvCapture, obj);
 }
 
 static void

@@ -37,6 +37,7 @@ EVENT_SHUTDOWN = 0x80000006
 EVENT_TICK = 0x80000007
 EVENT_INPUT = 0x80000015
 EVENT_LAYOUT = 0x8000001e  # tidewm's own
+EVENT_CAPTURE = 0x8000001f  # tidewm's own
 
 
 def is_urgency(event):

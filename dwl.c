@@ -21,6 +21,7 @@
 #include <wlr/types/wlr_alpha_modifier_v1.h>
 #include <drm_fourcc.h>
 #include <wlr/interfaces/wlr_buffer.h>
+#include <wlr/interfaces/wlr_ext_image_capture_source_v1.h>
 #include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_content_type_v1.h>
@@ -577,6 +578,7 @@ static struct wlr_xwayland *xwayland;
 #include "focus.h"
 #include "floating.h"
 #include "dim.h"
+#include "capture.h"
 
 /* function implementations */
 void
@@ -1010,6 +1012,7 @@ cleanuplisteners(void)
 	wl_list_remove(&start_drag.link);
 	wl_list_remove(&new_session_lock.link);
 	wl_list_remove(&new_foreign_toplevel_capture_request.link);
+	capture_finish();
 #ifdef XWAYLAND
 	/* Added only if XWayland started: it can't without an Xwayland binary */
 	if (xwayland) {
@@ -3307,7 +3310,7 @@ setup(void)
 	wlr_data_device_manager_create(dpy);
 	wlr_export_dmabuf_manager_v1_create(dpy);
 	wlr_screencopy_manager_v1_create(dpy);
-	wlr_ext_image_copy_capture_manager_v1_create(dpy, 1);
+	capture_init(wlr_ext_image_copy_capture_manager_v1_create(dpy, 1));
 	wlr_ext_output_image_capture_source_manager_v1_create(dpy, 1);
 	wlr_data_control_manager_v1_create(dpy);
 	wlr_ext_data_control_manager_v1_create(dpy, 1);

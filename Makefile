@@ -17,7 +17,7 @@ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEV
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 all: dwl
-dwl: dwl.c client.h config.h dim.h floating.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
+dwl: dwl.c capture.h client.h config.h dim.h floating.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
 	ext-image-copy-capture-v1-protocol.h \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
 	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h
@@ -101,6 +101,33 @@ tests/workspaces: tests/workspaces.c tests/ext-workspace-v1-client-protocol.h te
 	$(CC) tests/workspaces.c tests/ext-workspace-v1-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+tests/ext-foreign-toplevel-list-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		$(WAYLAND_PROTOCOLS)/staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml $@
+tests/ext-foreign-toplevel-list-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml $@
+tests/ext-image-capture-source-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		$(WAYLAND_PROTOCOLS)/staging/ext-image-capture-source/ext-image-capture-source-v1.xml $@
+tests/ext-image-capture-source-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/staging/ext-image-capture-source/ext-image-capture-source-v1.xml $@
+tests/ext-image-copy-capture-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		$(WAYLAND_PROTOCOLS)/staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml $@
+tests/ext-image-copy-capture-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml $@
+tests/capture: tests/capture.c tests/ext-foreign-toplevel-list-v1-client-protocol.h \
+		tests/ext-foreign-toplevel-list-v1-protocol.c \
+		tests/ext-image-capture-source-v1-client-protocol.h \
+		tests/ext-image-capture-source-v1-protocol.c \
+		tests/ext-image-copy-capture-v1-client-protocol.h tests/ext-image-copy-capture-v1-protocol.c
+	$(CC) tests/capture.c tests/ext-foreign-toplevel-list-v1-protocol.c \
+		tests/ext-image-capture-source-v1-protocol.c tests/ext-image-copy-capture-v1-protocol.c \
+		-Itests `$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
 tests/ext-session-lock-v1-client-protocol.h:
 	$(WAYLAND_SCANNER) client-header \
 		$(WAYLAND_PROTOCOLS)/staging/ext-session-lock/ext-session-lock-v1.xml $@
@@ -168,13 +195,14 @@ tests/launcher: tests/launcher.c tests/wlr-layer-shell-unstable-v1-client-protoc
 		-Itests `$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
 test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime tests/pointer tests/launcher \
-		tests/keyboard \
+		tests/keyboard tests/capture \
 		$(XWAYLAND:-DXWAYLAND=tests/x11client)
 	python3 -m unittest discover -s tests -v
 
 clean:
 	rm -f dwl *.o *-protocol.h tests/client tests/workspaces tests/locker tests/power \
-		tests/ime tests/pointer tests/launcher tests/keyboard tests/x11client tests/*-protocol.h \
+		tests/ime tests/pointer tests/launcher tests/keyboard tests/capture tests/x11client \
+		tests/*-protocol.h \
 		tests/*-protocol.c
 
 dist: clean

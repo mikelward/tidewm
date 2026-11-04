@@ -17,6 +17,10 @@ lands with a test.
 
 ## Done
 
+- **Capture events** (#41): the IPC's `capture` event says when an
+  ext-image-copy-capture session starts and stops, and of which window,
+  or of an output. Window identifiers were there already, as GET_TREE's
+  `foreign_toplevel_identifier`, since the IPC came.
 - **On-demand layers keep the keyboard** (#40): a notification's reply
   field takes the keyboard when clicked, and keeps it while a window opens
   or closes or the pointer crosses one, until a click, a key binding or a
@@ -110,6 +114,13 @@ lands with a test.
 
 ## Decisions needing review
 
+- **The capture event is tidewm's own** (#41), as sway has none:
+  `capture`, numbered after `layout`, where Hyprland's is `screencast`.
+  It names the captured window by `con_id`, but not an output, which
+  wlroots keeps to itself; naming it would mean tidewm's own output
+  sources, as hiding the shell from capture will need anyway. A
+  screenshot's session sends it too, start and stop close together.
+  Reversible.
 - **Hovering no longer focuses an on-demand layer** (#40): dwl gave one
   the keyboard when the pointer crossed it, under focus-follows-mouse;
   now only a click does, as tide's SPEC §14.1 has a notification's reply
@@ -320,8 +331,7 @@ lands with a test.
 
 ## Plan
 
-1. **Capture**: window identifiers over the IPC; capture start and stop
-   events; tide's launcher and notifications hidden from capture.
+1. **Capture**: tide's launcher and notifications hidden from capture.
 2. **Outside clicks**: a focus-grab protocol or click event for the
    notification center.
 3. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
