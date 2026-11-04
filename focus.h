@@ -47,6 +47,9 @@ static unsigned long fg_active_ws; /* the current workspace's IPC id as it was f
 static pid_t fg_active_pid;
 static char *fg_active_app; /* its app, normalized */
 static uint64_t fg_last_key; /* when you last pressed a key; 0 for never */
+/* Your last key press or click: when, and the window it went to, by IPC
+ * id, 0 for none (a launcher's, say), for the shell's polkit agent */
+static struct { uint64_t at; int button; unsigned long window; } fg_last_input;
 static unsigned long fg_focus_count; /* focuses so far, for Client.focus_seq */
 static struct wl_event_source *fg_timer; /* for or-recent grants' lapses */
 static int fg_focusing; /* focus that isn't you moving on: the guard's own, or an output change's */
@@ -590,18 +593,54 @@ fg_focused(Client *c)
 	fg_cancel();
 }
 
-/* A key press, or a click: you moving on */
+/* A key press, or a click: you moving on. It went to no window until
+ * fg_delivered says which, so not if a binding took it. */
 static void
 fg_key(void)
 {
 	fg_cancel();
 	fg_last_key = fg_now();
+	fg_last_input.at = fg_last_key;
+	fg_last_input.button = 0;
+	fg_last_input.window = 0;
 }
 
 static void
 fg_click(void)
 {
 	fg_cancel();
+	fg_last_input.at = fg_now();
+	fg_last_input.button = 1;
+	fg_last_input.window = 0;
+}
+
+/* Your key press or click went to s, the keyboard's focus or the
+ * pointer's: its window, or none for a menu, which isn't in the tree, a
+ * layer surface or the lock screen */
+static void
+fg_delivered(struct wlr_surface *s)
+{
+	Client *c = NULL;
+	toplevel_from_wlr_surface(s, &c, NULL);
+	fg_last_input.window = c && !client_is_unmanaged(c) ? ipc_id(&c->ipc_id) : 0;
+}
+
+/* GET_SEATS's last_input: {"type": "key" or "button", "window": its IPC
+ * id or null, "msec_ago": how long ago}, or null before any input */
+static struct json_object *
+fg_json_last_input(void)
+{
+	struct json_object *obj;
+	if (!fg_last_input.at)
+		return NULL;
+	obj = json_object_new_object();
+	json_object_object_add(obj, "type",
+			json_object_new_string(fg_last_input.button ? "button" : "key"));
+	json_object_object_add(obj, "window", fg_last_input.window
+			? json_object_new_uint64(fg_last_input.window) : NULL);
+	json_object_object_add(obj, "msec_ago",
+			json_object_new_uint64((fg_now() - fg_last_input.at) / 1000));
+	return obj;
 }
 
 /* An existing window asked to be activated: a grant for its app lets it
