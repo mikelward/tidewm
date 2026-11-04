@@ -17,6 +17,9 @@ lands with a test.
 
 ## Done
 
+- **Dimming** (#33): every window but the focused one is dimmed, at
+  `dim_inactive`'s strength, except where there's one window to see,
+  picture-in-picture, video, and what `dim disable` exempts.
 - **A floating window's place, per app** (#31): floating a window by hand
   puts it where its app's last floating window was, for the session.
 - **Dialogs follow their parent** (#29): a dialog stays above its parent
@@ -92,6 +95,20 @@ lands with a test.
   on. Its cause is in wlroots and Xwayland rather than tidewm; the
   alternative was to chase it there first. Reversible: it's the next thing
   to pick up.
+- **Dimming is off unless the config says** (#33): `config.h`'s
+  `dim_inactive` is 0, as its `focus_guard` is off, and tide's config
+  sets 0.07. The alternative was 0.07 in `config.h`. Reversible.
+- **Only the focused window is undimmed** (#33): the one GET_TREE calls
+  `focused`. While a layer surface, such as tide's launcher, has the
+  keyboard, every window dims, unless its monitor shows one. The
+  alternative: the last window focused stays undimmed then. Reversible.
+- **A fullscreen window counts as the only one shown** (#33), so it never
+  dims, like a lone window, as the windows under it can't be seen.
+  Reversible.
+- **The exemption is a command, `dim enable|disable|toggle`** (#33),
+  tidewm's own, for a `for_window` rule, as Hyprland's `no_dim` rule is;
+  its menus and tooltips are never dimmed. Reversible: sway has nothing
+  to follow here.
 - **A floating place is the app's, and only floating by hand takes it**
   (#31): tidewm keeps the place of each app's last floating window, size
   and position, other than a dialog's, a fixed-size window's or
@@ -255,25 +272,23 @@ lands with a test.
 
 ## Plan
 
-1. **Dimming** of every window but the focused one, with tide's
-   exceptions.
-2. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
+1. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
    a pointer button also ends the tap; `scroll_factor`; the `input`
    event's `xkb_layout`, when the active layout switches, for a layout
    indicator. Per-device settings came with the runtime config (#17).
-3. **Outputs**: a single-window width; the lid switch. Mode, scale,
+2. **Outputs**: a single-window width; the lid switch. Mode, scale,
    position and hotplug came with the runtime config (#16).
-4. **Lock and keyboard**: a command that drops a dead lock, no pointer
+3. **Lock and keyboard**: a command that drops a dead lock, no pointer
    events while locked; on-demand layers keep the keyboard.
-5. **Capture**: window identifiers over the IPC; capture start and stop
+4. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
-6. **Outside clicks**: a focus-grab protocol or click event for the
+5. **Outside clicks**: a focus-grab protocol or click event for the
    notification center.
-7. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+6. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
    client starts Xwayland, and a window it maps before wlroots' window
    manager watches the root is never managed (the tests' client waits
    for it): start Xwayland ahead of clients, or take on windows already
    there.
-8. **Session**: the entry and wrapper tide starts it with.
+7. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

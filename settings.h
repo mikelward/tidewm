@@ -115,6 +115,7 @@ typedef struct {
 	InputConfig *inputs;
 	size_t ninputs;
 	int focus_guard; /* focus_guard enable|disable; -1: not given */
+	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
 	double grant_seconds, prompt_seconds; /* 0: not given */
 	char *text; /* the file, as read, for GET_CONFIG */
 } Settings;
@@ -131,6 +132,7 @@ static size_t settings_mode; /* the current mode, in settings->modes */
 static int settings_apply_outputs(const OutputConfig *only);
 static int settings_apply_inputs(const InputConfig *only);
 static void fg_arm(void);
+static void dim_update(void);
 static void settings_group_register(KeyboardGroup *group);
 static void settings_free_input(InputConfig *ic);
 /* A release binding's key, while it's down and no other key has been */
@@ -844,6 +846,24 @@ settings_focus_guard(Settings *s, char *rest, unsigned int line, struct json_obj
 	return 1;
 }
 
+/* A dim_inactive line: how dark the dim over every window but the focused
+ * one is, from 0, none, to 1, black */
+static int
+settings_dim(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *end;
+	double v;
+	errno = 0;
+	v = strtod(rest, &end);
+	/* NaN fails both comparisons */
+	if (!*rest || *end || errno || !(v >= 0 && v <= 1)) {
+		settings_error(errors, line, "dim_inactive takes a strength from 0 to 1");
+		return 0;
+	}
+	s->dim_inactive = v;
+	return 1;
+}
+
 /* A mode's or input selector's name: a word, or text in double quotes,
  * as sway takes it. Moves *p past it. Returns NULL for an empty name or an
  * unclosed quote. */
@@ -972,6 +992,7 @@ settings_parse(char *text, struct json_object *errors)
 
 	s->text = text;
 	s->focus_guard = -1;
+	s->dim_inactive = -1;
 	settings_add_mode(s, "default");
 	for (start = text; *start; start = *end ? end + 1 : end) {
 		line++;
@@ -1043,6 +1064,13 @@ settings_parse(char *text, struct json_object *errors)
 				ok = 0;
 			} else {
 				ok &= settings_add_input(s, name, p, line, errors);
+			}
+		} else if (!strcasecmp(word, "dim_inactive")) {
+			if (mode) {
+				settings_error(errors, line, "dim_inactive can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_dim(s, p, line, errors);
 			}
 		} else if (!strcasecmp(word, "focus_guard")) {
 			if (mode) {
@@ -1159,6 +1187,8 @@ settings_load(void)
 	settings = loaded;
 	/* A notification's grant lapses by the new grant_seconds */
 	fg_arm();
+	/* Windows dim at the new strength */
+	dim_update();
 	/* Outputs and inputs take the new lines at once; at startup, there are
 	 * none yet. One that refuses them is an error, but the rest stands */
 	refused = settings_apply_outputs(NULL) < 0;

@@ -37,6 +37,10 @@ static const char *const portal_classes[] = {
 	"xdg-desktop-portal-gnome",
 };
 
+/* How dark the dim over every window but the focused one is, from 0, none,
+ * to 1, black; tide's is 0.07 (its SPEC §6.2) */
+static const float dim_inactive            = 0;
+
 static const Rule rules[] = {
 	/* app_id             title       workspace     isfloating   monitor */
 	{ "Gimp_EXAMPLE",     NULL,       NULL,         1,           -1 }, /* Start on the current workspace, floating, not tiled */

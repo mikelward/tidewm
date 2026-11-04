@@ -17,7 +17,7 @@ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEV
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 all: dwl
-dwl: dwl.c client.h config.h floating.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
+dwl: dwl.c client.h config.h dim.h floating.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
 	ext-image-copy-capture-v1-protocol.h \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
 	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h
@@ -71,11 +71,18 @@ tests/xdg-dialog-v1-client-protocol.h:
 tests/xdg-dialog-v1-protocol.c:
 	$(WAYLAND_SCANNER) private-code \
 		$(WAYLAND_PROTOCOLS)/staging/xdg-dialog/xdg-dialog-v1.xml $@
+tests/content-type-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		$(WAYLAND_PROTOCOLS)/staging/content-type/content-type-v1.xml $@
+tests/content-type-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		$(WAYLAND_PROTOCOLS)/staging/content-type/content-type-v1.xml $@
 tests/client: tests/client.c tests/xdg-shell-client-protocol.h tests/xdg-shell-protocol.c \
 		tests/xdg-activation-v1-client-protocol.h tests/xdg-activation-v1-protocol.c \
-		tests/xdg-dialog-v1-client-protocol.h tests/xdg-dialog-v1-protocol.c
+		tests/xdg-dialog-v1-client-protocol.h tests/xdg-dialog-v1-protocol.c \
+		tests/content-type-v1-client-protocol.h tests/content-type-v1-protocol.c
 	$(CC) tests/client.c tests/xdg-shell-protocol.c tests/xdg-activation-v1-protocol.c \
-		tests/xdg-dialog-v1-protocol.c -Itests \
+		tests/xdg-dialog-v1-protocol.c tests/content-type-v1-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
 # tests/x11client needs XWayland's xcb libraries. The substitution makes it
@@ -161,7 +168,7 @@ clean:
 dist: clean
 	mkdir -p dwl-$(VERSION)
 	cp -R LICENSE NOTICE Makefile CHANGELOG.md README.md client.h config.def.h \
-		config.mk protocols dwl.1 dwl.c floating.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h \
+		config.mk protocols dwl.1 dwl.c dim.h floating.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h \
 		dwl.desktop docs tests \
 		dwl-$(VERSION)
 	tar -caf dwl-$(VERSION).tar.gz dwl-$(VERSION)

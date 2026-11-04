@@ -19,7 +19,10 @@
 #include <wlr/render/swapchain.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_alpha_modifier_v1.h>
+#include <drm_fourcc.h>
+#include <wlr/interfaces/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_content_type_v1.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_data_control_v1.h>
@@ -182,6 +185,8 @@ typedef struct {
 	int ismaximized; /* covers its monitor's window area, above the other tiles */
 	int issticky; /* floating, it's on every workspace, as sway's sticky */
 	int recenter; /* it followed its parent: to its middle once laid out */
+	struct wlr_scene_buffer *dim; /* dim.h's layer over it */
+	int nodim; /* the dim command's or a rule's: it never dims */
 	int wantsfullscreen; /* asked for fullscreen while held, so waits for focus */
 	struct wlr_box unmaximized; /* its place before it was maximized; none if it opened so */
 	int held; /* how the focus guard holds it from focus: FgFree, FgWaiting, FgPopup */
@@ -549,6 +554,7 @@ static struct wlr_xwayland *xwayland;
 #include "layout.h"
 #include "focus.h"
 #include "floating.h"
+#include "dim.h"
 
 /* function implementations */
 void
@@ -653,6 +659,7 @@ arrange(Monitor *m)
 				placefloating(c, c->geom);
 		}
 	} while (recentered);
+	dim_update();
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
 }
@@ -866,6 +873,7 @@ cleanup(void)
 	ipc_finish();
 	fg_finish();
 	fl_finish();
+	dim_finish();
 	settings_finish();
 	lt_finish();
 	ws_protocol_finish();
@@ -1092,6 +1100,8 @@ commitnotify(struct wl_listener *listener, void *data)
 	}
 
 	resize(c, c->geom, (c->isfloating && !c->isfullscreen));
+	/* Its content type comes with a commit */
+	dim_update_one(c);
 }
 
 void
@@ -1665,6 +1675,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		focused_client = NULL;
 	}
 	printstatus();
+	dim_update();
 
 	if (!c && !l) {
 		/* With no client, all we have left is to clear focus */
@@ -1686,6 +1697,8 @@ focusclient(Client *c, LayerSurface *l, int lift)
 
 	if (!client_is_unmanaged(c)) {
 		focused_client = c;
+		/* Undimmed before the event says so */
+		dim_update();
 		ipc_event_window(c, "focus");
 		fg_focused(c);
 	}
@@ -2052,6 +2065,7 @@ mapnotify(struct wl_listener *listener, void *data)
 				c->isurgent ? urgentcolor : bordercolor);
 		c->border[i]->node.data = c;
 	}
+	dim_attach(c);
 
 	/* Initialize client geometry with room for border */
 	client_set_tiled(c, WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT |
@@ -2771,6 +2785,8 @@ resize(Client *c, struct wlr_box geo, int interact)
 	wlr_scene_node_set_position(&c->border[1]->node, 0, c->geom.height - c->bw);
 	wlr_scene_node_set_position(&c->border[2]->node, 0, c->bw);
 	wlr_scene_node_set_position(&c->border[3]->node, c->geom.width - c->bw, c->bw);
+	if (c->dim)
+		wlr_scene_buffer_set_dest_size(c->dim, c->geom.width, c->geom.height);
 
 	client_set_size(c, c->geom.width - 2 * c->bw, c->geom.height - 2 * c->bw);
 	client_get_clip(c, &clip);
@@ -3190,6 +3206,7 @@ setup(void)
 	wlr_primary_selection_v1_device_manager_create(dpy);
 	wlr_viewporter_create(dpy);
 	wlr_single_pixel_buffer_manager_v1_create(dpy);
+	dim_init();
 	wlr_fractional_scale_manager_v1_create(dpy, 1);
 	wlr_presentation_create(dpy, backend, 2);
 	wlr_alpha_modifier_v1_create(dpy);
@@ -3499,6 +3516,7 @@ unmapnotify(struct wl_listener *listener, void *data)
 	c->image_capture_scene = NULL;
 	c->image_capture_source = NULL;
 	wlr_scene_node_destroy(&c->scene->node);
+	c->dim = NULL; /* it went with the tree */
 	client_surface(c)->data = NULL;
 	printstatus();
 	motionnotify(0, NULL, 0, 0, 0, 0);
