@@ -573,6 +573,23 @@ fg_opened(Client *c, char *workspace)
 	}
 }
 
+/* Whether old, a layer surface with the keyboard, keeps it as focus moves
+ * to l, or to a window or nothing for no l: one with on-demand focus, such
+ * as a notification's reply field, keeps it unless you ask, by a click, a
+ * binding or a command, or the lock takes it, or an exclusive one,
+ * such as the launcher, opens. A window opening or closing, or the pointer
+ * crossing one, doesn't take it, guard or no guard, as tide's SPEC §14.1
+ * has it. */
+static int
+fg_layer_keeps(LayerSurface *old, LayerSurface *l)
+{
+	return !focus_asked && old->mapped
+			&& old->layer_surface->current.keyboard_interactive
+				== ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
+			&& !(l && l->layer_surface->current.keyboard_interactive
+				== ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
+}
+
 /* Focus went to c, or to nothing. However you got there, a held window
  * isn't held now. Focus moving on cancels the grants, unless it's the
  * guard's own, or a window mapping's (its rules may move it away, and

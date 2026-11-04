@@ -1020,7 +1020,10 @@ static int
 ipc_handle_command(IpcClient *cl, char *payload)
 {
 	int quit_after = 0, r;
+	/* A command is you asking, as a shell's click on a notification is */
+	focus_asked++;
 	r = ipc_send_json(cl, IpcCommand, ipc_run_commands(payload, &quit_after, NULL));
+	focus_asked--;
 	if (quit_after)
 		ipc_quit();
 	return r;

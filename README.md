@@ -143,6 +143,15 @@ unfocused and urgent, as tide's SPEC §14 has it. An app's activation
 marks its window urgent, unless a grant names it.
 [`docs/config.md`](docs/config.md) says how.
 
+### Notifications and the keyboard
+
+A layer surface with on-demand keyboard focus, such as a notification's
+reply field, takes the keyboard when you click it, not when the pointer
+crosses it. It keeps it until you click elsewhere, press a key binding or
+run a command, or the launcher or the lock takes it, as tide's SPEC §14.1
+has it. A window opening or closing, or the pointer crossing one, doesn't
+take it.
+
 ### A lone window
 
 A tiled window alone on its monitor is centered at 80% of the window

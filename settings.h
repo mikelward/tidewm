@@ -1463,7 +1463,9 @@ settings_run_binding(uint32_t mods, xkb_keysym_t sym, int release)
 	snprintf(what, sizeof(what), "binding %s", b->keys);
 	/* Said first, as the command may reload the file b is in */
 	ipc_event_binding(b->command, b->mods, b->sym, "keyboard");
+	focus_asked++;
 	settings_run(b->command, what, NULL);
+	focus_asked--;
 	return 1;
 }
 
