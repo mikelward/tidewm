@@ -296,6 +296,13 @@ typedef struct {
 	int monitor;
 } Rule;
 
+/* A lone tiled window's width, as a fraction, from a window area this
+ * wide for its height (layout.h's lt_single) */
+typedef struct {
+	double min_aspect;
+	double width;
+} SingleRule;
+
 typedef struct {
 	struct wlr_scene_tree *scene;
 
@@ -635,7 +642,8 @@ arrange(Monitor *m)
 								: c->scene->node.parent);
 	}
 
-	if (m->lt[m->sellt]->arrange)
+	/* A lone window has the single-window width, in any layout */
+	if (m->lt[m->sellt]->arrange && !lt_single(m))
 		m->lt[m->sellt]->arrange(m);
 	/* A maximized window covers the window area, above the other tiles
 	 * but under its own dialogs. Floating, it stacks by focus, as the

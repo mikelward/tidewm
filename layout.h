@@ -121,6 +121,48 @@ lt_place(Monitor *m, struct wlr_box *boxes, int n)
 	}
 }
 
+/* The width, as a fraction, for m's lone window: the config file's
+ * single_window rules, or config.h's, whichever the window area's aspect
+ * reaches with the largest min_aspect, and the whole width for none */
+static double
+lt_single_width(Monitor *m)
+{
+	const SingleRule *r = settings && settings->nsingles ? settings->singles : single_window;
+	size_t n = settings && settings->nsingles ? settings->nsingles : LENGTH(single_window), i;
+	double aspect = m->w.height > 0 ? m->w.width / (double)m->w.height : 0, best = -1;
+	double width = 1;
+	for (i = 0; i < n; i++) {
+		if (aspect >= r[i].min_aspect && r[i].min_aspect > best) {
+			best = r[i].min_aspect;
+			width = r[i].width;
+		}
+	}
+	return MAX(0.1, MIN(width, 1));
+}
+
+/* Places m's tiled window, if it's alone, centered at its single-window
+ * width, in any layout, as tide's geometry does (tide's SPEC §1). Returns
+ * whether it was alone, so the layout needn't place it. */
+static int
+lt_single(Monitor *m)
+{
+	struct wlr_box cols[3];
+	double f, side;
+	if (lt_count(m) != 1)
+		return 0;
+	f = lt_single_width(m);
+	side = (1 - f) / 2;
+	if (f >= 1)
+		cols[1] = m->w;
+	else
+		lt_columns(m->w, (double[]){side, f, side}, 3, cols);
+	lt_place(m, &cols[1], 1);
+	/* As monocle counts its windows */
+	if (m->lt[m->sellt]->arrange == monocle)
+		snprintf(m->ltsymbol, LENGTH(m->ltsymbol), "[1]");
+	return 1;
+}
+
 /* The master centered, with a stack either side. With one stack window
  * there's nothing to balance, so it's the master and one column. Stack
  * windows go right, left, right..., so adding one never moves another to

@@ -37,6 +37,16 @@ static const char *const portal_classes[] = {
 	"xdg-desktop-portal-gnome",
 };
 
+/* A lone tiled window's width, as a fraction of the window area, by how
+ * wide the area is for its height: the rule with the largest min_aspect
+ * the area reaches wins, and none means the whole width. tide's SPEC §1:
+ * 80% on an ultrawide, the whole width on 16:9 or 16:10. */
+static const SingleRule single_window[] = {
+	/* min_aspect   width */
+	{ 2.1,          0.8 },
+	{ 3.2,          0.6 },
+};
+
 /* How dark the dim over every window but the focused one is, from 0, none,
  * to 1, black; tide's is 0.07 (its SPEC §6.2) */
 static const float dim_inactive            = 0;

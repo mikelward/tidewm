@@ -5,7 +5,8 @@ whole pixels that cover the window area exactly."""
 import math
 import unittest
 
-from harness import EVENT_LAYOUT, GET_OUTPUTS, GET_TREE, GET_WORKSPACES, TidewmTest, power
+from harness import (EVENT_LAYOUT, GET_OUTPUTS, GET_TREE, GET_WORKSPACES, RUN_COMMAND, TidewmTest,
+                     power)
 
 
 def edge(start, length, frac):
@@ -14,7 +15,9 @@ def edge(start, length, frac):
     return math.floor(start + length * frac + 0.5)
 
 
-class LayoutTest(TidewmTest):
+class LayoutHelpers(TidewmTest):
+    """Helpers, with no tests of their own."""
+
     def setUp(self):
         super().setUp()
         self.ipc = self.connect()
@@ -38,6 +41,8 @@ class LayoutTest(TidewmTest):
         y0, y1 = edge(self.y, self.h, top), edge(self.y, self.h, bottom)
         return x0, y0, x1 - x0, y1 - y0
 
+
+class LayoutTest(LayoutHelpers):
     def test_threecol_centers_the_master_with_a_quarter_either_side(self):
         master, right, left = self.windows_in("threecol", 3)
         self.assertEqual(self.box(master), self.column(0.25, 0.75))
@@ -129,6 +134,68 @@ class LayoutTest(TidewmTest):
         self.command(self.connect(), "layout toggle")  # back to tile, then on to twocol
         self.command(self.connect(), "layout toggle")
         self.assertEqual(self.box(master), self.column(0, 0.72))
+
+
+class SingleWindowTest(LayoutHelpers):
+    """A lone tiled window's width, by its window area's aspect (tide's
+    SPEC §1): config.h's rule is 80% from 2.1, 60% from 3.2, and the whole
+    width below that."""
+
+    def output(self, mode):
+        self.command(self.connect(), f"output HEADLESS-1 mode {mode}")
+        area = self.connect().request(GET_OUTPUTS)[0]["rect"]
+        self.x, self.y, self.w, self.h = area["x"], area["y"], area["width"], area["height"]
+
+    def test_a_lone_window_fills_a_16_9_monitor(self):
+        con, = self.windows_in("tile", 1)
+        self.assertEqual(self.box(con), self.column(0, 1))
+
+    def test_a_lone_window_is_centered_at_80_percent_on_an_ultrawide(self):
+        self.output("2560x1080")
+        con, = self.windows_in("tile", 1)
+        self.assertEqual(self.box(con), self.column(0.1, 0.9))
+
+    def test_and_at_60_percent_on_a_wider_one(self):
+        self.output("3840x1080")
+        con, = self.windows_in("tile", 1)
+        self.assertEqual(self.box(con), self.column(0.2, 0.8))
+
+    def test_in_every_layout(self):
+        self.output("2560x1080")
+        con, = self.windows_in("tile", 1)
+        for layout in ["threecol", "twocol", "monocle"]:
+            self.command(self.connect(), f"layout {layout}")
+            self.assertEqual(self.box(con), self.column(0.1, 0.9), layout)
+
+    def test_a_second_window_tiles_as_the_layout_has_it(self):
+        self.output("2560x1080")
+        first, second = self.windows_in("threecol", 2)
+        self.assertEqual((self.box(first), self.box(second)),
+                         (self.column(0, 0.5), self.column(0.5, 1)))
+
+    def test_a_floating_window_beside_it_leaves_it_lone(self):
+        self.output("2560x1080")
+        con, floating = self.windows_in("tile", 2)
+        self.command(self.connect(), f"[con_id={floating['id']}] floating enable")
+        self.assertEqual(self.box(con), self.column(0.1, 0.9))
+
+
+class SingleWindowConfigTest(LayoutHelpers):
+    CONFIG = "single_window 1.5 0.5\n"
+
+    def test_the_config_files_rules_replace_config_hs(self):
+        con, = self.windows_in("tile", 1)
+        self.assertEqual(self.box(con), self.column(0.25, 0.75))
+
+    def test_a_bad_rule_is_an_error(self):
+        for line, error in [("single_window 2\n", ":1: single_window takes"),
+                            ("single_window wide 0.8\n", ":1: single_window takes"),
+                            ("single_window 2 0.05\n", ":1: single_window takes"),
+                            ("single_window 200 0.8\n", ":1: single_window takes")]:
+            self.wm.write_config(line)
+            result, = self.connect().request(RUN_COMMAND, "reload")
+            self.assertFalse(result["success"], line)
+            self.assertIn(error, result["error"], line)
 
 
 class WorkspaceLayoutTest(TidewmTest):
