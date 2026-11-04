@@ -183,6 +183,7 @@ is `config.h`'s. A later line for a name adds to an earlier one.
 | `scroll_method` | `none`, `two_finger`, `edge` or `on_button_down` |
 | `click_method` | `none`, `button_areas` or `clickfinger` |
 | `accel_profile`, `pointer_accel` | `adaptive` or `flat`, and the speed, from -1 to 1 |
+| `scroll_factor` | How much a pointer's scroll counts, 0 or more, 1 as it comes, as in sway: tidewm's own, so a client's virtual pointer has it too |
 | `events` | `enabled`, `disabled` or `disabled_on_external_mouse` |
 
 ```

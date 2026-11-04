@@ -734,6 +734,7 @@ axisnotify(struct wl_listener *listener, void *data)
 	unsigned int adir;
 	struct wlr_keyboard *keyboard;
 	uint32_t mods;
+	double factor;
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 	/* Super with a scroll isn't Super tapped */
@@ -754,10 +755,13 @@ axisnotify(struct wl_listener *listener, void *data)
 		}
 	}
 
-	/* Notify the client with pointer focus of the axis event. */
+	/* Notify the client with pointer focus of the axis event, at the
+	 * device's scroll factor (sway's scroll_factor) */
+	factor = settings_scroll_factor(&event->pointer->base);
 	wlr_seat_pointer_notify_axis(seat,
-			event->time_msec, event->orientation, event->delta,
-			event->delta_discrete, event->source, event->relative_direction);
+			event->time_msec, event->orientation, event->delta * factor,
+			(int32_t)round(event->delta_discrete * factor), event->source,
+			event->relative_direction);
 }
 
 void

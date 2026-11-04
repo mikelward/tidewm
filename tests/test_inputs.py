@@ -12,8 +12,10 @@ import shutil
 import subprocess
 import unittest
 
-from harness import (EVENT_INPUT, GET_CONFIG, GET_INPUTS, ROOT, RUN_COMMAND, TIMEOUT, Tidewm,
-                     TidewmTest)
+from harness import (EVENT_INPUT, EVENT_WINDOW, GET_CONFIG, GET_INPUTS, GET_OUTPUTS, ROOT,
+                     RUN_COMMAND, TIMEOUT, Tidewm, TidewmTest)
+
+POINTER = os.path.join(ROOT, "tests", "pointer")
 
 
 class InputTest(TidewmTest):
@@ -42,6 +44,8 @@ class InputErrorsTest(InputTest):
             ("input * brightness 5\n", ":1: input *: no setting is called brightness"),
             ("input * pointer_accel 2\n", ":1: input *: pointer_accel 2 isn't a number from -1 to 1"),
             ("input * pointer_accel nan\n", ":1: input *: pointer_accel nan isn't a number from -1 to 1"),
+            ("input * scroll_factor -1\n", ":1: input *: scroll_factor -1 isn't a number, 0 or more"),
+            ("input * scroll_factor inf\n", ":1: input *: scroll_factor inf isn't a number, 0 or more"),
             ("input * repeat_rate fast\n",
              ":1: input *: repeat_rate fast isn't a whole number from 0 to 100000"),
             ("input type:keyboard xkb_layout nosuchlayout\n",
@@ -86,6 +90,55 @@ input * events enabled
         for command in ("input", "input type:mouse tap enabled", "input * tap",
                         "input * tap maybe", "input * brightness 5"):
             self.assertTrue(self.fails(command)["parse_error"], command)
+
+
+class ScrollTest(InputTest):
+    """The tests' pointer, a virtual one, scrolls 15 over a window that says
+    how far it scrolled."""
+
+    def line(self, client, start):
+        """The client's next line that starts with start."""
+        while True:
+            self.assertTrue(select.select([client.stdout], [], [], TIMEOUT)[0],
+                            f"no {start!r} from the window")
+            line = client.stdout.readline()
+            self.assertTrue(line, f"the window went before {start!r}")
+            if line.startswith(start):
+                return line
+
+    def scrolled(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        client = self.wm.open_window("test.app", "test.app", stdout=True, scrolls=True)
+        window = ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new")["container"]
+        output, = self.connect().request(GET_OUTPUTS)
+        size = [str(output["rect"]["width"]), str(output["rect"]["height"])]
+        # The headless seat has a pointer once a virtual one comes, and
+        # keeps it; the window takes its own then
+        subprocess.run([POINTER, "move", "0", "0", *size], env=self.wm.env, check=True,
+                       timeout=TIMEOUT)
+        self.line(client, b"pointing")
+        rect = window["rect"]
+        subprocess.run([POINTER, "move", str(rect["x"] + 50), str(rect["y"] + 50), *size,
+                        "scroll"], env=self.wm.env, check=True, timeout=TIMEOUT)
+        return float(self.line(client, b"scroll ").split()[1])
+
+
+class ScrollFactorTest(ScrollTest):
+    CONFIG = "input type:pointer scroll_factor 2\n"
+
+    def test_a_scroll_is_scaled_by_the_pointers_scroll_factor(self):
+        self.assertEqual(self.scrolled(), 30)
+
+    def test_a_reload_changes_it(self):
+        self.wm.write_config("input * scroll_factor 0.5\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.scrolled(), 7.5)
+
+
+class NoScrollFactorTest(ScrollTest):
+    def test_a_scroll_is_as_the_pointer_sent_it(self):
+        self.assertEqual(self.scrolled(), 15)
 
 
 class NestedTest(InputTest):
