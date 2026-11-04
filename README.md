@@ -143,6 +143,15 @@ unfocused and urgent, as tide's SPEC §14 has it. An app's activation
 marks its window urgent, unless a grant names it.
 [`docs/config.md`](docs/config.md) says how.
 
+### Dialogs and floating windows
+
+A window floats when it has a parent, is modal (X11's state or Wayland's
+xdg-dialog-v1), is an X11 dialog, utility, toolbar or splash window, asks
+for a fixed size, or has neither an app ID nor a title, or when a rule
+floats it. One that floats as it opens goes in the middle of its parent,
+or of its monitor's window area without one, as big as it asks but no
+more than 80% of the monitor, as tide's SPEC §6.4 has it.
+
 ### IPC
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so

@@ -151,6 +151,15 @@ fg_raw_title(Client *c)
 	return c->surface.xdg->toplevel->title;
 }
 
+/* A status popup, such as Chrome's own notification: a window with
+ * neither an app ID nor a title. It floats, and the guard holds it. */
+static int
+fg_nameless(Client *c)
+{
+	const char *appid = fg_raw_appid(c), *title = fg_raw_title(c);
+	return (!appid || !*appid) && (!title || !*title);
+}
+
 static void
 fg_free(FgGrant *g)
 {
@@ -504,14 +513,13 @@ out:
 static char *
 fg_open(Client *c)
 {
-	const char *appid = fg_raw_appid(c), *title = fg_raw_title(c);
 	FgGrant *g;
 	char *ws;
 	/* A window mapping again is new again: nothing holds it yet */
 	c->held = FgFree;
 	/* A status popup opens on screen as it is: unfocused even from the
 	 * app you're in, unmarked, and taking no grant */
-	if ((!appid || !*appid) && (!title || !*title)) {
+	if (fg_nameless(c)) {
 		if (fg_enabled())
 			c->held = FgPopup;
 		return NULL;
