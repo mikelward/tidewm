@@ -134,7 +134,8 @@ class TwoOutputTest(X11Helpers):
     OUTPUTS = 2
     CONFIG = ("xwayland_scaling disable\n"
               "output HEADLESS-1 mode 800x600@50Hz scale 1 position 0 0\n"
-              "output HEADLESS-2 mode 800x600@50Hz scale 2 position 800 0\n")
+              "output HEADLESS-2 mode 800x600@50Hz scale 2 position 800 0\n"
+              'for_window [class="^test.float$"] floating enable\n')
 
     def on_the_left(self, window):
         """Moves window to the monitor at 1, if it isn't there."""
@@ -150,6 +151,17 @@ class TwoOutputTest(X11Helpers):
         # Its 400x300 pixels are 200x150 there, in a 1px border
         rect = self.windows()[window["id"]]["rect"]
         self.assertEqual((rect["width"], rect["height"]), (202, 152))
+
+    def test_a_floating_x11_window_opens_in_the_pixels_of_its_own_monitor(self):
+        # Its place, 0,0 in X11's space, is on the monitor at 1, but it
+        # opens on the focused one, at 2
+        self.command(self.connect(), "focus output HEADLESS-2")
+        client = self.wm.open_x11_window("test.float", "Float", report=True)
+        window = self.opened(client)
+        self.assertEqual(window["output"], "HEADLESS-2")
+        # Its 100x100 pixels are 50x50 there, in a 1px border
+        rect = self.windows()[window["id"]]["rect"]
+        self.assertEqual((rect["width"], rect["height"]), (52, 52))
 
     def test_a_configure_request_is_in_the_pixels_of_the_windows_monitor(self):
         client = self.wm.open_x11_window("test.x11", "X11", stdin=True, report=True)
