@@ -144,6 +144,17 @@ tests/pointer: tests/pointer.c tests/wlr-virtual-pointer-unstable-v1-client-prot
 	$(CC) tests/pointer.c tests/wlr-virtual-pointer-unstable-v1-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+tests/virtual-keyboard-unstable-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		protocols/virtual-keyboard-unstable-v1.xml $@
+tests/virtual-keyboard-unstable-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		protocols/virtual-keyboard-unstable-v1.xml $@
+tests/keyboard: tests/keyboard.c tests/virtual-keyboard-unstable-v1-client-protocol.h \
+		tests/virtual-keyboard-unstable-v1-protocol.c
+	$(CC) tests/keyboard.c tests/virtual-keyboard-unstable-v1-protocol.c -Itests \
+		`$(PKG_CONFIG) --cflags wayland-client xkbcommon` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client xkbcommon` -o $@
 tests/wlr-layer-shell-unstable-v1-client-protocol.h:
 	$(WAYLAND_SCANNER) client-header \
 		protocols/wlr-layer-shell-unstable-v1.xml $@
@@ -157,12 +168,13 @@ tests/launcher: tests/launcher.c tests/wlr-layer-shell-unstable-v1-client-protoc
 		-Itests `$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
 test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime tests/pointer tests/launcher \
+		tests/keyboard \
 		$(XWAYLAND:-DXWAYLAND=tests/x11client)
 	python3 -m unittest discover -s tests -v
 
 clean:
 	rm -f dwl *.o *-protocol.h tests/client tests/workspaces tests/locker tests/power \
-		tests/ime tests/pointer tests/launcher tests/x11client tests/*-protocol.h \
+		tests/ime tests/pointer tests/launcher tests/keyboard tests/x11client tests/*-protocol.h \
 		tests/*-protocol.c
 
 dist: clean

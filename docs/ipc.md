@@ -81,6 +81,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `mode NAME` | Makes the config file's mode `NAME`'s bindings the ones in force; `mode default` goes back to the top level. `NAME` may be in `"` |
 | `output NAME SETTINGS` | Sets the output `NAME`'s, or every output's for `*`, mode, scale, position, transform, or `enable` or `disable`, as the config file's output lines do ([`config.md`](config.md)), until a reload |
 | `input NAME SETTING VALUE` | Sets one setting, such as `xkb_layout` or `tap`, on the input devices `NAME` names, as the config file's input lines do ([`config.md`](config.md)), until a reload. It fails for a name no device has |
+| `input NAME xkb_switch_layout next\|prev\|INDEX` | As sway's: switches the active layout of the keyboards `NAME` names, and of the others in their groups, which share it, now, as a layout indicator's click might. It fails for an index past a keymap's layouts |
 | `dim enable\|disable\|toggle` | tidewm's own, tide's SPEC §6.2: whether the window dims when it isn't focused, as `dim_inactive` has windows do ([`config.md`](config.md)); a `for_window` rule's `dim disable` exempts a screen share's preview, say |
 | `sticky enable\|disable\|toggle` | As sway's: a sticky floating window is on every workspace, going along to the current one; a tiled one stays where it is. Picture-in-picture is sticky as it opens |
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails. Floated, it goes where one of its app's floating windows last opened, moved or was resized to, as tide's SPEC §6.4 has it, unless a `for_window` rule floats it as it opens, which puts it in the middle |
@@ -157,6 +158,6 @@ in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
 | `shutdown` | `0x80000006` | tidewm exits: `{"change": "exit"}` |
 | `tick` | `0x80000007` | Someone sends `SEND_TICK`: `{"first": false, "payload": ...}`. Subscribing sends one at once, with `first` true |
 | `layout` | `0x8000001e` | tidewm's own: the current workspace's part on a monitor changes layout, or the current workspace changes, or a monitor takes its part of it, as it appears, or is enabled after the workspace changed; a monitor powered off says so once it's on again: `{"change": "layout", "workspace": ..., "output": ..., "layout": ..., "symbol": ...}`, `symbol` as `config.h` gives it, or monocle's `[n]` |
-| `input` | `0x80000015` | An input device is `added` or `removed`, a keyboard's keymap changes (`xkb_keymap`), or a libinput device's settings are set (`libinput_config`): `{"change": ..., "input": ...}`, the device as `GET_INPUTS` has it. A switch of the active layout doesn't send one yet |
+| `input` | `0x80000015` | An input device is `added` or `removed`, a keyboard's keymap changes (`xkb_keymap`), a libinput device's settings are set (`libinput_config`), or a keyboard's active layout switches, by a key, `xkb_switch_layout` or a client (`xkb_layout`): `{"change": ..., "input": ...}`, the device as `GET_INPUTS` has it |
 
 A client that stops reading is closed once 16 MiB of events wait for it.

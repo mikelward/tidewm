@@ -21,6 +21,7 @@
 #include <wlr/types/wlr_alpha_modifier_v1.h>
 #include <drm_fourcc.h>
 #include <wlr/interfaces/wlr_buffer.h>
+#include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_content_type_v1.h>
 #include <wlr/types/wlr_cursor.h>
@@ -215,6 +216,7 @@ typedef struct {
 	struct wl_listener modifiers;
 	struct wl_listener key;
 	struct wl_listener destroy;
+	xkb_layout_index_t layout; /* the active one, as its input event last said */
 } KeyboardGroup;
 
 typedef struct {
@@ -1958,6 +1960,8 @@ keypressmod(struct wl_listener *listener, void *data)
 	 * pressed. We simply communicate this to the client. */
 	KeyboardGroup *group = wl_container_of(listener, group, modifiers);
 
+	/* A key, xkb_switch_layout or a client may have switched the layout */
+	settings_layout_check(group);
 	if (input_method_keyboard_grab_forward_modifiers(group))
 		return;
 

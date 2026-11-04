@@ -1641,6 +1641,14 @@ settings_libinput_device(const SettingsInput *in)
 		? wlr_libinput_get_device_handle(in->dev) : NULL;
 }
 
+/* kb's active layout, as XKB has it */
+static xkb_layout_index_t
+settings_active_layout(const struct wlr_keyboard *kb)
+{
+	return kb->xkb_state ? xkb_state_serialize_layout(kb->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE)
+			: 0;
+}
+
 /* An input in GET_INPUTS and the input event, with sway's fields */
 static struct json_object *
 settings_json_input(const SettingsInput *in)
@@ -1661,7 +1669,7 @@ settings_json_input(const SettingsInput *in)
 	if (!strcmp(in->type, "keyboard")) {
 		kb = in->group ? &in->group->wlr_group->keyboard : wlr_keyboard_from_input_device(in->dev);
 		n = kb->keymap ? xkb_keymap_num_layouts(kb->keymap) : 0;
-		active = kb->xkb_state ? xkb_state_serialize_layout(kb->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE) : 0;
+		active = settings_active_layout(kb);
 		names = json_object_new_array();
 		for (i = 0; i < n; i++) {
 			name = xkb_keymap_layout_get_name(kb->keymap, i);
@@ -2120,6 +2128,97 @@ settings_apply_inputs(const InputConfig *only)
 	return refused ? -1 : n;
 }
 
+/* group's modifiers changed. If its active layout did too, each of its
+ * keyboards' input event says so (xkb_layout), as sway's does, for a
+ * layout indicator. A client's virtual keyboard, as an on-screen one, has
+ * a group of its own, which its device doesn't name, as it takes no
+ * settings: it's the group's virtual keyboard. */
+static void
+settings_layout_check(KeyboardGroup *group)
+{
+	SettingsInput *in;
+	xkb_layout_index_t layout = settings_active_layout(&group->wlr_group->keyboard);
+	if (layout == group->layout)
+		return;
+	group->layout = layout;
+	wl_list_for_each(in, &settings_inputs, link)
+		if (in->group == group || (group->virtual_keyboard
+				&& in->dev == &group->virtual_keyboard->base))
+			settings_event_input("xkb_layout", in);
+}
+
+/* Whether in is one of the devices the input command's name names */
+static int
+settings_input_named(const SettingsInput *in, const char *name)
+{
+	char type[32];
+	snprintf(type, sizeof(type), "type:%s", in->type);
+	return !strcmp(name, "*") || !strcmp(name, type) || !strcmp(name, in->identifier);
+}
+
+/* sway's "input NAME xkb_switch_layout next|prev|INDEX": switches the
+ * active layout of the keyboards NAME names now. It's a keyboard's in
+ * its group, so one keyboard switches each group, and wlroots takes the
+ * rest of the group along. Returns 1, or 0 with err saying why. */
+static int
+settings_switch_layout(const char *name, char *arg, char *err, size_t errsize)
+{
+	SettingsInput *in, *other;
+	struct wlr_keyboard *kb, *member;
+	char *end;
+	long index = -1;
+	int step = 0, n = 0, seen;
+	xkb_layout_index_t nlayouts, layout;
+	arg += strspn(arg, " \t");
+	if (!strcmp(arg, "next")) {
+		step = 1;
+	} else if (!strcmp(arg, "prev")) {
+		step = -1;
+	} else {
+		errno = 0;
+		index = strtol(arg, &end, 10);
+		if (!*arg || *end || errno || index < 0) {
+			snprintf(err, errsize, "input %s: xkb_switch_layout takes next, prev or a "
+					"layout's index", name);
+			return 0;
+		}
+	}
+	wl_list_for_each(in, &settings_inputs, link) {
+		if (!in->group || !settings_input_named(in, name))
+			continue;
+		/* One switch a group */
+		seen = 0;
+		wl_list_for_each(other, &settings_inputs, link) {
+			if (other == in)
+				break;
+			seen |= other->group == in->group && settings_input_named(other, name);
+		}
+		if (seen)
+			continue;
+		kb = &in->group->wlr_group->keyboard;
+		nlayouts = kb->keymap ? xkb_keymap_num_layouts(kb->keymap) : 0;
+		if (!nlayouts)
+			continue;
+		if (step)
+			layout = (xkb_layout_index_t)(((long)settings_active_layout(kb) + step
+					+ (long)nlayouts) % (long)nlayouts);
+		else if ((unsigned long)index < nlayouts)
+			layout = (xkb_layout_index_t)index;
+		else {
+			snprintf(err, errsize, "input %s: xkb_switch_layout %ld: its keymap has %u nlayouts",
+					name, index, nlayouts);
+			return 0;
+		}
+		member = wlr_keyboard_from_input_device(in->dev);
+		wlr_keyboard_notify_modifiers(member, member->modifiers.depressed,
+				member->modifiers.latched, member->modifiers.locked, layout);
+		n++;
+	}
+	if (!n)
+		snprintf(err, errsize, "No keyboard matches %s", name);
+	return n > 0;
+}
+
 /* The input command, "NAME SETTING VALUE": sets it now, on the devices
  * NAME names, until a reload. Returns 1, or 0 with err saying why; *parse
  * says it didn't parse. */
@@ -2133,6 +2232,11 @@ settings_input_command(char *args, char *err, size_t errsize, int *parse)
 	*parse = 1;
 	if (!settings_input_name_ok(name ? name : "", err, errsize))
 		return 0;
+	/* A switch now, not a setting */
+	if (!strncmp(args, "xkb_switch_layout", 17) && (!args[17] || isspace((unsigned char)args[17]))) {
+		*parse = 0;
+		return settings_switch_layout(name, args + 17, err, errsize);
+	}
 	settings_input_init(&ic, name);
 	if (settings_parse_input_setting(&ic, args, err, errsize)) {
 		*parse = 0;
