@@ -128,6 +128,7 @@ typedef struct {
 	size_t ninputs;
 	int focus_guard; /* focus_guard enable|disable; -1: not given */
 	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
+	int xwayland_scaling; /* xwayland_scaling enable|disable; -1: not given */
 	SingleRule *singles; /* single_window lines, which replace config.h's */
 	size_t nsingles;
 	SwitchBinding *switches;
@@ -966,6 +967,21 @@ settings_single(Settings *s, char *rest, unsigned int line, struct json_object *
 	return 1;
 }
 
+/* An xwayland_scaling line: enable, as by default, or disable, for X11
+ * windows in their outputs' pixels (x11.h) */
+static int
+settings_xwayland_scaling(Settings *s, char *rest, unsigned int line,
+		struct json_object *errors)
+{
+	char *word = settings_arg(&rest);
+	if (!word || (strcmp(word, "enable") && strcmp(word, "disable")) || *rest) {
+		settings_error(errors, line, "xwayland_scaling takes enable or disable");
+		return 0;
+	}
+	s->xwayland_scaling = !strcmp(word, "enable");
+	return 1;
+}
+
 /* A dim_inactive line: how dark the dim over every window but the focused
  * one is, from 0, none, to 1, black */
 static int
@@ -1113,6 +1129,7 @@ settings_parse(char *text, struct json_object *errors)
 	s->text = text;
 	s->focus_guard = -1;
 	s->dim_inactive = -1;
+	s->xwayland_scaling = -1;
 	settings_add_mode(s, "default");
 	for (start = text; *start; start = *end ? end + 1 : end) {
 		line++;
@@ -1205,6 +1222,13 @@ settings_parse(char *text, struct json_object *errors)
 				ok = 0;
 			} else {
 				ok &= settings_dim(s, p, line, errors);
+			}
+		} else if (!strcasecmp(word, "xwayland_scaling")) {
+			if (mode) {
+				settings_error(errors, line, "xwayland_scaling can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_xwayland_scaling(s, p, line, errors);
 			}
 		} else if (!strcasecmp(word, "focus_guard")) {
 			if (mode) {
@@ -1323,6 +1347,8 @@ settings_load(void)
 	fg_arm();
 	/* Windows dim at the new strength */
 	dim_update();
+	/* X11 windows scale, or not, at once; with no file, they scale */
+	x11_set_scaling(!settings || settings->xwayland_scaling != 0);
 	/* Outputs and inputs take the new lines at once; at startup, there are
 	 * none yet. One that refuses them is an error, but the rest stands */
 	refused = settings_apply_outputs(NULL) < 0;

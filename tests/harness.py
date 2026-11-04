@@ -204,10 +204,22 @@ class Tidewm:
         self.clients.append(client)
         return client
 
-    def open_x11_window(self, class_, title, stdin=False, fullscreen=False):
-        env = dict(self.env, FULLSCREEN="1") if fullscreen else self.env
-        client = subprocess.Popen([X11CLIENT, class_, title], env=env,
-                                  stdin=subprocess.PIPE if stdin else subprocess.DEVNULL)
+    def open_x11_window(self, class_, title, stdin=False, fullscreen=False, report=False,
+                        fixed_size=None):
+        """Opens tests/x11client's window. With report, it says its size and
+        clicks on its stdout, read unbuffered, so a line's select isn't
+        fooled by the one before it having read both. With fixed_size,
+        "WxH", its size hints fix its size."""
+        env = dict(self.env)
+        if fullscreen:
+            env["FULLSCREEN"] = "1"
+        if fixed_size:
+            env["FIXED_SIZE"] = fixed_size
+        if report:
+            env["REPORT"] = "1"
+        client = subprocess.Popen([X11CLIENT, class_, title], env=env, bufsize=0,
+                                  stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE if report else None)
         self.clients.append(client)
         return client
 

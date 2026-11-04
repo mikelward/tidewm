@@ -80,10 +80,12 @@
 #include <xkbcommon/xkbcommon.h>
 #ifdef XWAYLAND
 #include <wlr/xwayland.h>
+#include <wlr/xwayland/shell.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_icccm.h>
 #endif
 
+#include "xdg-output-unstable-v1-protocol.h"
 #include "xdg-shell-protocol.h"
 #include "hyprland-focus-grab-v1-protocol.h"
 #include "util.h"
@@ -183,8 +185,10 @@ typedef struct {
 	struct wl_listener configure;
 	struct wl_listener set_geometry;
 	struct wl_listener set_hints;
+	struct wl_listener x11_commit; /* x11.h's, after the scene's own */
 #endif
 	unsigned int bw;
+	float xscale; /* an X11 window's pixels to the layout's, on its monitor (x11.h) */
 	Workspace *ws;
 	int isfloating, isurgent, isfullscreen;
 	int ismaximized; /* covers its monitor's window area, above the other tiles */
@@ -566,6 +570,8 @@ static struct wlr_xwayland *xwayland;
 
 /* configuration, allows nested code to access above variables */
 #include "config.h"
+
+#include "x11.h"
 
 /* attempt to encapsulate suck into one file */
 #include "client.h"
@@ -1500,7 +1506,10 @@ cursorwarptohint(void)
 
 	toplevel_from_wlr_surface(active_constraint->surface, &c, NULL);
 	if (c && active_constraint->current.cursor_hint.enabled) {
-		wlr_cursor_warp(cursor, NULL, sx + c->geom.x + c->bw, sy + c->geom.y + c->bw);
+		/* An X11 window's hint is in its own pixels (x11.h) */
+		double scale = c->type == X11 ? c->xscale : 1;
+		wlr_cursor_warp(cursor, NULL, sx / scale + c->geom.x + c->bw,
+				sy / scale + c->geom.y + c->bw);
 		wlr_seat_pointer_warp(active_constraint->seat, sx, sy);
 	}
 }
@@ -2176,6 +2185,13 @@ mapnotify(struct wl_listener *listener, void *data)
 	c->scene->node.data = c->scene_surface->node.data = c;
 
 	client_get_geometry(c, &c->geom);
+#ifdef XWAYLAND
+	/* An X11 window is shown at its size in the layout, as it commits too */
+	if (client_is_x11(c)) {
+		LISTEN(&client_surface(c)->events.commit, &c->x11_commit, x11_committed);
+		x11_scale_scene(c);
+	}
+#endif
 
 	/* Handle unmanaged clients first so we can return prior create borders */
 	if (client_is_unmanaged(c)) {
@@ -2563,6 +2579,11 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 		surface = seat->pointer_state.focused_surface;
 		sx = cursor->x - (focusedl ? focusedl->scene->node.x : w->geom.x);
 		sy = cursor->y - (focusedl ? focusedl->scene->node.y : w->geom.y);
+		/* An X11 window's, from inside its border, in its own pixels (x11.h) */
+		if (w && w->type == X11) {
+			sx = (sx - w->bw) * w->xscale;
+			sy = (sy - w->bw) * w->xscale;
+		}
 	}
 
 	/* time is 0 in internal calls meant to restore pointer focus. */
@@ -2577,12 +2598,14 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 		if (active_constraint && cursor_mode != CurResize && cursor_mode != CurMove) {
 			toplevel_from_wlr_surface(active_constraint->surface, &c, NULL);
 			if (c && active_constraint->surface == seat->pointer_state.focused_surface) {
-				sx = cursor->x - c->geom.x - c->bw;
-				sy = cursor->y - c->geom.y - c->bw;
+				/* In the window's own pixels, an X11 one's its own (x11.h) */
+				double scale = c->type == X11 ? c->xscale : 1;
+				sx = (cursor->x - c->geom.x - c->bw) * scale;
+				sy = (cursor->y - c->geom.y - c->bw) * scale;
 				if (wlr_region_confine(&active_constraint->region, sx, sy,
-						sx + dx, sy + dy, &sx_confined, &sy_confined)) {
-					dx = sx_confined - sx;
-					dy = sy_confined - sy;
+						sx + dx * scale, sy + dy * scale, &sx_confined, &sy_confined)) {
+					dx = (sx_confined - sx) / scale;
+					dy = (sy_confined - sy) / scale;
 				}
 
 				if (active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED)
@@ -2938,6 +2961,10 @@ resize(Client *c, struct wlr_box geo, int interact)
 	client_set_size(c, c->geom.width - 2 * c->bw, c->geom.height - 2 * c->bw);
 	client_get_clip(c, &clip);
 	wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, &clip);
+#ifdef XWAYLAND
+	/* The clip sizes it again */
+	x11_scale_scene(c);
+#endif
 }
 
 void
@@ -3378,7 +3405,7 @@ setup(void)
 	output_layout = wlr_output_layout_create(dpy);
 	wl_signal_add(&output_layout->events.change, &layout_change);
 
-    wlr_xdg_output_manager_v1_create(dpy, output_layout);
+	x11_wlr_xdg_outputs = wlr_xdg_output_manager_v1_create(dpy, output_layout);
 
 	/* Configure a listener to be notified when new outputs are available on the
 	 * backend. */
@@ -3515,6 +3542,7 @@ setup(void)
 	} else {
 		fprintf(stderr, "failed to setup XWayland X server, continuing without it\n");
 	}
+	x11_init();
 #endif
 }
 
@@ -3675,6 +3703,8 @@ unmapnotify(struct wl_listener *listener, void *data)
 		wlr_scene_node_destroy(&c->capture.image_capture_scene_surface->buffer->node);
 		c->capture.image_capture_scene_surface = NULL;
 	}
+	if (client_is_x11(c))
+		wl_list_remove(&c->x11_commit.link);
 #endif
 
 	wlr_scene_node_destroy(&c->image_capture_scene->tree.node);
@@ -3792,6 +3822,10 @@ updatemons(struct wl_listener *listener, void *data)
 	}
 	/* The layout of each monitor that took its part, now its windows are placed */
 	lt_flush();
+#ifdef XWAYLAND
+	/* Xwayland's outputs, and X11 windows in their pixels */
+	x11_update();
+#endif
 
 	/* FIXME: figure out why the cursor image is at 0,0 after turning all
 	 * the monitors on.
@@ -3987,6 +4021,8 @@ configurex11(struct wl_listener *listener, void *data)
 {
 	Client *c = wl_container_of(listener, c, configure);
 	struct wlr_xwayland_surface_configure_event *event = data;
+	int x, y;
+	float scale;
 	if (!client_surface(c) || !client_surface(c)->mapped
 			|| client_is_unmanaged(c)) {
 		wlr_xwayland_surface_configure(c->surface.xwayland,
@@ -3994,9 +4030,13 @@ configurex11(struct wl_listener *listener, void *data)
 		return;
 	}
 	if ((c->isfloating && c != grabc) || !c->mon->lt[c->mon->sellt]->arrange) {
-		resize(c, (struct wlr_box){.x = event->x - c->bw,
-				.y = event->y - c->bw, .width = event->width + c->bw * 2,
-				.height = event->height + c->bw * 2}, 0);
+		/* From X11's space, and in the pixels of the monitor that
+		 * configures it, its own, wherever it asks to be */
+		x11_to_layout(event->x, event->y, &x, &y);
+		scale = x11_scale(c->mon);
+		resize(c, (struct wlr_box){.x = x - (int)c->bw, .y = y - (int)c->bw,
+				.width = (int)lroundf((float)event->width / scale) + (int)c->bw * 2,
+				.height = (int)lroundf((float)event->height / scale) + (int)c->bw * 2}, 0);
 	} else {
 		arrange(c->mon);
 	}
@@ -4012,6 +4052,7 @@ createnotifyx11(struct wl_listener *listener, void *data)
 	c = xsurface->data = ecalloc(1, sizeof(*c));
 	c->surface.xwayland = xsurface;
 	c->type = X11;
+	c->xscale = 1;
 	c->bw = client_is_unmanaged(c) ? 0 : borderpx;
 
 	/* Listen to the various events it can emit */
@@ -4045,6 +4086,7 @@ setgeometryx11(struct wl_listener *listener, void *data)
 
 	client_get_geometry(c, &c->geom);
 	wlr_scene_node_set_position(&c->scene->node, c->geom.x, c->geom.y);
+	x11_scale_scene(c);
 }
 
 void

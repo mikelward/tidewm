@@ -6,20 +6,31 @@
  * compositor may hear of while the window has no Wayland surface yet. It
  * runs until it's killed or the X server goes.
  *
- * It waits for the window manager first. Xwayland starts for the first X
- * client, and wlroots' window manager doesn't take on a window that was
- * there before it watched the root, so a window made in between would
- * never be managed.
+ * It waits for the window manager first, as it has since a stall in the
+ * tests was put down to a window made before wlroots' window manager
+ * watched the root. Xwayland rules that out: it takes no client until the
+ * window manager owns WM_S0, which wlroots takes after it watches the
+ * root. The wait stays, as every run since has had it (TODO.md, Known
+ * bugs).
  *
  * A line "activate" on stdin asks for the window to be activated, with a
  * _NET_ACTIVE_WINDOW message to the root, as an application does. Lines
  * "urgent on" and "urgent off" set and clear its WM_HINTS urgency hint,
  * and "title TEXT" sets its title, which a window manager hears of after
- * any change before it.
+ * any change before it. "configure X Y W H" asks for that place and size,
+ * in X11's space.
  *
  * With FULLSCREEN set in its environment, it says it's fullscreen in
  * _NET_WM_STATE before it maps, as an X11 game or video player does, once
  * wlroots' window manager watches the window (wait_for_watch).
+ *
+ * With FIXED_SIZE=WxH, its WM_NORMAL_HINTS say it's that big, no more
+ * and no less, in X11's pixels.
+ *
+ * With REPORT set, it prints "screen W H", the X screen's size, at the
+ * start, then "size W H" each time its window's size changes, "button X Y"
+ * for each button pressed in it, at that point in it, and "motion X Y" for
+ * each move with a button held, there, all in X11's pixels.
  *
  * Usage: x11client CLASS TITLE
  */
@@ -161,11 +172,46 @@ command(xcb_connection_t *conn, xcb_window_t root, xcb_window_t win, const char 
 			hints.flags &= ~(uint32_t)XCB_ICCCM_WM_HINT_X_URGENCY;
 		xcb_icccm_set_wm_hints(conn, win, &hints);
 		xcb_flush(conn);
+	} else if (!strncmp(line, "configure ", 10)) {
+		int x, y, w, h;
+		uint32_t values[4];
+		if (sscanf(line + 10, "%d %d %d %d", &x, &y, &w, &h) == 4) {
+			values[0] = (uint32_t)x;
+			values[1] = (uint32_t)y;
+			values[2] = (uint32_t)w;
+			values[3] = (uint32_t)h;
+			xcb_configure_window(conn, win, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y
+					| XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT, values);
+			xcb_flush(conn);
+		}
 	} else if (!strncmp(line, "title ", 6)) {
 		xcb_icccm_set_wm_name(conn, win, XCB_ATOM_STRING, 8,
 				(uint32_t)strlen(line + 6), line + 6);
 		xcb_flush(conn);
 	}
+}
+
+/* With REPORT, what an event says of the window: its size, as it changes,
+ * or a button pressed in it */
+static void
+report(xcb_generic_event_t *event, xcb_window_t win)
+{
+	static uint16_t width, height;
+	xcb_configure_notify_event_t *configure = (xcb_configure_notify_event_t *)event;
+	xcb_button_press_event_t *press = (xcb_button_press_event_t *)event;
+	xcb_motion_notify_event_t *motion = (xcb_motion_notify_event_t *)event;
+	uint8_t type = event->response_type & ~0x80;
+	if (type == XCB_CONFIGURE_NOTIFY && configure->window == win
+			&& (configure->width != width || configure->height != height)) {
+		width = configure->width;
+		height = configure->height;
+		printf("size %u %u\n", (unsigned)width, (unsigned)height);
+	} else if (type == XCB_BUTTON_PRESS && press->event == win) {
+		printf("button %d %d\n", press->event_x, press->event_y);
+	} else if (type == XCB_MOTION_NOTIFY && motion->event == win) {
+		printf("motion %d %d\n", motion->event_x, motion->event_y);
+	}
+	fflush(stdout);
 }
 
 /* Waits until the X server has handled every request so far. */
@@ -188,6 +234,11 @@ main(int argc, char *argv[])
 	char buf[256], *line, *nl;
 	size_t buflen = 0;
 	ssize_t n;
+	int reporting = getenv("REPORT") != NULL, fixed_width, fixed_height;
+	const char *fixed = getenv("FIXED_SIZE");
+	xcb_size_hints_t size_hints = {0};
+	uint32_t mask = XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_BUTTON_PRESS
+			| XCB_EVENT_MASK_BUTTON_MOTION;
 
 	if (argc != 3)
 		die("usage: x11client CLASS TITLE");
@@ -196,6 +247,11 @@ main(int argc, char *argv[])
 		die("can't connect to the X server");
 	screen = xcb_setup_roots_iterator(xcb_get_setup(conn)).data;
 	wait_for_wm(conn, screen->root);
+	if (reporting) {
+		printf("screen %u %u\n", (unsigned)screen->width_in_pixels,
+				(unsigned)screen->height_in_pixels);
+		fflush(stdout);
+	}
 	win = xcb_generate_id(conn);
 	xcb_create_window(conn, XCB_COPY_FROM_PARENT, win, screen->root,
 			0, 0, 100, 100, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
@@ -204,6 +260,11 @@ main(int argc, char *argv[])
 	len = (size_t)snprintf(class, sizeof(class), "%s%c%s", argv[1], '\0', argv[1]) + 1;
 	xcb_icccm_set_wm_class(conn, win, (uint32_t)len, class);
 	xcb_icccm_set_wm_name(conn, win, XCB_ATOM_STRING, 8, 7, "unnamed");
+	if (fixed && sscanf(fixed, "%dx%d", &fixed_width, &fixed_height) == 2) {
+		xcb_icccm_size_hints_set_min_size(&size_hints, fixed_width, fixed_height);
+		xcb_icccm_size_hints_set_max_size(&size_hints, fixed_width, fixed_height);
+		xcb_icccm_set_wm_normal_hints(conn, win, &size_hints);
+	}
 	sync_server(conn);
 	/* A title change while unmapped */
 	xcb_icccm_set_wm_name(conn, win, XCB_ATOM_STRING, 8,
@@ -214,6 +275,9 @@ main(int argc, char *argv[])
 		xcb_change_property(conn, XCB_PROP_MODE_REPLACE, win, intern(conn, "_NET_WM_STATE"),
 				XCB_ATOM_ATOM, 32, 1, &fullscreen);
 	}
+	/* After wait_for_watch, which sets the window's events for itself */
+	if (reporting)
+		xcb_change_window_attributes(conn, win, XCB_CW_EVENT_MASK, &mask);
 	sync_server(conn);
 	xcb_map_window(conn, win);
 	xcb_flush(conn);
@@ -222,8 +286,11 @@ main(int argc, char *argv[])
 	for (;;) {
 		if (poll(fds, 2, -1) < 0)
 			die("can't poll");
-		while ((event = xcb_poll_for_event(conn)))
+		while ((event = xcb_poll_for_event(conn))) {
+			if (reporting)
+				report(event, win);
 			free(event);
+		}
 		if (xcb_connection_has_error(conn))
 			return 0;
 		if (fds[1].revents) {
