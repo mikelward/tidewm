@@ -17,6 +17,8 @@ lands with a test.
 
 ## Done
 
+- **A lone window's width** (#37): a lone tiled window is centered at
+  80% on an ultrawide, 60% from 3.2, by `single_window` rules.
 - **Layout switches** (#36): the `input` event's `xkb_layout` says when a
   keyboard's active layout switches, and sway's `xkb_switch_layout`
   switches it.
@@ -103,6 +105,11 @@ lands with a test.
   on. Its cause is in wlroots and Xwayland rather than tidewm; the
   alternative was to chase it there first. Reversible: it's the next thing
   to pick up.
+- **A lone window's width is by aspect, not by output** (#37), as tide's
+  Layouts page sets it, from `config.h`'s tide rules, not dwl's whole
+  width: tidewm's layouts already follow tide's (three-column on an
+  ultrawide). The Plan said "a single-window width" under Outputs; a
+  per-output width can come with the output lines. Reversible.
 - **A scroll ends a tap too** (#34), as a pointer button does, though
   tide's SPEC §8.2 names only `Super+T`, `Super`+drag and `Super`+click:
   Super with a scroll is Super as a modifier. Reversible.
@@ -283,8 +290,8 @@ lands with a test.
 
 ## Plan
 
-1. **Outputs**: a single-window width; the lid switch. Mode, scale,
-   position and hotplug came with the runtime config (#16).
+1. **Outputs**: the lid switch. Mode, scale, position and hotplug came
+   with the runtime config (#16), a lone window's width with #37.
 2. **Lock and keyboard**: a command that drops a dead lock, no pointer
    events while locked; on-demand layers keep the keyboard.
 3. **Capture**: window identifiers over the IPC; capture start and stop

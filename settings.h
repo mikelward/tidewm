@@ -118,6 +118,8 @@ typedef struct {
 	size_t ninputs;
 	int focus_guard; /* focus_guard enable|disable; -1: not given */
 	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
+	SingleRule *singles; /* single_window lines, which replace config.h's */
+	size_t nsingles;
 	double grant_seconds, prompt_seconds; /* 0: not given */
 	char *text; /* the file, as read, for GET_CONFIG */
 } Settings;
@@ -172,6 +174,7 @@ settings_free(Settings *s)
 	for (i = 0; i < s->ninputs; i++)
 		settings_free_input(&s->inputs[i]);
 	free(s->inputs);
+	free(s->singles);
 	free(s->text);
 	free(s);
 }
@@ -864,6 +867,34 @@ settings_focus_guard(Settings *s, char *rest, unsigned int line, struct json_obj
 	return 1;
 }
 
+/* A single_window line, "MIN_ASPECT WIDTH", as tide's layout takes them:
+ * an aspect from 0 to 100 and a width from 0.1 to 1 */
+static int
+settings_single(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	SingleRule r;
+	char *end;
+	errno = 0;
+	r.min_aspect = strtod(rest, &end);
+	if (end != rest && isspace((unsigned char)*end)) {
+		rest = end;
+		r.width = strtod(rest, &end);
+	} else {
+		end = rest;
+	}
+	if (end == rest || *end || errno || !(r.min_aspect >= 0 && r.min_aspect <= 100)
+			|| !(r.width >= 0.1 && r.width <= 1)) {
+		settings_error(errors, line, "single_window takes an aspect from 0 to 100 "
+				"and a width from 0.1 to 1");
+		return 0;
+	}
+	s->singles = realloc(s->singles, (s->nsingles + 1) * sizeof(*s->singles));
+	if (!s->singles)
+		die("realloc:");
+	s->singles[s->nsingles++] = r;
+	return 1;
+}
+
 /* A dim_inactive line: how dark the dim over every window but the focused
  * one is, from 0, none, to 1, black */
 static int
@@ -1082,6 +1113,13 @@ settings_parse(char *text, struct json_object *errors)
 				ok = 0;
 			} else {
 				ok &= settings_add_input(s, name, p, line, errors);
+			}
+		} else if (!strcasecmp(word, "single_window")) {
+			if (mode) {
+				settings_error(errors, line, "single_window can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_single(s, p, line, errors);
 			}
 		} else if (!strcasecmp(word, "dim_inactive")) {
 			if (mode) {

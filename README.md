@@ -143,6 +143,14 @@ unfocused and urgent, as tide's SPEC §14 has it. An app's activation
 marks its window urgent, unless a grant names it.
 [`docs/config.md`](docs/config.md) says how.
 
+### A lone window
+
+A tiled window alone on its monitor is centered at 80% of the window
+area's width on an ultrawide, at least 2.1 times as wide as it's high,
+and 60% from 3.2, in any layout, as tide's SPEC §1 has it. Below that it
+has the whole width. The config file's `single_window` lines change the
+widths and where they start.
+
 ### Dimming
 
 With `dim_inactive 0.07` in the config file, or a `dim_inactive` above 0
