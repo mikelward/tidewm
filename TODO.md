@@ -119,6 +119,14 @@ lands with a test.
 
 ## Decisions needing review
 
+- **What sway has goes after tide's own** (autopilot, 2026-11-04): the
+  Plan takes tide's items first, as "finish the fork's features first"
+  asked, then what sway has and tidewm lacks, the ones a laptop meets
+  most first: gestures, shortcut inhibit, xdg-foreign and security
+  context. Full desktops' portals (global shortcuts, remote desktop,
+  input capture), accessibility, auto-rotation, and titlebars,
+  animations and blur stay out: wlroots compositors lack most of them,
+  and dwl leaves the last three out on purpose. Reversible.
 - **The capture event is tidewm's own** (#41), as sway has none:
   `capture`, numbered after `layout`, where Hyprland's is `screencast`.
   It names the captured window by `con_id`, but not an output, which
@@ -344,6 +352,17 @@ lands with a test.
    for it): start Xwayland ahead of clients, or take on windows already
    there.
 3. **Session**: the entry and wrapper tide starts it with.
+4. **Gestures**: pointer-gestures, so a touchpad's pinch and swipe reach
+   apps, as Chrome's pinch to zoom.
+5. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
+   desktop can take Super and Alt+Tab.
+6. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
+   window that opened it.
+7. **Security context**: security-context, so Flatpak apps don't get the
+   privileged protocols, such as screencopy and the virtual keyboard.
+8. **The rest of sway's**: touchscreens, drawing tablets,
+   wlr-foreign-toplevel-management for taskbars and docks, adaptive sync
+   and tearing control, and a scratchpad.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.
 
