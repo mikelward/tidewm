@@ -24,7 +24,8 @@
 
 enum { IpcCommand = 0, IpcGetWorkspaces = 1, IpcSubscribe = 2,
 	IpcGetOutputs = 3, IpcGetTree = 4, IpcGetVersion = 7, IpcGetBindingModes = 8,
-	IpcGetConfig = 9, IpcSendTick = 10, IpcGetBindingState = 12, IpcGetInputs = 100 };
+	IpcGetConfig = 9, IpcSendTick = 10, IpcGetBindingState = 12, IpcGetInputs = 100,
+	IpcGetSeats = 101 };
 /* Event numbers, as sway sends them with IPC_EVENT_BIT set */
 enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvMode = 2, IpcEvWindow = 3,
 	IpcEvShutdown = 6, IpcEvTick = 7, IpcEvInput = 21,
@@ -63,6 +64,7 @@ static int settings_output_command(char *args, char *err, size_t errsize, int *p
 static int settings_input_command(char *args, char *err, size_t errsize, int *parse);
 static struct json_object *settings_json_inputs(void);
 static int fg_command(char *args, char *err, size_t errsize);
+static struct json_object *fg_json_last_input(void);
 static int fg_focus_recent(char *args, char *err, size_t errsize, int *parse);
 /* layout.h, included after this file */
 static const Layout *lt_part_layout(Workspace *ws, Monitor *m);
@@ -1028,6 +1030,18 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 		return ipc_send_json(cl, type, settings_json());
 	case IpcGetInputs:
 		return ipc_send_json(cl, type, settings_json_inputs());
+	case IpcGetSeats: {
+		/* sway's one seat, with tidewm's own last_input */
+		struct json_object *list = json_object_new_array(), *s = json_object_new_object();
+		json_object_object_add(s, "name", json_object_new_string(seat->name));
+		json_object_object_add(s, "capabilities", json_object_new_int((int)seat->capabilities));
+		json_object_object_add(s, "focus", json_object_new_uint64(
+				focused_client ? ipc_id(&focused_client->ipc_id) : 0));
+		json_object_object_add(s, "devices", settings_json_inputs());
+		json_object_object_add(s, "last_input", fg_json_last_input());
+		json_object_array_add(list, s);
+		return ipc_send_json(cl, type, list);
+	}
 	case IpcSendTick:
 		tick = json_object_new_object();
 		json_object_object_add(tick, "first", json_object_new_boolean(0));

@@ -47,6 +47,9 @@ lands with a test.
   three-column and two columns + stack beside tile and monocle, with
   tide's geometry; a layout, mfact and nmaster per workspace part, from
   its monitor's aspect; the `layout` event.
+- **The last input** (#25): sway's `GET_SEATS` with tidewm's own
+  `last_input`, the last key or click, the window it went to and how long
+  ago, for the shell's polkit agent.
 - **Urgency marks** (#24): `urgent_order` in the tree, most recent mark
   highest, and sway's `urgent enable|disable` for the shell's own marks.
 - **Notification grants** (#23): `grant --or-recent`, which lapsing
@@ -136,6 +139,15 @@ lands with a test.
   `urgent` in the tree and in events, so a restarted shell reads the
   marks there, with no `tide-attention` event or `announce_waiting`.
   Reversible.
+- **No notice without a shell** (#25): with no shell running, a window
+  the guard holds shows only its urgent border and its workspace's
+  urgency, where tide's Lua guard showed a Hyprland notification. tidewm
+  draws no text, and the shell is the notification daemon, so there's no
+  one to send a notification to. Reversible, if a fallback is wanted.
+- **The last input is GET_SEATS's** (#25): tidewm's own `last_input` on
+  sway's seat, rather than a request of its own. Its window is the one the
+  input reached, none for a key or click a binding took, since the app
+  never saw it. Reversible before tide's agent reads it.
 - **The marks' order is a field** (#24): tidewm's own `urgent_order`
   on each window, a sequence, rather than a list of marked windows, so
   the tree stays sway's shape. A mark on a window already marked makes it
@@ -159,34 +171,33 @@ lands with a test.
 
 ## Plan
 
-1. **The focus guard's rest**: the last key or click and its window, for
-   the shell's polkit agent; a notice when no shell runs. The guard,
-   grants and activation came with #22, notification grants with #23,
-   the marks' order and the shell's own marks with #24.
-2. **Window states**: maximize, ending when another window on the
-   workspace takes focus; fullscreen on open, applied with the grant.
-3. **Dialogs and floating**: centered on the parent, capped at 80% of the
+1. **Window states**: maximize, ending when another window on the
+   workspace takes focus; fullscreen on open, applied with the grant. A
+   window the focus guard holds ends another's fullscreen as it maps, and
+   its own fullscreen request covers the window you're in: it should
+   leave fullscreen be, and wait to go fullscreen until it has focus.
+2. **Dialogs and floating**: centered on the parent, capped at 80% of the
    monitor, following it; modal; a picture-in-picture rule; a hand-floated
    window's size remembered.
-4. **Dimming** of every window but the focused one, with tide's
+3. **Dimming** of every window but the focused one, with tide's
    exceptions.
-5. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
+4. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
    a pointer button also ends the tap; `scroll_factor`; the `input`
    event's `xkb_layout`, when the active layout switches, for a layout
    indicator. Per-device settings came with the runtime config (#17).
-6. **Outputs**: a single-window width; the lid switch. Mode, scale,
+5. **Outputs**: a single-window width; the lid switch. Mode, scale,
    position and hotplug came with the runtime config (#16).
-7. **Lock and keyboard**: a command that drops a dead lock, no pointer
+6. **Lock and keyboard**: a command that drops a dead lock, no pointer
    events while locked; on-demand layers keep the keyboard.
-8. **Capture**: window identifiers over the IPC; capture start and stop
+7. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
-9. **Outside clicks**: a focus-grab protocol or click event for the
-    notification center.
-10. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
-    client starts Xwayland, and a window it maps before wlroots' window
-    manager watches the root is never managed (the tests' client waits
-    for it): start Xwayland ahead of clients, or take on windows already
-    there.
-11. **Session**: the entry and wrapper tide starts it with.
+8. **Outside clicks**: a focus-grab protocol or click event for the
+   notification center.
+9. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+   client starts Xwayland, and a window it maps before wlroots' window
+   manager watches the root is never managed (the tests' client waits
+   for it): start Xwayland ahead of clients, or take on windows already
+   there.
+10. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

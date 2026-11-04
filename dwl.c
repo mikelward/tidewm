@@ -763,7 +763,11 @@ buttonpress(struct wl_listener *listener, void *data)
 		break;
 	}
 	/* If the event wasn't handled by the compositor, notify the client with
-	 * pointer focus that a button press has occurred */
+	 * pointer focus that a button press has occurred. A held button keeps
+	 * that focus, so a second button goes where the first did; the shell's
+	 * polkit agent asks which window that was. */
+	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED)
+		fg_delivered(seat->pointer_state.focused_surface);
 	wlr_seat_pointer_notify_button(seat,
 			event->time_msec, event->button, event->state);
 }
@@ -1851,7 +1855,13 @@ keypress(struct wl_listener *listener, void *data)
 	else
 		wl_event_source_timer_update(group->key_repeat_source, 0);
 
-	if (handled || input_method_keyboard_grab_forward_key(group, event))
+	if (handled)
+		return;
+	/* The window a key press goes to, straight or through an input
+	 * method, which types into it, for the shell's polkit agent */
+	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED && !consumed[event->keycode])
+		fg_delivered(seat->keyboard_state.focused_surface);
+	if (input_method_keyboard_grab_forward_key(group, event))
 		return;
 
 	if (consumed[event->keycode]) {
