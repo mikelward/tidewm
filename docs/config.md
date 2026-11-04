@@ -53,10 +53,13 @@ A later binding of the same keys replaces an earlier one, though a
 `--release` binding is apart from the press one. Holding a key repeats its
 press binding, as dwl's keys do. Flags, before the keys:
 
-- **`--release`:** runs when the key comes up, if no other key went down
-  meanwhile: a tap. The modifiers are as they were before the key, so
-  `bindsym --release Super_L ...` is Super tapped alone. The window still
-  gets the key, down and up, as in sway.
+- **`--release`:** runs when the key comes up, if no other key, pointer
+  button or scroll came meanwhile: a tap. The modifiers are as they were
+  before the key, so `bindsym --release Super_L ...` is Super tapped
+  alone, and not `Super+T`, `Super`+click, `Super`+drag or `Super` with a
+  scroll. The window still gets the key, down and up, as in sway. The IPC's
+  `binding` event says when a binding runs ([`ipc.md`](ipc.md)), so
+  `bindsym --release Super_L nop launcher` is a tap a shell can listen for.
 - **`--locked`:** runs on the lock screen too. Other bindings, and all of
   `config.h`'s keys, don't.
 

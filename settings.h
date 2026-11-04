@@ -1327,6 +1327,8 @@ settings_run_binding(uint32_t mods, xkb_keysym_t sym, int release)
 	if (!b)
 		return 0;
 	snprintf(what, sizeof(what), "binding %s", b->keys);
+	/* Said first, as the command may reload the file b is in */
+	ipc_event_binding(b->command, b->mods, b->sym);
 	settings_run(b->command, what, NULL);
 	return 1;
 }
@@ -2117,6 +2119,14 @@ settings_key_pressed(uint32_t keycode, uint32_t mods, const xkb_keysym_t syms[2]
 			return;
 		}
 	}
+}
+
+/* A pointer button went down, or the pointer scrolled, while a release
+ * binding's key was down: that key is a modifier now, not a tap */
+static void
+settings_tap_over(void)
+{
+	settings_tap.armed = 0;
 }
 
 /* A key came up: runs the release binding it armed, if it's still there.

@@ -28,7 +28,7 @@ enum { IpcCommand = 0, IpcGetWorkspaces = 1, IpcSubscribe = 2,
 	IpcGetSeats = 101 };
 /* Event numbers, as sway sends them with IPC_EVENT_BIT set */
 enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvMode = 2, IpcEvWindow = 3,
-	IpcEvShutdown = 6, IpcEvTick = 7, IpcEvInput = 21,
+	IpcEvBinding = 5, IpcEvShutdown = 6, IpcEvTick = 7, IpcEvInput = 21,
 	IpcEvLayout = 30 /* tidewm's own */ };
 
 typedef struct {
@@ -1006,7 +1006,8 @@ ipc_handle_subscribe(IpcClient *cl, const char *payload)
 {
 	static const struct { const char *name; int event; } names[] = {
 		{"workspace", IpcEvWorkspace}, {"output", IpcEvOutput}, {"mode", IpcEvMode},
-		{"window", IpcEvWindow}, {"shutdown", IpcEvShutdown}, {"tick", IpcEvTick},
+		{"window", IpcEvWindow}, {"binding", IpcEvBinding},
+		{"shutdown", IpcEvShutdown}, {"tick", IpcEvTick},
 		{"input", IpcEvInput}, {"layout", IpcEvLayout},
 	};
 	struct json_object *req = json_tokener_parse(payload), *tick;
@@ -1332,6 +1333,37 @@ ipc_event_window(Client *c, const char *change)
 	json_object_object_add(obj, "change", json_object_new_string(change));
 	json_object_object_add(obj, "container", ipc_json_window(c));
 	ipc_broadcast(IpcEvWindow, obj);
+}
+
+/* A binding event, as sway's: the config file's binding of mods and sym
+ * ran command, as a tap of Super runs tide's launcher's */
+static void
+ipc_event_binding(const char *command, uint32_t mods, xkb_keysym_t sym)
+{
+	/* WLR_MODIFIER_SHIFT up to WLR_MODIFIER_MOD5, as sway names them */
+	static const char *const names[] = {
+		"Shift", "Lock", "Ctrl", "Mod1", "Mod2", "Mod3", "Mod4", "Mod5",
+	};
+	struct json_object *obj, *binding, *mask;
+	char symbol[64];
+	size_t i;
+	if (!ipc_subscribed(IpcEvBinding))
+		return;
+	mask = json_object_new_array();
+	for (i = 0; i < LENGTH(names); i++)
+		if (mods & (1u << i))
+			json_object_array_add(mask, json_object_new_string(names[i]));
+	binding = json_object_new_object();
+	json_object_object_add(binding, "command", json_object_new_string(command));
+	json_object_object_add(binding, "event_state_mask", mask);
+	json_object_object_add(binding, "input_code", json_object_new_int(0));
+	json_object_object_add(binding, "symbol", xkb_keysym_get_name(sym, symbol, sizeof(symbol)) > 0
+			? json_object_new_string(symbol) : NULL);
+	json_object_object_add(binding, "input_type", json_object_new_string("keyboard"));
+	obj = json_object_new_object();
+	json_object_object_add(obj, "change", json_object_new_string("run"));
+	json_object_object_add(obj, "binding", binding);
+	ipc_broadcast(IpcEvBinding, obj);
 }
 
 /* A workspace event: init, empty, focus (with the old one), rename or
