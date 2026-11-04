@@ -17,6 +17,9 @@ lands with a test.
 
 ## Done
 
+- **Tap Super** (#34): a `--release` binding is a tap only with no pointer
+  button or scroll meanwhile, and sway's `binding` event says when one
+  runs, for tide's launcher.
 - **Dimming** (#33): every window but the focused one is dimmed, at
   `dim_inactive`'s strength, except where there's one window to see,
   picture-in-picture, video, and what `dim disable` exempts.
@@ -95,6 +98,9 @@ lands with a test.
   on. Its cause is in wlroots and Xwayland rather than tidewm; the
   alternative was to chase it there first. Reversible: it's the next thing
   to pick up.
+- **A scroll ends a tap too** (#34), as a pointer button does, though
+  tide's SPEC §8.2 names only `Super+T`, `Super`+drag and `Super`+click:
+  Super with a scroll is Super as a modifier. Reversible.
 - **Dimming is off unless the config says** (#33): `config.h`'s
   `dim_inactive` is 0, as its `focus_guard` is off, and tide's config
   sets 0.07. The alternative was 0.07 in `config.h`. Reversible.
@@ -272,10 +278,9 @@ lands with a test.
 
 ## Plan
 
-1. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
-   a pointer button also ends the tap; `scroll_factor`; the `input`
-   event's `xkb_layout`, when the active layout switches, for a layout
-   indicator. Per-device settings came with the runtime config (#17).
+1. **Input**: `scroll_factor`; the `input` event's `xkb_layout`, when the
+   active layout switches, for a layout indicator. Per-device settings
+   came with the runtime config (#17), tap Super with #34.
 2. **Outputs**: a single-window width; the lid switch. Mode, scale,
    position and hotplug came with the runtime config (#16).
 3. **Lock and keyboard**: a command that drops a dead lock, no pointer

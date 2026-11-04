@@ -7,8 +7,11 @@ import shlex
 import subprocess
 import unittest
 
-from harness import (EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MODES, GET_BINDING_STATE,
-                     GET_CONFIG, GET_VERSION, LOCKER, RUN_COMMAND, TIMEOUT, TidewmTest)
+from harness import (EVENT_BINDING, EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MODES,
+                     GET_BINDING_STATE, GET_CONFIG, GET_VERSION, LOCKER, ROOT, RUN_COMMAND,
+                     TIMEOUT, TidewmTest)
+
+POINTER = os.path.join(ROOT, "tests", "pointer")
 
 CONFIG = """# Lines like this, and blank ones, are skipped
 
@@ -262,6 +265,62 @@ bindsym --release Mod1+r workspace released
         ipc = self.workspaces_ipc()
         self.alt("r")
         self.assertEqual([self.shown(ipc), self.shown(ipc)], ["pressed", "released"])
+
+
+class TapTest(KeysTest):
+    """Super tapped alone, tide's launcher key (its SPEC §8.2), and not
+    Super+click, Super+drag or Super with a scroll."""
+    CONFIG = """bindsym --release Super_L workspace tapped
+bindsym Super_L workspace down
+bindsym Mod1+z workspace marker
+"""
+
+    def pointer_with_super(self, *actions):
+        """Holds Super down, as wtype does while it waits on its input, does
+        the pointer's actions, and lets Super go."""
+        ipc = self.workspaces_ipc()
+        typist = subprocess.Popen(["wtype", "-P", "Super_L", "-", "-p", "Super_L"],
+                                  env=self.wm.env, stdin=subprocess.PIPE)
+        self.wm.clients.append(typist)
+        self.assertEqual(self.shown(ipc), "down")
+        if actions:
+            subprocess.run([POINTER, *actions], env=self.wm.env, check=True, timeout=TIMEOUT)
+        typist.stdin.close()
+        typist.wait(TIMEOUT)
+        # Had the release been a tap, its workspace would come first
+        self.alt("z")
+        return self.shown(ipc)
+
+    def test_a_tap_alone_runs(self):
+        self.assertEqual(self.pointer_with_super(), "tapped")
+
+    def test_a_click_meanwhile_is_no_tap(self):
+        self.assertEqual(self.pointer_with_super("click"), "marker")
+
+    def test_a_drag_meanwhile_is_no_tap(self):
+        self.assertEqual(self.pointer_with_super("press", "left", "move", "100", "100",
+                                                 "1280", "720", "release", "left"), "marker")
+
+    def test_a_scroll_meanwhile_is_no_tap(self):
+        self.assertEqual(self.pointer_with_super("scroll"), "marker")
+
+
+class BindingEventTest(KeysTest):
+    CONFIG = """bindsym --release Super_L nop launcher
+bindsym Mod1+Shift+z nop marker
+"""
+
+    def test_a_binding_that_runs_says_so(self):
+        ipc = self.connect()
+        ipc.subscribe("binding")
+        self.press("-k", "Super_L")
+        self.assertEqual(ipc.next_event(EVENT_BINDING), {"change": "run", "binding": {
+            "command": "nop launcher", "event_state_mask": [], "input_code": 0,
+            "symbol": "Super_L", "input_type": "keyboard"}})
+        self.alt("z", shift=True)
+        binding = ipc.next_event(EVENT_BINDING)["binding"]
+        self.assertEqual((binding["command"], binding["event_state_mask"], binding["symbol"]),
+                         ("nop marker", ["Shift", "Mod1"], "z"))
 
 
 class LockTest(KeysTest):

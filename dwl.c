@@ -736,6 +736,8 @@ axisnotify(struct wl_listener *listener, void *data)
 	uint32_t mods;
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
+	/* Super with a scroll isn't Super tapped */
+	settings_tap_over();
 
 	if (!locked) {
 		if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL)
@@ -774,6 +776,8 @@ buttonpress(struct wl_listener *listener, void *data)
 	case WL_POINTER_BUTTON_STATE_PRESSED:
 		/* A click is you moving on, from whatever a grant was for */
 		fg_click();
+		/* Super+click and Super+drag aren't Super tapped */
+		settings_tap_over();
 		cursor_mode = CurPressed;
 		selmon = xytomon(cursor->x, cursor->y);
 		if (locked)
