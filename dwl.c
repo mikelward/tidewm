@@ -63,6 +63,8 @@
 #include <wlr/types/wlr_session_lock_v1.h>
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_switch.h>
+#include <wlr/interfaces/wlr_switch.h>
 #include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <wlr/types/wlr_virtual_pointer_v1.h>
@@ -336,6 +338,8 @@ static void createdecoration(struct wl_listener *listener, void *data);
 static void createidleinhibitor(struct wl_listener *listener, void *data);
 static void createkeyboard(struct wlr_keyboard *keyboard);
 static KeyboardGroup *createkeyboardgroup(void);
+static void createswitch(struct wlr_switch *wlr_switch);
+static void switchset(int type, int on);
 static void createlayersurface(struct wl_listener *listener, void *data);
 static void createlocksurface(struct wl_listener *listener, void *data);
 static void createmon(struct wl_listener *listener, void *data);
@@ -451,6 +455,10 @@ static pid_t child_pid = -1;
 static int locked;
 static unsigned long urgent_count; /* windows marked urgent so far, for Client.urgent_seq */
 static Client *focused_client;
+/* tidewm's own switch device, made the first time the switch command
+ * moves it, as if a real switch had: for a test, which has no lid, or a
+ * lid the hardware doesn't report */
+static struct wlr_switch *ownswitch;
 static struct wl_display *dpy;
 static struct wl_event_loop *event_loop;
 static struct wlr_backend *backend;
@@ -891,6 +899,11 @@ cleanup(void)
 	ipc_finish();
 	fg_finish();
 	fl_finish();
+	if (ownswitch) {
+		wlr_switch_finish(ownswitch);
+		free(ownswitch);
+		ownswitch = NULL;
+	}
 	dim_finish();
 	settings_finish();
 	lt_finish();
@@ -1846,6 +1859,57 @@ incnmaster(const Arg *arg)
 	arrange(selmon);
 }
 
+/* A switch device, such as the lid's, whose toggles run the config file's
+ * bindswitch lines */
+typedef struct {
+	struct wl_listener toggle;
+	struct wl_listener destroy;
+} Switch;
+
+static void
+switchtoggled(struct wl_listener *listener, void *data)
+{
+	struct wlr_switch_toggle_event *event = data;
+	settings_run_switch(event->switch_type, event->switch_state == WLR_SWITCH_STATE_ON);
+}
+
+static void
+switchdestroyed(struct wl_listener *listener, void *data)
+{
+	Switch *sw = wl_container_of(listener, sw, destroy);
+	wl_list_remove(&sw->toggle.link);
+	wl_list_remove(&sw->destroy.link);
+	free(sw);
+}
+
+void
+createswitch(struct wlr_switch *wlr_switch)
+{
+	Switch *sw = ecalloc(1, sizeof(*sw));
+	LISTEN(&wlr_switch->events.toggle, &sw->toggle, switchtoggled);
+	LISTEN(&wlr_switch->base.events.destroy, &sw->destroy, switchdestroyed);
+}
+
+static const struct wlr_switch_impl ownswitch_impl = {.name = "tidewm-switch"};
+
+void
+switchset(int type, int on)
+{
+	struct timespec now;
+	struct wlr_switch_toggle_event event = {
+		.switch_type = (enum wlr_switch_type)type,
+		.switch_state = on ? WLR_SWITCH_STATE_ON : WLR_SWITCH_STATE_OFF,
+	};
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	event.time_msec = (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
+	if (!ownswitch) {
+		ownswitch = ecalloc(1, sizeof(*ownswitch));
+		wlr_switch_init(ownswitch, &ownswitch_impl, "tidewm-switch");
+		createswitch(ownswitch);
+	}
+	wl_signal_emit_mutable(&ownswitch->events.toggle, &event);
+}
+
 void
 inputdevice(struct wl_listener *listener, void *data)
 {
@@ -1860,6 +1924,9 @@ inputdevice(struct wl_listener *listener, void *data)
 		break;
 	case WLR_INPUT_DEVICE_POINTER:
 		createpointer(wlr_pointer_from_input_device(device));
+		break;
+	case WLR_INPUT_DEVICE_SWITCH:
+		createswitch(wlr_switch_from_input_device(device));
 		break;
 	default:
 		/* TODO handle other input device types */

@@ -22,6 +22,16 @@ typedef struct {
 	char *command;
 } Binding;
 
+/* A bindswitch line: a command run when a switch, such as the lid, turns
+ * on, off, or either */
+enum { SwOff, SwOn, SwToggle };
+typedef struct {
+	int type; /* WLR_SWITCH_TYPE_LID or WLR_SWITCH_TYPE_TABLET_MODE */
+	int state; /* SwOff, SwOn or SwToggle */
+	int locked; /* runs while the screen is locked, too */
+	char *command;
+} SwitchBinding;
+
 /* A submap: bindings in force while it's the current mode */
 typedef struct {
 	char *name;
@@ -120,6 +130,8 @@ typedef struct {
 	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
 	SingleRule *singles; /* single_window lines, which replace config.h's */
 	size_t nsingles;
+	SwitchBinding *switches;
+	size_t nswitches;
 	double grant_seconds, prompt_seconds; /* 0: not given */
 	char *text; /* the file, as read, for GET_CONFIG */
 } Settings;
@@ -175,6 +187,9 @@ settings_free(Settings *s)
 		settings_free_input(&s->inputs[i]);
 	free(s->inputs);
 	free(s->singles);
+	for (i = 0; i < s->nswitches; i++)
+		free(s->switches[i].command);
+	free(s->switches);
 	free(s->text);
 	free(s);
 }
@@ -311,6 +326,62 @@ settings_arg(char **p)
 	while (isspace((unsigned char)**p))
 		(*p)++;
 	return arg;
+}
+
+/* A bindswitch line, as sway's: "[--locked] lid|tablet:on|off|toggle
+ * COMMAND". A later one for the same switch and state replaces an earlier
+ * one. */
+static int
+settings_add_switch(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	static const char *const states[] = {[SwOff] = "off", [SwOn] = "on", [SwToggle] = "toggle"};
+	SwitchBinding b = {0}, *bs;
+	char *spec, *colon;
+	size_t i;
+	while (rest[0] == '-' && rest[1] == '-') {
+		char *flag = settings_word(&rest);
+		if (!strcmp(flag, "--locked")) {
+			b.locked = 1;
+		} else {
+			settings_error(errors, line, "bindswitch has no flag %s", flag);
+			return 0;
+		}
+	}
+	spec = settings_word(&rest);
+	if (!*spec || !*rest) {
+		settings_error(errors, line, "bindswitch needs a switch and a command");
+		return 0;
+	}
+	b.state = -1;
+	if ((colon = strchr(spec, ':'))) {
+		*colon = '\0';
+		for (i = 0; i < LENGTH(states); i++)
+			if (!strcmp(colon + 1, states[i]))
+				b.state = (int)i;
+	}
+	b.type = !strcmp(spec, "lid") ? WLR_SWITCH_TYPE_LID
+		: !strcmp(spec, "tablet") ? WLR_SWITCH_TYPE_TABLET_MODE : -1;
+	if (colon)
+		*colon = ':';
+	if (b.type < 0 || b.state < 0) {
+		settings_error(errors, line, "bindswitch %s: a switch is lid or tablet, "
+				"and its state on, off or toggle", spec);
+		return 0;
+	}
+	for (i = 0; i < s->nswitches; i++)
+		if (s->switches[i].type == b.type && s->switches[i].state == b.state)
+			break;
+	if (i == s->nswitches) {
+		if (!(bs = realloc(s->switches, (s->nswitches + 1) * sizeof(*bs))))
+			die("out of memory reading the config");
+		s->switches = bs;
+		s->nswitches++;
+	} else {
+		free(s->switches[i].command);
+	}
+	b.command = settings_strdup(rest, strlen(rest));
+	s->switches[i] = b;
+	return 1;
 }
 
 static int
@@ -1085,6 +1156,13 @@ settings_parse(char *text, struct json_object *errors)
 			input = NULL;
 		} else if (!strcasecmp(word, "bindsym")) {
 			ok &= settings_add_binding(&s->modes[mode], p, line, errors);
+		} else if (!strcasecmp(word, "bindswitch")) {
+			if (mode) {
+				settings_error(errors, line, "bindswitch can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_add_switch(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "output")) {
 			if (mode) {
 				settings_error(errors, line, "output can't be in a mode");
@@ -1384,9 +1462,32 @@ settings_run_binding(uint32_t mods, xkb_keysym_t sym, int release)
 		return 0;
 	snprintf(what, sizeof(what), "binding %s", b->keys);
 	/* Said first, as the command may reload the file b is in */
-	ipc_event_binding(b->command, b->mods, b->sym);
+	ipc_event_binding(b->command, b->mods, b->sym, "keyboard");
 	settings_run(b->command, what, NULL);
 	return 1;
+}
+
+/* A switch, such as the lid, turned on or off: runs the file's bindswitch
+ * commands for it, each for its state or for either, and on the lock
+ * screen only --locked ones */
+static void
+settings_run_switch(int type, int on)
+{
+	const Settings *loaded = settings;
+	char *command, what[64];
+	size_t i;
+	for (i = 0; settings && settings == loaded && i < settings->nswitches; i++) {
+		const SwitchBinding *b = &settings->switches[i];
+		if (b->type != type || (b->state != SwToggle && b->state != (on ? SwOn : SwOff))
+				|| (locked && !b->locked))
+			continue;
+		snprintf(what, sizeof(what), "bindswitch %s", type == WLR_SWITCH_TYPE_LID ? "lid" : "tablet");
+		/* Copied first, as the command may reload the file b is in */
+		command = settings_strdup(b->command, strlen(b->command));
+		ipc_event_binding(command, 0, XKB_KEY_NoSymbol, "switch");
+		settings_run(command, what, NULL);
+		free(command);
+	}
 }
 
 /* A window's value for a criterion, or NULL where it has none, which no
