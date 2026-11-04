@@ -17,6 +17,8 @@ lands with a test.
 
 ## Done
 
+- **A floating window's place, per app** (#31): floating a window by hand
+  puts it where its app's last floating window was, for the session.
 - **Dialogs follow their parent** (#29): a dialog stays above its parent
   and goes with it to another workspace or output.
 - **Picture-in-picture** (#30): a window titled `Picture-in-Picture`, or
@@ -90,6 +92,18 @@ lands with a test.
   on. Its cause is in wlroots and Xwayland rather than tidewm; the
   alternative was to chase it there first. Reversible: it's the next thing
   to pick up.
+- **A floating place is the app's, and only floating by hand takes it**
+  (#31): tidewm keeps the place of each app's last floating window, size
+  and position, other than a dialog's, a fixed-size window's or
+  picture-in-picture's, which place themselves. Floating a window of that
+  app by a key or the `floating` command puts it there; the first time,
+  it stays where it was tiled, as in dwl. tide's SPEC §6.4 says floating
+  windows remember their place per app for the session, and tide's
+  `docs/compositor.md` that a hand-floated window gets its last floating
+  size back. A window that floats as it opens, by a rule or its type,
+  still goes in the middle (#28). The alternatives: a place per window,
+  not per app, or a rule-floated window opening at its app's place too.
+  Reversible.
 - **Picture-in-picture is built in** (#30): by its title, as tide's
   Hyprland rule matches it, `^Picture[- ]in[- ][Pp]icture$`, at that
   rule's size and corner, rather than a `for_window` rule in tide's config,
@@ -241,28 +255,25 @@ lands with a test.
 
 ## Plan
 
-1. **Dialogs and floating**: a hand-floated window's size remembered.
-   Placement and modal came with #28, following the parent with #29,
-   picture-in-picture with #30.
-2. **Dimming** of every window but the focused one, with tide's
+1. **Dimming** of every window but the focused one, with tide's
    exceptions.
-3. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
+2. **Input**: a tap-Super event, which `--release Super_L` nearly is, once
    a pointer button also ends the tap; `scroll_factor`; the `input`
    event's `xkb_layout`, when the active layout switches, for a layout
    indicator. Per-device settings came with the runtime config (#17).
-4. **Outputs**: a single-window width; the lid switch. Mode, scale,
+3. **Outputs**: a single-window width; the lid switch. Mode, scale,
    position and hotplug came with the runtime config (#16).
-5. **Lock and keyboard**: a command that drops a dead lock, no pointer
+4. **Lock and keyboard**: a command that drops a dead lock, no pointer
    events while locked; on-demand layers keep the keyboard.
-6. **Capture**: window identifiers over the IPC; capture start and stop
+5. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
-7. **Outside clicks**: a focus-grab protocol or click event for the
+6. **Outside clicks**: a focus-grab protocol or click event for the
    notification center.
-8. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+7. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
    client starts Xwayland, and a window it maps before wlroots' window
    manager watches the root is never managed (the tests' client waits
    for it): start Xwayland ahead of clients, or take on windows already
    there.
-9. **Session**: the entry and wrapper tide starts it with.
+8. **Session**: the entry and wrapper tide starts it with.
 
 Then tide's shell gets a tidewm backend beside its Hyprland one.

@@ -9,6 +9,8 @@
  *           title, which an unmapped toplevel has lost.
  * activate  asks for the window to be activated, over xdg-activation, and
  *           prints "activated" once the compositor has had the request.
+ * commit    draws the window again, as it is, and prints "committed" once
+ *           the compositor has had the commit.
  * maximize, unmaximize
  *           asks to be maximized, or not.
  * fullscreen, unfullscreen
@@ -259,16 +261,17 @@ open_dialog(int level, const char *dialog_title, const char *retitle)
 	wl_surface_commit(d->surface);
 }
 
+/* Prints data, the word for what the compositor has had by now */
 static void
-activated(void *data, struct wl_callback *callback, uint32_t serial)
+synced(void *data, struct wl_callback *callback, uint32_t serial)
 {
 	wl_callback_destroy(callback);
-	printf("activated\n");
+	printf("%s\n", (const char *)data);
 	fflush(stdout);
 }
 
-static const struct wl_callback_listener activated_listener = {
-	.done = activated,
+static const struct wl_callback_listener synced_listener = {
+	.done = synced,
 };
 
 static void
@@ -277,7 +280,7 @@ token_done(void *data, struct xdg_activation_token_v1 *token, const char *name)
 	xdg_activation_v1_activate(activation, name, surface);
 	xdg_activation_token_v1_destroy(token);
 	/* The compositor answers in order, so it has had the request by then */
-	wl_callback_add_listener(wl_display_sync(display), &activated_listener, NULL);
+	wl_callback_add_listener(wl_display_sync(display), &synced_listener, (void *)"activated");
 }
 
 static const struct xdg_activation_token_v1_listener token_listener = {
@@ -341,6 +344,10 @@ command(const char *line)
 		wl_surface_commit(surface);
 	} else if (!strcmp(line, "activate")) {
 		activate();
+	} else if (!strcmp(line, "commit")) {
+		draw();
+		/* The compositor answers in order, so it has had the commit by then */
+		wl_callback_add_listener(wl_display_sync(display), &synced_listener, (void *)"committed");
 	} else if (!strcmp(line, "maximize")) {
 		xdg_toplevel_set_maximized(window);
 	} else if (!strcmp(line, "unmaximize")) {

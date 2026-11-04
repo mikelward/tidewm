@@ -389,6 +389,7 @@ static void setcursor(struct wl_listener *listener, void *data);
 static void setcursorshape(struct wl_listener *listener, void *data);
 static int client_is_pip(Client *c);
 static void placefloating(Client *c, struct wlr_box asked);
+static void fitsizehints(Client *c, struct wlr_box *box);
 static void setfloating(Client *c, int floating);
 static void setfullscreen(Client *c, int fullscreen);
 static int fullscreenwanted(Client *c);
@@ -547,6 +548,7 @@ static struct wlr_xwayland *xwayland;
 #include "settings.h"
 #include "layout.h"
 #include "focus.h"
+#include "floating.h"
 
 /* function implementations */
 void
@@ -863,6 +865,7 @@ cleanup(void)
 {
 	ipc_finish();
 	fg_finish();
+	fl_finish();
 	settings_finish();
 	lt_finish();
 	ws_protocol_finish();
@@ -2742,7 +2745,7 @@ void
 resize(Client *c, struct wlr_box geo, int interact)
 {
 	struct wlr_box *bbox;
-	struct wlr_box clip;
+	struct wlr_box clip, was = c->geom;
 
 	if (!c->mon || !client_surface(c)->mapped)
 		return;
@@ -2752,6 +2755,11 @@ resize(Client *c, struct wlr_box geo, int interact)
 	client_set_bounds(c, geo.width, geo.height);
 	c->geom = geo;
 	applybounds(c, bbox);
+	/* A move or a resize is its app's place; a redraw where it is, as
+	 * every commit makes, isn't another window's to take */
+	if (c->geom.x != was.x || c->geom.y != was.y || c->geom.width != was.width
+			|| c->geom.height != was.height)
+		fl_remember(c);
 
 	/* Update scene-graph, including borders */
 	wlr_scene_node_set_position(&c->scene->node, c->geom.x, c->geom.y);
@@ -2902,24 +2910,17 @@ void
 placefloating(Client *c, struct wlr_box asked)
 {
 	Client *p = client_get_parent(c);
-	struct wlr_box area = c->mon->w, box = asked, min = {0}, max = {0};
+	struct wlr_box area = c->mon->w, box = asked;
 	struct wlr_box around = p && p->mon == c->mon ? p->geom : area;
-	int bw = 2 * (int)c->bw, pip = client_is_pip(c);
+	int pip = client_is_pip(c);
 	if (pip) {
 		box.width = c->mon->m.width / 4;
 		box.height = c->mon->m.height / 4;
 	}
 	box.width = MIN(box.width, c->mon->m.width * 4 / 5);
 	box.height = MIN(box.height, c->mon->m.height * 4 / 5);
-	/* The size it gets, as applybounds gives it: its minimum before the
-	 * cap, so it's centered at that size */
-	client_get_size_hints(c, &max, &min);
-	box.width = MAX(box.width, min.width + bw);
-	box.height = MAX(box.height, min.height + bw);
-	if (max.width > 0 && bw <= INT_MAX - max.width)
-		box.width = MIN(box.width, max.width + bw);
-	if (max.height > 0 && bw <= INT_MAX - max.height)
-		box.height = MIN(box.height, max.height + bw);
+	/* Its minimum wins over the cap, so it's centered at that size */
+	fitsizehints(c, &box);
 	box.x = pip ? area.x + area.width - box.width - 16
 			: around.x + (around.width - box.width) / 2;
 	box.y = pip ? area.y + area.height - box.height - 16
@@ -2931,6 +2932,22 @@ placefloating(Client *c, struct wlr_box asked)
 		c->unmaximized = box;
 	else
 		resize(c, box, 0);
+}
+
+/* Gives box the size applybounds() will give c, border and all: at least
+ * its minimum, and at most its maximum, so it's placed at that size */
+void
+fitsizehints(Client *c, struct wlr_box *box)
+{
+	struct wlr_box min = {0}, max = {0};
+	int bw = 2 * (int)c->bw;
+	client_get_size_hints(c, &max, &min);
+	box->width = MAX(box->width, min.width + bw);
+	box->height = MAX(box->height, min.height + bw);
+	if (max.width > 0 && bw <= INT_MAX - max.width)
+		box->width = MIN(box->width, max.width + bw);
+	if (max.height > 0 && bw <= INT_MAX - max.height)
+		box->height = MIN(box->height, max.height + bw);
 }
 
 void
@@ -3049,6 +3066,9 @@ setmon(Client *c, Monitor *m, Workspace *ws)
 	if (m) {
 		/* Make sure window actually overlaps with the monitor */
 		resize(c, c->geom, 0);
+		/* Its app's place is now relative to this monitor, though it
+		 * may not have moved */
+		fl_remember(c);
 		c->ws = ws ? ws : curws; /* the current workspace, unless told */
 		/* This will call arrange(c->mon), and keeps a request waiting */
 		setfullscreen(c, fullscreenwanted(c));
@@ -3401,7 +3421,7 @@ togglefloating(const Arg *arg)
 	Client *sel = focustop(selmon);
 	/* return if fullscreen */
 	if (sel && !sel->isfullscreen)
-		setfloating(sel, !sel->isfloating);
+		fl_by_hand(sel, !sel->isfloating);
 }
 
 void
