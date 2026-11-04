@@ -83,6 +83,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `input NAME SETTING VALUE` | Sets one setting, such as `xkb_layout` or `tap`, on the input devices `NAME` names, as the config file's input lines do ([`config.md`](config.md)), until a reload. It fails for a name no device has |
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails |
 | `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles |
+| `maximize [enable\|disable\|toggle]` | tidewm's own, tide's SPEC §6.3: makes the window cover its monitor's window area, above the other tiles, which stay where they are, with the bar still showing; alone, it toggles. It lasts until it's turned off, the window closes, or another window on its workspace takes focus on that monitor (not a dialog of it). An app's own request maximizes it too. Fullscreen covers it while it lasts, and a floating window gets its place back after |
 | `layout tile\|threecol\|twocol\|monocle\|floating\|toggle` | tidewm's own: the layout of the current workspace's part on the focused monitor, from `config.h`'s `layouts`, or back to the previous one. The names are tide's: `threecol` centers the master with a stack either side, and `twocol` puts the masters side by side with the rest stacked on the right. Each part keeps its own layouts, and each layout its own `mfact` and `nmaster` (below) |
 | `nmaster N\|+N\|-N` | tidewm's own: how many windows the master area holds on the focused monitor |
 | `mfact F\|+F\|-F` | tidewm's own: the master area's share of the focused monitor's width, from 0.1 to 0.9. Only a finite number will do |
@@ -134,8 +135,8 @@ A window in the tree or in an event is a container: `id` (unique for
 tidewm's life), `type` (`con`, or `floating_con`), `name` (the title),
 `app_id`, `pid`, `shell` (`xdg_shell` or `xwayland`), `focused`, `urgent`,
 `urgent_order` (tidewm's own: higher for a more recent mark, 0 if it has
-none), `visible`, `fullscreen_mode` (0 or 1), `rect` (in layout coordinates, border
-included), `workspace` and `output` (tidewm's own: where it is) and
+none), `visible`, `fullscreen_mode` (0 or 1), `maximized` (tidewm's own),
+`rect` (in layout coordinates, border included), `workspace` and `output` (tidewm's own: where it is) and
 `foreign_toplevel_identifier`, the ext-foreign-toplevel-list
 identifier `grim -T` takes. An X11 window has `app_id` null and its class,
 instance and title in `window_properties`, as in sway, and its X11 window id
@@ -148,7 +149,7 @@ in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
 | `workspace` | `0x80000000` | A workspace is made (`init`), goes (`empty`), becomes current (`focus`, with the previous one in `old`), is renamed (`rename`), or a window on it gains or loses urgency (`urgent`): `{"change": ..., "current": ..., "old": ...}` |
 | `output` | `0x80000001` | An output appears or goes: `{"change": "unspecified"}` |
 | `mode` | `0x80000002` | The binding mode changes: `{"change": NAME, "pango_markup": false}` |
-| `window` | `0x80000003` | A window is `new`, `close`d, gets `focus`, changes `title`, `fullscreen_mode`, `floating` or `urgent`, or moves to another workspace or output, by a command, a key or a drag (`move`): `{"change": ..., "container": ...}`. A window's first event is `new`, sent once it has an output, workspace and floating state |
+| `window` | `0x80000003` | A window is `new`, `close`d, gets `focus`, changes `title`, `fullscreen_mode`, `floating` or `urgent`, is maximized or not (tidewm's own `maximize`), or moves to another workspace or output, by a command, a key or a drag (`move`): `{"change": ..., "container": ...}`. A window's first event is `new`, sent once it has an output, workspace and floating state |
 | `shutdown` | `0x80000006` | tidewm exits: `{"change": "exit"}` |
 | `tick` | `0x80000007` | Someone sends `SEND_TICK`: `{"first": false, "payload": ...}`. Subscribing sends one at once, with `first` true |
 | `layout` | `0x8000001e` | tidewm's own: the current workspace's part on a monitor changes layout, or the current workspace changes, or a monitor takes its part of it, as it appears, or is enabled after the workspace changed; a monitor powered off says so once it's on again: `{"change": "layout", "workspace": ..., "output": ..., "layout": ..., "symbol": ...}`, `symbol` as `config.h` gives it, or monocle's `[n]` |

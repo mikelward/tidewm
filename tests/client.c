@@ -9,10 +9,18 @@
  *           title, which an unmapped toplevel has lost.
  * activate  asks for the window to be activated, over xdg-activation, and
  *           prints "activated" once the compositor has had the request.
+ * maximize, unmaximize
+ *           asks to be maximized, or not.
+ * dialog    opens a dialog, a second toplevel whose parent is the window,
+ *           with the app ID APP_ID.dialog.
+ *
+ * It prints "maximized" or "unmaximized" when the compositor says it's
+ * maximized, or no longer.
  *
  * With MAPPED_APP_ID, it changes its app ID to that after its first commit,
  * before it maps. With MIN_SIZE=WxH in its environment, it asks to be at
- * least that big, and with MAX_SIZE=WxH, at most that big.
+ * least that big, and with MAX_SIZE=WxH, at most that big. With MAXIMIZED
+ * set, it asks to be maximized before it maps.
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -36,9 +44,10 @@ static struct xdg_activation_v1 *activation;
 static struct xdg_toplevel *window;
 static const char *mapped_app_id;
 static const char *app_id, *title; /* as it was last given them */
-static struct wl_surface *surface;
+static struct wl_surface *surface, *dialog_surface;
 static struct wl_display *display;
 static int32_t width = 100, height = 100;
+static int maximized, configured_maximized; /* as last drawn, and as configured */
 
 static void
 die(const char *msg)
@@ -48,10 +57,10 @@ die(const char *msg)
 }
 
 static void
-draw(void)
+paint(struct wl_surface *s, int32_t w, int32_t h)
 {
-	int32_t stride = width * 4;
-	size_t size = (size_t)stride * (size_t)height, i;
+	int32_t stride = w * 4;
+	size_t size = (size_t)stride * (size_t)h, i;
 	struct wl_shm_pool *pool;
 	struct wl_buffer *buffer;
 	uint32_t *pixels;
@@ -66,13 +75,19 @@ draw(void)
 		pixels[i] = 0xff336699;
 	munmap(pixels, size);
 	pool = wl_shm_create_pool(shm, fd, (int32_t)size);
-	buffer = wl_shm_pool_create_buffer(pool, 0, width, height, stride,
+	buffer = wl_shm_pool_create_buffer(pool, 0, w, h, stride,
 			WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
 	close(fd);
-	wl_surface_attach(surface, buffer, 0, 0);
-	wl_surface_damage(surface, 0, 0, width, height);
-	wl_surface_commit(surface);
+	wl_surface_attach(s, buffer, 0, 0);
+	wl_surface_damage(s, 0, 0, w, h);
+	wl_surface_commit(s);
+}
+
+static void
+draw(void)
+{
+	paint(surface, width, height);
 }
 
 static void
@@ -89,6 +104,11 @@ static void
 xdg_surface_configure(void *data, struct xdg_surface *xsurface, uint32_t serial)
 {
 	xdg_surface_ack_configure(xsurface, serial);
+	if (configured_maximized != maximized) {
+		maximized = configured_maximized;
+		printf(maximized ? "maximized\n" : "unmaximized\n");
+		fflush(stdout);
+	}
 	if (mapped_app_id) {
 		xdg_toplevel_set_app_id(window, mapped_app_id);
 		app_id = mapped_app_id;
@@ -105,10 +125,15 @@ static void
 toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t w,
 		int32_t h, struct wl_array *states)
 {
+	uint32_t *state;
 	if (w > 0)
 		width = w;
 	if (h > 0)
 		height = h;
+	configured_maximized = 0;
+	wl_array_for_each(state, states)
+		if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED)
+			configured_maximized = 1;
 }
 
 static void
@@ -135,6 +160,56 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 	.configure_bounds = toplevel_configure_bounds,
 	.wm_capabilities = toplevel_wm_capabilities,
 };
+
+static void
+dialog_surface_configure(void *data, struct xdg_surface *xsurface, uint32_t serial)
+{
+	xdg_surface_ack_configure(xsurface, serial);
+	paint(dialog_surface, 100, 100);
+}
+
+static const struct xdg_surface_listener dialog_surface_listener = {
+	.configure = dialog_surface_configure,
+};
+
+static void
+dialog_configure(void *data, struct xdg_toplevel *toplevel, int32_t w,
+		int32_t h, struct wl_array *states)
+{
+}
+
+static void
+dialog_close(void *data, struct xdg_toplevel *toplevel)
+{
+}
+
+static const struct xdg_toplevel_listener dialog_listener = {
+	.configure = dialog_configure,
+	.close = dialog_close,
+	.configure_bounds = toplevel_configure_bounds,
+	.wm_capabilities = toplevel_wm_capabilities,
+};
+
+/* A dialog of the window, at 100x100, as a file chooser is */
+static void
+open_dialog(void)
+{
+	struct xdg_surface *xsurface;
+	struct xdg_toplevel *dialog;
+	char name[256];
+	if (dialog_surface)
+		die("there's a dialog already");
+	dialog_surface = wl_compositor_create_surface(compositor);
+	xsurface = xdg_wm_base_get_xdg_surface(wm_base, dialog_surface);
+	xdg_surface_add_listener(xsurface, &dialog_surface_listener, NULL);
+	dialog = xdg_surface_get_toplevel(xsurface);
+	xdg_toplevel_add_listener(dialog, &dialog_listener, NULL);
+	xdg_toplevel_set_parent(dialog, window);
+	snprintf(name, sizeof(name), "%s.dialog", app_id);
+	xdg_toplevel_set_app_id(dialog, name);
+	xdg_toplevel_set_title(dialog, "Dialog");
+	wl_surface_commit(dialog_surface);
+}
 
 static void
 activated(void *data, struct wl_callback *callback, uint32_t serial)
@@ -184,7 +259,10 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 	else if (!strcmp(interface, wl_shm_interface.name))
 		shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
 	else if (!strcmp(interface, xdg_wm_base_interface.name))
-		wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
+		/* Version 2 or later, as most apps bind, so a tiled window
+		 * hears it's tiled, not maximized */
+		wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
+				version < 5 ? version : 5);
 	else if (!strcmp(interface, xdg_activation_v1_interface.name))
 		activation = wl_registry_bind(registry, name, &xdg_activation_v1_interface, 1);
 }
@@ -229,6 +307,8 @@ main(int argc, char *argv[])
 		xdg_toplevel_set_min_size(window, hint_width, hint_height);
 	if (max && sscanf(max, "%dx%d", &hint_width, &hint_height) == 2)
 		xdg_toplevel_set_max_size(window, hint_width, hint_height);
+	if (getenv("MAXIMIZED"))
+		xdg_toplevel_set_maximized(window);
 	wl_surface_commit(surface);
 
 	for (int input = STDIN_FILENO;;) {
@@ -261,6 +341,12 @@ main(int argc, char *argv[])
 			wl_surface_commit(surface);
 		} else if (!strcmp(line, "activate\n")) {
 			activate();
+		} else if (!strcmp(line, "maximize\n")) {
+			xdg_toplevel_set_maximized(window);
+		} else if (!strcmp(line, "unmaximize\n")) {
+			xdg_toplevel_unset_maximized(window);
+		} else if (!strcmp(line, "dialog\n")) {
+			open_dialog();
 		}
 	}
 }

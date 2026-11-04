@@ -6,7 +6,10 @@
  * compositor has it, then a line "close" on stdin closes it, and it
  * prints "closed" once the compositor has had that, and exits.
  *
- * Usage: launcher
+ * With "bar", it's a bar instead: a top layer surface along the top, 30 px
+ * high, that keeps windows out of its space and takes no keys.
+ *
+ * Usage: launcher [bar]
  */
 #define _GNU_SOURCE /* memfd_create */
 #include <stdio.h>
@@ -106,8 +109,10 @@ main(int argc, char *argv[])
 	struct zwlr_layer_surface_v1 *layer;
 	char line[64];
 
-	if (argc != 1)
-		die("usage: launcher");
+	int bar = argc == 2 && !strcmp(argv[1], "bar");
+
+	if (argc != 1 && !bar)
+		die("usage: launcher [bar]");
 	if (!(display = wl_display_connect(NULL)))
 		die("can't connect to the compositor");
 	wl_registry_add_listener(wl_display_get_registry(display), &registry_listener, NULL);
@@ -117,10 +122,18 @@ main(int argc, char *argv[])
 		die("the compositor lacks wl_compositor, wl_shm or zwlr_layer_shell_v1");
 	surface = wl_compositor_create_surface(compositor);
 	layer = zwlr_layer_shell_v1_get_layer_surface(layer_shell, surface, NULL,
-			ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "launcher");
+			bar ? ZWLR_LAYER_SHELL_V1_LAYER_TOP : ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
+			bar ? "bar" : "launcher");
 	zwlr_layer_surface_v1_add_listener(layer, &layer_listener, NULL);
-	zwlr_layer_surface_v1_set_size(layer, 200, 100);
-	zwlr_layer_surface_v1_set_keyboard_interactivity(layer, 1); /* exclusive */
+	if (bar) {
+		zwlr_layer_surface_v1_set_anchor(layer, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP
+				| ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+		zwlr_layer_surface_v1_set_size(layer, 0, 30);
+		zwlr_layer_surface_v1_set_exclusive_zone(layer, 30);
+	} else {
+		zwlr_layer_surface_v1_set_size(layer, 200, 100);
+		zwlr_layer_surface_v1_set_keyboard_interactivity(layer, 1); /* exclusive */
+	}
 	wl_surface_commit(surface);
 	/* The configure, then the buffer it draws, which maps it */
 	while (!configured)
