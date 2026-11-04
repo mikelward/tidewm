@@ -312,6 +312,7 @@ ipc_json_window(Client *c)
 			c->isurgent ? c->urgent_seq : 0));
 	json_object_object_add(obj, "visible", json_object_new_boolean(c->mon && VISIBLEON(c, c->mon)));
 	json_object_object_add(obj, "fullscreen_mode", json_object_new_int(c->isfullscreen));
+	json_object_object_add(obj, "sticky", json_object_new_boolean(c->issticky));
 	/* tidewm's own, tide's SPEC §6.3: over the window area, the bar showing */
 	json_object_object_add(obj, "maximized", json_object_new_boolean(c->ismaximized));
 	json_object_object_add(obj, "rect", ipc_json_box(c->geom));
@@ -758,6 +759,18 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		}
 		if (ipc_exec(cmd) < 0)
 			return ipc_json_success(0, "Can't start the command");
+		return ipc_json_success(1, NULL);
+	}
+	/* As sway's: a sticky floating window is on every workspace */
+	if (ipc_take(&cmd, "sticky")) {
+		int sticky;
+		if ((sticky = ipc_switch(cmd, target ? target->issticky : 0, 0)) < 0) {
+			error = "Expected sticky enable|disable|toggle";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to make sticky");
+		target->issticky = sticky;
 		return ipc_json_success(1, NULL);
 	}
 	if (ipc_take(&cmd, "floating")) {

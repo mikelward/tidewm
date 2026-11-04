@@ -180,6 +180,7 @@ typedef struct {
 	Workspace *ws;
 	int isfloating, isurgent, isfullscreen;
 	int ismaximized; /* covers its monitor's window area, above the other tiles */
+	int issticky; /* floating, it's on every workspace, as sway's sticky */
 	int wantsfullscreen; /* asked for fullscreen while held, so waits for focus */
 	struct wlr_box unmaximized; /* its place before it was maximized; none if it opened so */
 	int held; /* how the focus guard holds it from focus: FgFree, FgWaiting, FgPopup */
@@ -385,6 +386,7 @@ static void resize(Client *c, struct wlr_box geo, int interact);
 static void run(char *startup_cmd);
 static void setcursor(struct wl_listener *listener, void *data);
 static void setcursorshape(struct wl_listener *listener, void *data);
+static int client_is_pip(Client *c);
 static void placefloating(Client *c, struct wlr_box asked);
 static void setfloating(Client *c, int floating);
 static void setfullscreen(Client *c, int fullscreen);
@@ -2064,6 +2066,8 @@ mapnotify(struct wl_listener *listener, void *data)
 	fg_mapping = c;
 	if ((p = client_get_parent(c))) {
 		c->isfloating = 1;
+		/* The rules don't see a dialog: picture-in-picture is sticky here */
+		c->issticky = client_is_pip(c);
 		setmon(c, p->mon, p->ws);
 	} else {
 		applyrules(c);
@@ -2108,6 +2112,8 @@ matchrules(Client *c, const char **wsname)
 	/* Decided afresh each time, at the first commit and at the map, as
 	 * the app ID and title may have come in between */
 	c->isfloating = 0;
+	/* Picture-in-picture floats on every workspace (tide's SPEC §6.4) */
+	c->issticky = client_is_pip(c);
 
 	/* Once a config file is loaded, its for_window rules replace these */
 	for (r = rules; !settings && r < END(rules); r++) {
@@ -2124,7 +2130,7 @@ matchrules(Client *c, const char **wsname)
 		}
 	}
 
-	c->isfloating |= client_is_float_type(c) || fg_nameless(c);
+	c->isfloating |= client_is_float_type(c) || fg_nameless(c) || c->issticky;
 	return mon;
 }
 
@@ -2751,17 +2757,35 @@ setcursorshape(struct wl_listener *listener, void *data)
 				wlr_cursor_shape_v1_name(event->shape));
 }
 
+/* Whether c is a browser's picture-in-picture window, by its title, as
+ * tide's Hyprland rule has it: ^Picture[- ]in[- ][Pp]icture$ */
+int
+client_is_pip(Client *c)
+{
+	const char *t = fg_raw_title(c);
+	return t && strlen(t) == 18 && !strncmp(t, "Picture", 7)
+			&& (t[7] == '-' || t[7] == ' ') && !strncmp(t + 8, "in", 2)
+			&& (t[10] == '-' || t[10] == ' ') && (t[11] == 'P' || t[11] == 'p')
+			&& !strcmp(t + 12, "icture");
+}
+
 /* A window that floats as it opens, a dialog or one a rule floats, goes
  * in the middle of its parent, or of its monitor's window area without
  * one, as big as it asked, border and all, but no more than 80% of its
- * monitor, and kept in that area (tide's SPEC §6.4) */
+ * monitor, and kept in that area (tide's SPEC §6.4). Picture-in-picture
+ * is a quarter of the monitor each way, in the window area's bottom right
+ * corner, 16 px in. */
 void
 placefloating(Client *c, struct wlr_box asked)
 {
 	Client *p = client_get_parent(c);
 	struct wlr_box area = c->mon->w, box = asked, min = {0}, max = {0};
 	struct wlr_box around = p && p->mon == c->mon ? p->geom : area;
-	int bw = 2 * (int)c->bw;
+	int bw = 2 * (int)c->bw, pip = client_is_pip(c);
+	if (pip) {
+		box.width = c->mon->m.width / 4;
+		box.height = c->mon->m.height / 4;
+	}
 	box.width = MIN(box.width, c->mon->m.width * 4 / 5);
 	box.height = MIN(box.height, c->mon->m.height * 4 / 5);
 	/* The size it gets, as applybounds gives it: its minimum before the
@@ -2773,8 +2797,10 @@ placefloating(Client *c, struct wlr_box asked)
 		box.width = MIN(box.width, max.width + bw);
 	if (max.height > 0 && bw <= INT_MAX - max.height)
 		box.height = MIN(box.height, max.height + bw);
-	box.x = around.x + (around.width - box.width) / 2;
-	box.y = around.y + (around.height - box.height) / 2;
+	box.x = pip ? area.x + area.width - box.width - 16
+			: around.x + (around.width - box.width) / 2;
+	box.y = pip ? area.y + area.height - box.height - 16
+			: around.y + (around.height - box.height) / 2;
 	box.x = MAX(area.x, MIN(box.x, area.x + area.width - box.width));
 	box.y = MAX(area.y, MIN(box.y, area.y + area.height - box.height));
 	/* One that opened maximized takes this place once it isn't */
