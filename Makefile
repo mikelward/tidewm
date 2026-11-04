@@ -17,11 +17,12 @@ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEV
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 all: dwl
-dwl: dwl.c capture.h client.h config.h dim.h floating.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
-	ext-image-copy-capture-v1-protocol.h \
+dwl: dwl.c capture.h client.h config.h dim.h floating.h focus.h grab.h ime.h ipc.h layout.h settings.h util.h workspace.h config.mk cursor-shape-v1-protocol.h \
+	ext-image-copy-capture-v1-protocol.h hyprland-focus-grab-v1-protocol.h \
+	hyprland-focus-grab-v1-protocol.c \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
 	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h
-	$(CC) dwl.c $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
+	$(CC) dwl.c hyprland-focus-grab-v1-protocol.c $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # wayland-scanner is a tool which generates C headers and rigging for Wayland
 # protocols, which are specified in XML. wlroots requires you to rig these up
@@ -38,6 +39,12 @@ ext-image-copy-capture-v1-protocol.h:
 pointer-constraints-unstable-v1-protocol.h:
 	$(WAYLAND_SCANNER) enum-header \
 		$(WAYLAND_PROTOCOLS)/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml $@
+hyprland-focus-grab-v1-protocol.h:
+	$(WAYLAND_SCANNER) server-header \
+		protocols/hyprland-focus-grab-v1.xml $@
+hyprland-focus-grab-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		protocols/hyprland-focus-grab-v1.xml $@
 wlr-layer-shell-unstable-v1-protocol.h:
 	$(WAYLAND_SCANNER) enum-header \
 		protocols/wlr-layer-shell-unstable-v1.xml $@
@@ -80,9 +87,11 @@ tests/content-type-v1-protocol.c:
 tests/client: tests/client.c tests/xdg-shell-client-protocol.h tests/xdg-shell-protocol.c \
 		tests/xdg-activation-v1-client-protocol.h tests/xdg-activation-v1-protocol.c \
 		tests/xdg-dialog-v1-client-protocol.h tests/xdg-dialog-v1-protocol.c \
-		tests/content-type-v1-client-protocol.h tests/content-type-v1-protocol.c
+		tests/content-type-v1-client-protocol.h tests/content-type-v1-protocol.c \
+		tests/hyprland-focus-grab-v1-client-protocol.h tests/hyprland-focus-grab-v1-protocol.c
 	$(CC) tests/client.c tests/xdg-shell-protocol.c tests/xdg-activation-v1-protocol.c \
-		tests/xdg-dialog-v1-protocol.c tests/content-type-v1-protocol.c -Itests \
+		tests/xdg-dialog-v1-protocol.c tests/content-type-v1-protocol.c \
+		tests/hyprland-focus-grab-v1-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
 # tests/x11client needs XWayland's xcb libraries. The substitution makes it
@@ -188,10 +197,18 @@ tests/wlr-layer-shell-unstable-v1-client-protocol.h:
 tests/wlr-layer-shell-unstable-v1-protocol.c:
 	$(WAYLAND_SCANNER) private-code \
 		protocols/wlr-layer-shell-unstable-v1.xml $@
+tests/hyprland-focus-grab-v1-client-protocol.h:
+	$(WAYLAND_SCANNER) client-header \
+		protocols/hyprland-focus-grab-v1.xml $@
+tests/hyprland-focus-grab-v1-protocol.c:
+	$(WAYLAND_SCANNER) private-code \
+		protocols/hyprland-focus-grab-v1.xml $@
 tests/launcher: tests/launcher.c tests/wlr-layer-shell-unstable-v1-client-protocol.h \
 		tests/wlr-layer-shell-unstable-v1-protocol.c tests/xdg-shell-client-protocol.h \
-		tests/xdg-shell-protocol.c
+		tests/xdg-shell-protocol.c tests/hyprland-focus-grab-v1-client-protocol.h \
+		tests/hyprland-focus-grab-v1-protocol.c
 	$(CC) tests/launcher.c tests/wlr-layer-shell-unstable-v1-protocol.c tests/xdg-shell-protocol.c \
+		tests/hyprland-focus-grab-v1-protocol.c \
 		-Itests `$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
 test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime tests/pointer tests/launcher \
@@ -200,7 +217,7 @@ test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime tests
 	python3 -m unittest discover -s tests -v
 
 clean:
-	rm -f dwl *.o *-protocol.h tests/client tests/workspaces tests/locker tests/power \
+	rm -f dwl *.o *-protocol.h *-protocol.c tests/client tests/workspaces tests/locker tests/power \
 		tests/ime tests/pointer tests/launcher tests/keyboard tests/capture tests/x11client \
 		tests/*-protocol.h \
 		tests/*-protocol.c
@@ -208,7 +225,8 @@ clean:
 dist: clean
 	mkdir -p dwl-$(VERSION)
 	cp -R LICENSE NOTICE Makefile CHANGELOG.md README.md client.h config.def.h \
-		config.mk protocols dwl.1 dwl.c dim.h floating.h focus.h ime.h ipc.h layout.h settings.h util.h workspace.h \
+		config.mk protocols dwl.1 dwl.c capture.h dim.h floating.h focus.h grab.h ime.h ipc.h layout.h \
+		settings.h util.h workspace.h \
 		dwl.desktop docs tests \
 		dwl-$(VERSION)
 	tar -caf dwl-$(VERSION).tar.gz dwl-$(VERSION)

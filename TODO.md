@@ -22,6 +22,9 @@ lands with a test.
 
 ## Done
 
+- **Outside clicks** (#44): hyprland-focus-grab-v1, so Quickshell's
+  `HyprlandFocusGrab` closes tide's notification center on a click
+  outside it, but not on the pointer crossing away.
 - **Capture events** (#41): the IPC's `capture` event says when an
   ext-image-copy-capture session starts and stops, and of which window,
   or of an output. Window identifiers were there already, as GET_TREE's
@@ -119,6 +122,14 @@ lands with a test.
 
 ## Decisions needing review
 
+- **Outside clicks are Hyprland's focus grab** (#44): tidewm takes
+  hyprland-focus-grab-v1, vendored from hyprland-protocols under its
+  BSD-3-Clause license, so tide's Quickshell center works as it does on
+  Hyprland, rather than an IPC click event of tidewm's own. The click
+  that ends a grab goes no further, as one outside a menu doesn't; the
+  alternative was to pass it on to the window clicked. A key binding or
+  command that moves focus, the launcher or the lock end the grab too,
+  where a window opening is held back. Reversible.
 - **What sway has goes after tide's own** (autopilot, 2026-11-04): the
   Plan takes tide's items first, as "finish the fork's features first"
   asked, then what sway has and tidewm lacks, the ones a laptop meets
@@ -344,23 +355,21 @@ lands with a test.
 
 ## Plan
 
-1. **Outside clicks**: a focus-grab protocol or click event for the
-   notification center.
-2. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
+1. **X11**: sharp at fractional scale, by unscaled Xwayland. The first X
    client starts Xwayland, and a window it maps before wlroots' window
    manager watches the root is never managed (the tests' client waits
    for it): start Xwayland ahead of clients, or take on windows already
    there.
-3. **Session**: the entry and wrapper tide starts it with.
-4. **Gestures**: pointer-gestures, so a touchpad's pinch and swipe reach
+2. **Session**: the entry and wrapper tide starts it with.
+3. **Gestures**: pointer-gestures, so a touchpad's pinch and swipe reach
    apps, as Chrome's pinch to zoom.
-5. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
+4. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
    desktop can take Super and Alt+Tab.
-6. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
+5. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
    window that opened it.
-7. **Security context**: security-context, so Flatpak apps don't get the
+6. **Security context**: security-context, so Flatpak apps don't get the
    privileged protocols, such as screencopy and the virtual keyboard.
-8. **The rest of sway's**: touchscreens, drawing tablets,
+7. **The rest of sway's**: touchscreens, drawing tablets,
    wlr-foreign-toplevel-management for taskbars and docks, adaptive sync
    and tearing control, and a scratchpad.
 
