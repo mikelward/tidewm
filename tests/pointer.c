@@ -9,7 +9,7 @@
  *   press BUTTON              press left, middle or right
  *   release BUTTON            release it
  *   move X Y WIDTH HEIGHT     move to X,Y, in a layout WIDTH by HEIGHT
- *   scroll                    scroll down a step
+ *   scroll [up]               scroll down a step, or up
  */
 #include <linux/input-event-codes.h>
 #include <stdio.h>
@@ -33,7 +33,7 @@ static void
 usage(void)
 {
 	die("usage: pointer click | press BUTTON | release BUTTON | move X Y WIDTH HEIGHT "
-			"| scroll ...");
+			"| scroll [up] ...");
 }
 
 static void
@@ -119,8 +119,10 @@ main(int argc, char *argv[])
 		} else if (!strcmp(argv[i], "release")) {
 			press(pointer, button(argv[++i]), WL_POINTER_BUTTON_STATE_RELEASED);
 		} else if (!strcmp(argv[i], "scroll")) {
+			int up = i + 1 < argc && !strcmp(argv[i + 1], "up");
+			i += up;
 			zwlr_virtual_pointer_v1_axis(pointer, 0, WL_POINTER_AXIS_VERTICAL_SCROLL,
-					wl_fixed_from_int(15));
+					wl_fixed_from_int(up ? -15 : 15));
 			zwlr_virtual_pointer_v1_frame(pointer);
 		} else if (!strcmp(argv[i], "move") && i + 4 < argc) {
 			uint32_t x = number(argv[i + 1]), y = number(argv[i + 2]);

@@ -92,6 +92,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `mfact F\|+F\|-F` | tidewm's own: the master area's share of the focused monitor's width, from 0.1 to 0.9. Only a finite number will do |
 | `zoom` | tidewm's own: swaps the focused window with the master, or with the next window if it's the master |
 | `switch lid\|tablet on\|off` | tidewm's own: moves a switch device of tidewm's own, as if a switch such as the lid had moved, which runs the config file's `bindswitch` lines for it ([`config.md`](config.md)): for a test, which has no lid, or a lid the hardware doesn't report |
+| `unlock` | tidewm's own, tide's SPEC §10: drops a lock whose screen locker has gone, as after it crashed, showing the windows again and focusing the top one: from a TTY (`swaymsg -s "$XDG_RUNTIME_DIR"/tidewm-ipc.*.sock unlock`), the way back in that keeps the session. Until then the screen stays covered, no key or pointer event reaches a window, and a new locker may take the lock over. It fails while a locker holds the lock, which only that locker may end, and with nothing locked |
 | `chvt N` | tidewm's own: switches to virtual terminal `N`; fails without a session, as on the headless backend |
 | `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD` |
 | `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |

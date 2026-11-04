@@ -432,6 +432,7 @@ static void tagmon(const Arg *arg);
 static void tile(Monitor *m);
 static void togglefloating(const Arg *arg);
 static void togglefullscreen(const Arg *arg);
+static int unlockdead(void);
 static void unlocksession(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void unmapnotify(struct wl_listener *listener, void *data);
@@ -3534,6 +3535,21 @@ togglefullscreen(const Arg *arg)
 	Client *sel = focustop(selmon);
 	if (sel)
 		setfullscreen(sel, !sel->isfullscreen);
+}
+
+/* Drops a lock whose locker has gone, as after it crashed: the way back
+ * in, from a TTY, that keeps the session. A lock its locker still holds
+ * only the locker may end. */
+int
+unlockdead(void)
+{
+	if (!locked || cur_lock)
+		return 0;
+	locked = 0;
+	wlr_scene_node_set_enabled(&locked_bg->node, 0);
+	focusclient(focustop(selmon), NULL, 0);
+	motionnotify(0, NULL, 0, 0, 0, 0);
+	return 1;
 }
 
 void

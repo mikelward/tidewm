@@ -17,6 +17,11 @@ lands with a test.
 
 ## Done
 
+- **A dead lock** (#39): the IPC's `unlock` drops a lock whose locker has
+  gone, from a TTY, keeping the session; a new locker takes it over with
+  no window shown or focused between. No pointer event reached a window
+  behind a dead lock already, as dwl looks only at the lock's layer while
+  locked; tests now say so.
 - **The lid switch** (#38): sway's `bindswitch` runs a command when the
   lid closes or opens, as `output eDP-1 disable` and `enable`.
 - **A lone window's width** (#37): a lone tiled window is centered at
@@ -101,6 +106,11 @@ lands with a test.
 
 ## Decisions needing review
 
+- **The command is `unlock`** (#39), tidewm's own, as sway has none:
+  Hyprland's is `hl.clear_crashed_lockscreen()`. It fails, doing nothing,
+  while a locker holds the lock, so it never unlocks a working lock
+  screen, and any client of the IPC socket, which is the user's own, may
+  run it, as anyone at a TTY may restart the locker. Reversible.
 - **The X11 map stall waits** (autopilot, 2026-11-04): Known bugs' X11
   window that sometimes never maps in the tests, about one run in 130 of
   a pair of X11 tests, on `main` too, is left there while the Plan goes
@@ -300,8 +310,7 @@ lands with a test.
 
 ## Plan
 
-1. **Lock and keyboard**: a command that drops a dead lock, no pointer
-   events while locked; on-demand layers keep the keyboard.
+1. **Keyboard**: on-demand layers keep the keyboard.
 2. **Capture**: window identifiers over the IPC; capture start and stop
    events; tide's launcher and notifications hidden from capture.
 3. **Outside clicks**: a focus-grab protocol or click event for the
