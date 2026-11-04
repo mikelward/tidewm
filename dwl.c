@@ -178,6 +178,8 @@ typedef struct {
 	unsigned int bw;
 	Workspace *ws;
 	int isfloating, isurgent, isfullscreen;
+	int ismaximized; /* covers its monitor's window area, above the other tiles */
+	struct wlr_box unmaximized; /* its place before it was maximized; none if it opened so */
 	int held; /* how the focus guard holds it from focus: FgFree, FgWaiting, FgPopup */
 	unsigned long focus_seq; /* when it last had focus, in the guard's count; 0 for never */
 	unsigned long urgent_seq; /* when it was last marked urgent, in marks so far */
@@ -383,6 +385,10 @@ static void setcursor(struct wl_listener *listener, void *data);
 static void setcursorshape(struct wl_listener *listener, void *data);
 static void setfloating(Client *c, int floating);
 static void setfullscreen(Client *c, int fullscreen);
+static int laidout(Client *c);
+static void raisewithdialogs(Client *c);
+static void setmaximized(Client *c, int maximized);
+static void unmaximizefor(Client *c);
 static void setlayout(const Arg *arg);
 static void setmfact(const Arg *arg);
 static void setmon(Client *c, Monitor *m, Workspace *ws);
@@ -608,6 +614,16 @@ arrange(Monitor *m)
 
 	if (m->lt[m->sellt]->arrange)
 		m->lt[m->sellt]->arrange(m);
+	/* A maximized window covers the window area, above the other tiles
+	 * but under its own dialogs. Floating, it stacks by focus, as the
+	 * other floating windows do. */
+	wl_list_for_each(c, &clients, link) {
+		if (VISIBLEON(c, m) && c->ismaximized && !c->isfullscreen) {
+			resize(c, m->w, 0);
+			if (!c->isfloating)
+				raisewithdialogs(c);
+		}
+	}
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
 }
@@ -1030,7 +1046,12 @@ commitnotify(struct wl_listener *listener, void *data)
 		setmon(c, NULL, 0); /* Make sure to reapply rules in mapnotify() */
 
 		wlr_xdg_toplevel_set_wm_capabilities(c->surface.xdg->toplevel,
-				WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN);
+				WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN
+				| WLR_XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE);
+		/* Maximized before it maps if it asked, as its first configure
+		 * says, and not if it's mapping again maximized no more */
+		c->ismaximized = c->surface.xdg->toplevel->requested.maximized;
+		client_set_maximized(c, c->ismaximized);
 		if (c->decoration)
 			requestdecorationmode(&c->set_decoration_mode, c->decoration);
 		wlr_xdg_toplevel_set_size(c->surface.xdg->toplevel, 0, 0);
@@ -1581,6 +1602,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		wl_list_insert(&fstack, &c->flink);
 		selmon = c->mon;
 		c->held = FgFree;
+		unmaximizefor(c);
 		seturgent(c, 0);
 
 		/* Don't change border color if there is an exclusive focus or we are
@@ -2088,17 +2110,84 @@ maximizenotify(struct wl_listener *listener, void *data)
 {
 	/* This event is raised when a client would like to maximize itself,
 	 * typically because the user clicked on the maximize button on
-	 * client-side decorations. dwl doesn't support maximization, but
-	 * to conform to xdg-shell protocol we still must send a configure.
-	 * Since xdg-shell protocol v5 we should ignore request of unsupported
-	 * capabilities, just schedule a empty configure when the client uses <5
-	 * protocol version
-	 * wlr_xdg_surface_schedule_configure() is used to send an empty reply. */
+	 * client-side decorations. tidewm maximizes, as tide's SPEC §6.3 has
+	 * it, and the configure that says so answers the request. Before the
+	 * first commit, the initial configure answers it (commitnotify). */
 	Client *c = wl_container_of(listener, c, maximize);
-	if (c->surface.xdg->initialized
-			&& wl_resource_get_version(c->surface.xdg->toplevel->resource)
-					< XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION)
-		wlr_xdg_surface_schedule_configure(c->surface.xdg);
+	if (c->surface.xdg->initialized)
+		setmaximized(c, c->surface.xdg->toplevel->requested.maximized);
+}
+
+/* Whether a layout places c: it's tiled, and its own workspace's part of
+ * its monitor, showing or not, has an arranging layout, or will have one,
+ * for a part not made yet, which takes the monitor's defaults */
+static int
+laidout(Client *c)
+{
+	const Layout *lt;
+	if (c->isfloating || !c->mon)
+		return 0;
+	lt = lt_part_layout(c->ws, c->mon);
+	return lt ? lt->arrange != NULL : c->mon->lt[c->mon->sellt]->arrange != NULL;
+}
+
+/* Raises c to the top of its layer, then its dialogs over it, the one
+ * focused last on top: in the floating layout, they share its layer */
+static void
+raisewithdialogs(Client *c)
+{
+	Client *d, *p;
+	wlr_scene_node_raise_to_top(&c->scene->node);
+	wl_list_for_each_reverse(d, &fstack, flink) {
+		for (p = client_get_parent(d); p && p != c; p = client_get_parent(p))
+			;
+		if (p)
+			wlr_scene_node_raise_to_top(&d->scene->node);
+	}
+}
+
+/* Maximizes c, over its monitor's window area with the bar showing, or
+ * gives it its place back, telling the client either way. Another window
+ * on its workspace taking focus ends it (unmaximizefor). */
+void
+setmaximized(Client *c, int maximized)
+{
+	int changed = !c->ismaximized != !maximized;
+	/* Its place, which it takes back if it's floating by then */
+	if (maximized && changed)
+		c->unmaximized = c->isfullscreen ? c->prev : c->geom;
+	c->ismaximized = maximized;
+	client_set_maximized(c, maximized);
+	if (!changed || !c->mon || !client_surface(c) || !client_surface(c)->mapped)
+		return;
+	/* Placed by hand, floating or in the floating layout, where no layout
+	 * places it, on its own workspace, it takes its place back, as it leaves fullscreen if it's
+	 * fullscreen now. One that opened maximized has no place, and keeps
+	 * the area's size. */
+	if (!maximized && !laidout(c) && c->unmaximized.width) {
+		if (c->isfullscreen)
+			c->prev = c->unmaximized;
+		else
+			resize(c, c->unmaximized, 0);
+	}
+	arrange(c->mon);
+	ipc_event_window(c, "maximize");
+}
+
+/* Focus went to c: any other maximized window on its workspace there is
+ * maximized no more, unless c is its dialog */
+static void
+unmaximizefor(Client *c)
+{
+	Client *w, *p;
+	wl_list_for_each(w, &clients, link) {
+		if (w == c || !w->ismaximized || w->mon != c->mon || w->ws != c->ws)
+			continue;
+		for (p = client_get_parent(c); p && p != w; p = client_get_parent(p))
+			;
+		if (!p)
+			setmaximized(w, 0);
+	}
 }
 
 void
@@ -3121,6 +3210,9 @@ unmapnotify(struct wl_listener *listener, void *data)
 	ipc_event_window(c, "close");
 	if (c == focused_client)
 		focused_client = NULL;
+	/* Mapping again, it's maximized only if it asks again */
+	c->ismaximized = 0;
+	c->unmaximized = (struct wlr_box){0};
 
 	if (!client_is_unmanaged(c)) {
 		wl_list_remove(&c->link);

@@ -174,13 +174,15 @@ class Tidewm:
         return Ipc(self.socket)
 
     def open_window(self, app_id, title, stdin=False, mapped_app_id=None, min_size=None,
-                    max_size=None, stdout=False):
+                    max_size=None, stdout=False, maximized=False):
         args = [app_id, title] + ([mapped_app_id] if mapped_app_id else [])
         env = dict(self.env)
         if min_size:
             env["MIN_SIZE"] = min_size
         if max_size:
             env["MAX_SIZE"] = max_size
+        if maximized:
+            env["MAXIMIZED"] = "1"
         client = subprocess.Popen([CLIENT, *args], env=env,
                                   stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
                                   stdout=subprocess.PIPE if stdout else subprocess.DEVNULL)

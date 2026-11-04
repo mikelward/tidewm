@@ -381,6 +381,22 @@ client_set_size(Client *c, uint32_t width, uint32_t height)
 		wlr_xdg_toplevel_set_size(c->surface.xdg->toplevel, (int32_t)width, (int32_t)height);
 }
 
+/* Tells c it's maximized, or not. X11 windows, and xdg ones too old for
+ * tiled states, already hear they're maximized while tiled. */
+static inline void
+client_set_maximized(Client *c, int maximized)
+{
+#ifdef XWAYLAND
+	if (client_is_x11(c))
+		return;
+#endif
+	if (wl_resource_get_version(c->surface.xdg->toplevel->resource)
+			>= XDG_TOPLEVEL_STATE_TILED_RIGHT_SINCE_VERSION)
+		wlr_xdg_toplevel_set_maximized(c->surface.xdg->toplevel, maximized);
+	else if (!maximized)
+		wlr_xdg_surface_schedule_configure(c->surface.xdg);
+}
+
 static inline void
 client_set_tiled(Client *c, uint32_t edges)
 {

@@ -47,6 +47,10 @@ lands with a test.
   three-column and two columns + stack beside tile and monocle, with
   tide's geometry; a layout, mfact and nmaster per workspace part, from
   its monitor's aspect; the `layout` event.
+- **Maximize** (#26): tidewm's own `maximize` command, `maximized` field
+  and `maximize` event, and apps' own requests: one window over its
+  monitor's window area, above the other tiles, until it's turned off,
+  closes, or another window on its workspace takes focus.
 - **The last input** (#25): sway's `GET_SEATS` with tidewm's own
   `last_input`, the last key or click, the window it went to and how long
   ago, for the shell's polkit agent.
@@ -144,6 +148,19 @@ lands with a test.
   urgency, where tide's Lua guard showed a Hyprland notification. tidewm
   draws no text, and the shell is the notification daemon, so there's no
   one to send a notification to. Reversible, if a fallback is wanted.
+- **Maximize is tidewm's own** (#26): sway has no maximize, so the
+  `maximize [enable|disable|toggle]` command, the `maximized` field and
+  the `maximize` window event are tidewm's, named as `fullscreen`'s are.
+  Reversible before tide's shell uses them.
+- **What ends a maximize** (#26): another window on its workspace taking
+  focus on the same monitor, as tide's SPEC §6.3 says, but not a dialog of
+  it, such as its file chooser, which would otherwise end it every time
+  it opened. A window on another monitor, or another workspace, leaves it.
+  Reversible.
+- **Apps may maximize themselves** (#26): an xdg app's own maximize
+  request, from its title bar's button, is honored, where dwl ignored it;
+  X11 apps' requests still aren't heard. A floating window gets its place
+  back after; one that opened maximized keeps the area's size. Reversible.
 - **The last input is GET_SEATS's** (#25): tidewm's own `last_input` on
   sway's seat, rather than a request of its own. Its window is the one the
   input reached, none for a key or click a binding took, since the app
@@ -171,11 +188,11 @@ lands with a test.
 
 ## Plan
 
-1. **Window states**: maximize, ending when another window on the
-   workspace takes focus; fullscreen on open, applied with the grant. A
+1. **Window states**: fullscreen on open, applied with the grant. A
    window the focus guard holds ends another's fullscreen as it maps, and
    its own fullscreen request covers the window you're in: it should
    leave fullscreen be, and wait to go fullscreen until it has focus.
+   Maximize came with #26.
 2. **Dialogs and floating**: centered on the parent, capped at 80% of the
    monitor, following it; modal; a picture-in-picture rule; a hand-floated
    window's size remembered.

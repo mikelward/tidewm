@@ -312,6 +312,8 @@ ipc_json_window(Client *c)
 			c->isurgent ? c->urgent_seq : 0));
 	json_object_object_add(obj, "visible", json_object_new_boolean(c->mon && VISIBLEON(c, c->mon)));
 	json_object_object_add(obj, "fullscreen_mode", json_object_new_int(c->isfullscreen));
+	/* tidewm's own, tide's SPEC §6.3: over the window area, the bar showing */
+	json_object_object_add(obj, "maximized", json_object_new_boolean(c->ismaximized));
 	json_object_object_add(obj, "rect", ipc_json_box(c->geom));
 	json_object_object_add(obj, "workspace", c->ws ? json_object_new_string(c->ws->name) : NULL);
 	json_object_object_add(obj, "output", c->mon ? json_object_new_string(c->mon->wlr_output->name) : NULL);
@@ -771,6 +773,18 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			return ipc_json_success(0, "A fullscreen window can't float or tile");
 		if (floating != target->isfloating)
 			setfloating(target, floating);
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own, as tide's SPEC §6.3 has it */
+	if (ipc_take(&cmd, "maximize")) {
+		int maximized;
+		if ((maximized = ipc_switch(cmd, target ? target->ismaximized : 0, 1)) < 0) {
+			error = "Expected maximize [enable|disable|toggle]";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to maximize");
+		setmaximized(target, maximized);
 		return ipc_json_success(1, NULL);
 	}
 	if (ipc_take(&cmd, "fullscreen")) {
