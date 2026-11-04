@@ -38,8 +38,8 @@
  * xdg-dialog-v1. With CONTENT_TYPE set to photo, video or game, it says
  * its content is that, over wp-content-type-v1. With SCROLLS set, it
  * prints "pointing" once the compositor has its wl_pointer, which waits
- * for the seat to have a pointer, and "scroll AMOUNT" for each vertical
- * scroll it gets.
+ * for the seat to have a pointer, "scroll AMOUNT" for each vertical
+ * scroll it gets, and "button" for each button pressed on it.
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -304,6 +304,10 @@ static void
 pointer_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t time,
 		uint32_t button, uint32_t state)
 {
+	if (state != WL_POINTER_BUTTON_STATE_PRESSED)
+		return;
+	printf("button\n");
+	fflush(stdout);
 }
 
 static void

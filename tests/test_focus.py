@@ -8,7 +8,7 @@ import select
 import subprocess
 import unittest
 
-from harness import (CLIENT, EVENT_WINDOW, GET_CONFIG, GET_WORKSPACES, LOCKER, ROOT,
+from harness import (CLIENT, EVENT_WINDOW, GET_CONFIG, GET_WORKSPACES, ROOT,
                      RUN_COMMAND, TIMEOUT, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
@@ -614,17 +614,12 @@ class HeldTest(GuardTest):
         self.grant("test.x")
         self.open("test.x")
         held, client = self.open("test.held")
-        locker = subprocess.Popen([LOCKER], env=self.wm.env, stdin=subprocess.PIPE,
-                                  stdout=subprocess.PIPE)
-        self.wm.clients.append(locker)
-        self.assertEqual(self.line(locker), b"locked\n")
+        locker = self.lock()
         self.grant("test.held")
         client.stdin.write(b"activate\n")
         client.stdin.flush()
         self.assertEqual(self.line(client), b"activated\n")
-        locker.stdin.write(b"unlock\n")
-        locker.stdin.flush()
-        self.assertEqual(locker.wait(TIMEOUT), 0)
+        self.unlock(locker)
         self.assertEqual(self.state(held), (True, False))
 
     def test_focus_next_reaches_a_held_window(self):

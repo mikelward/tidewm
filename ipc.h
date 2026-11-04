@@ -926,6 +926,18 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		switchset(type, on);
 		return ipc_json_success(1, NULL);
 	}
+	/* tidewm's own: drops a lock whose locker has gone */
+	if (!has_criteria && ipc_take(&cmd, "unlock")) {
+		if (*cmd) {
+			error = "Expected unlock";
+			goto parse_error;
+		}
+		if (!locked)
+			return ipc_json_success(0, "Nothing is locked");
+		if (!unlockdead())
+			return ipc_json_success(0, "The screen locker holds the lock, and only it may unlock");
+		return ipc_json_success(1, NULL);
+	}
 	if (!has_criteria && ipc_take(&cmd, "chvt")) {
 		unsigned int vt;
 		char extra;

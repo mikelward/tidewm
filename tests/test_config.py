@@ -8,7 +8,7 @@ import subprocess
 import unittest
 
 from harness import (EVENT_BINDING, EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MODES,
-                     GET_BINDING_STATE, GET_CONFIG, GET_VERSION, LOCKER, ROOT, RUN_COMMAND,
+                     GET_BINDING_STATE, GET_CONFIG, GET_VERSION, ROOT, RUN_COMMAND,
                      TIMEOUT, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
@@ -388,25 +388,7 @@ bindsym Mod1+Shift+z nop marker
                          ("nop marker", ["Shift", "Mod1"], "z"))
 
 
-class LockTest(KeysTest):
-    """The screen locked by tests/locker, over ext-session-lock."""
-
-    def lock(self):
-        locker = subprocess.Popen([LOCKER], env=self.wm.env, stdin=subprocess.PIPE,
-                                  stdout=subprocess.PIPE)
-        self.wm.clients.append(locker)
-        self.addCleanup(locker.stdout.close)
-        self.assertTrue(select.select([locker.stdout], [], [], TIMEOUT)[0], "the lock didn't take")
-        self.assertEqual(locker.stdout.readline(), b"locked\n")
-        return locker
-
-    def unlock(self, locker):
-        locker.stdin.write(b"unlock\n")
-        locker.stdin.flush()
-        self.assertEqual(locker.wait(TIMEOUT), 0)
-
-
-class LockedSwitchTest(LockTest):
+class LockedSwitchTest(KeysTest):
     CONFIG = """bindswitch lid:on workspace closed
 bindswitch --locked lid:off workspace opened
 """
@@ -419,7 +401,7 @@ bindswitch --locked lid:off workspace opened
         self.assertEqual(self.shown(ipc), "opened")
 
 
-class LockedTest(LockTest):
+class LockedTest(KeysTest):
     CONFIG = "bindsym --locked Mod1+x workspace locked\nbindsym Mod1+y workspace plain\n"
 
     def test_only_locked_bindings_run_on_the_lock_screen(self):
@@ -433,7 +415,7 @@ class LockedTest(LockTest):
         self.assertEqual(self.shown(ipc), "plain")
 
 
-class NoConfigLockTest(LockTest):
+class NoConfigLockTest(KeysTest):
     def test_config_h_keys_are_off_on_the_lock_screen(self):
         ipc = self.workspaces_ipc()
         locker = self.lock()

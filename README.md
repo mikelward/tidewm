@@ -162,6 +162,15 @@ app's content type (wp-content-type-v1), and a window the `dim disable`
 command exempts, as a `for_window` rule can for a screen share's preview.
 A window's menus and tooltips aren't dimmed.
 
+### The lock
+
+A screen locker that crashes leaves the screen locked, as
+ext-session-lock requires and tide's SPEC §10 relies on: covered, with no
+key or pointer event reaching a window. A new locker takes the lock over,
+and from a TTY the IPC's `unlock` command drops it, keeping the session.
+It can't end a lock a running locker holds.
+[`docs/ipc.md`](docs/ipc.md) says how.
+
 ### Dialogs and floating windows
 
 A window floats when it has a parent, is modal (X11's state or Wayland's

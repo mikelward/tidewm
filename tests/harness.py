@@ -257,6 +257,22 @@ class TidewmTest(unittest.TestCase):
         self.addCleanup(ipc.close)
         return ipc
 
+    def lock(self):
+        """Locks the screen with tests/locker, over ext-session-lock,
+        returning the locker, whose stdin takes "unlock"."""
+        locker = subprocess.Popen([LOCKER], env=self.wm.env, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE)
+        self.wm.clients.append(locker)
+        self.addCleanup(locker.stdout.close)
+        self.assertTrue(select.select([locker.stdout], [], [], TIMEOUT)[0], "the lock didn't take")
+        self.assertEqual(locker.stdout.readline(), b"locked\n")
+        return locker
+
+    def unlock(self, locker):
+        locker.stdin.write(b"unlock\n")
+        locker.stdin.flush()
+        self.assertEqual(locker.wait(TIMEOUT), 0)
+
     def open_window(self, ipc, app_id, title=None, min_size=None, max_size=None):
         """Opens a window, at least min_size and at most max_size ("WxH")
         big where they're given, and returns its client and its "new"
