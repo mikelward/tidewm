@@ -150,7 +150,10 @@ xdg-dialog-v1), is an X11 dialog, utility, toolbar or splash window, asks
 for a fixed size, or has neither an app ID nor a title, or when a rule
 floats it. One that floats as it opens goes in the middle of its parent,
 or of its monitor's window area without one, as big as it asks but no
-more than 80% of the monitor, as tide's SPEC §6.4 has it.
+more than 80% of the monitor, as tide's SPEC §6.4 has it. A browser's
+picture-in-picture window, titled `Picture-in-Picture` or so, floats a
+quarter of the monitor each way in the window area's bottom right corner,
+and is sticky, on every workspace.
 
 ### IPC
 

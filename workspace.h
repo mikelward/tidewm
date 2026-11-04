@@ -188,10 +188,21 @@ static void
 ws_view_to(Workspace *ws, Client *c)
 {
 	Workspace *old = curws;
+	Client *w;
 	if (!ws || ws == curws)
 		return;
 	prevws = old;
 	curws = ws;
+	/* A sticky floating window, such as picture-in-picture, comes along,
+	 * and any urgency with it */
+	wl_list_for_each(w, &clients, link) {
+		if (w->issticky && w->isfloating && w->ws == old) {
+			w->ws = ws;
+			ipc_event_window(w, "move");
+		}
+	}
+	ws_update_urgency(old);
+	ws_update_urgency(ws);
 	ws_set_active(old, 0);
 	ws_set_active(ws, 1);
 	/* Each monitor keeps old's layout and takes ws's */

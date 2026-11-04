@@ -13,8 +13,12 @@
  *           asks to be maximized, or not.
  * fullscreen, unfullscreen
  *           asks to be fullscreen, or not.
- * dialog    opens a dialog, a second toplevel whose parent is the window,
- *           with the app ID APP_ID.dialog.
+ * dialog [TITLE]
+ *           opens a dialog, a second toplevel whose parent is the window,
+ *           with the app ID APP_ID.dialog and the title TITLE, or Dialog.
+ * retitled-dialog TITLE
+ *           opens one titled Dialog that takes the title TITLE after its
+ *           first commit, before it maps.
  *
  * It prints "maximized" or "unmaximized" when the compositor says it's
  * maximized, or no longer, and "fullscreen" or "unfullscreen" likewise.
@@ -177,10 +181,18 @@ static const struct xdg_toplevel_listener toplevel_listener = {
 	.wm_capabilities = toplevel_wm_capabilities,
 };
 
+/* The dialog's title to take before it maps, after its first commit */
+static const char *dialog_retitle;
+
 static void
 dialog_surface_configure(void *data, struct xdg_surface *xsurface, uint32_t serial)
 {
+	struct xdg_toplevel *dialog = data;
 	xdg_surface_ack_configure(xsurface, serial);
+	if (dialog_retitle) {
+		xdg_toplevel_set_title(dialog, dialog_retitle);
+		dialog_retitle = NULL;
+	}
 	paint(dialog_surface, 100, 100);
 }
 
@@ -208,7 +220,7 @@ static const struct xdg_toplevel_listener dialog_listener = {
 
 /* A dialog of the window, at 100x100, as a file chooser is */
 static void
-open_dialog(void)
+open_dialog(const char *dialog_title)
 {
 	struct xdg_surface *xsurface;
 	struct xdg_toplevel *dialog;
@@ -217,13 +229,13 @@ open_dialog(void)
 		die("there's a dialog already");
 	dialog_surface = wl_compositor_create_surface(compositor);
 	xsurface = xdg_wm_base_get_xdg_surface(wm_base, dialog_surface);
-	xdg_surface_add_listener(xsurface, &dialog_surface_listener, NULL);
 	dialog = xdg_surface_get_toplevel(xsurface);
+	xdg_surface_add_listener(xsurface, &dialog_surface_listener, dialog);
 	xdg_toplevel_add_listener(dialog, &dialog_listener, NULL);
 	xdg_toplevel_set_parent(dialog, window);
 	snprintf(name, sizeof(name), "%s.dialog", app_id);
 	xdg_toplevel_set_app_id(dialog, name);
-	xdg_toplevel_set_title(dialog, "Dialog");
+	xdg_toplevel_set_title(dialog, dialog_title);
 	wl_surface_commit(dialog_surface);
 }
 
@@ -318,7 +330,12 @@ command(const char *line)
 	} else if (!strcmp(line, "unfullscreen")) {
 		xdg_toplevel_unset_fullscreen(window);
 	} else if (!strcmp(line, "dialog")) {
-		open_dialog();
+		open_dialog("Dialog");
+	} else if (!strncmp(line, "dialog ", 7)) {
+		open_dialog(line + 7);
+	} else if (!strncmp(line, "retitled-dialog ", 16)) {
+		dialog_retitle = strdup(line + 16);
+		open_dialog("Dialog");
 	}
 }
 

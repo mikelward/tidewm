@@ -17,6 +17,8 @@ lands with a test.
 
 ## Done
 
+- **Picture-in-picture** (#30): a window titled `Picture-in-Picture`, or
+  so, floats sticky in the bottom right corner; sway's `sticky` command.
 - **Dialog placement** (#28): a window that floats as it opens goes in
   the middle of its parent, or of the window area, no bigger than 80% of
   the monitor; modal windows, by xdg-dialog-v1, and nameless ones float.
@@ -86,6 +88,11 @@ lands with a test.
   on. Its cause is in wlroots and Xwayland rather than tidewm; the
   alternative was to chase it there first. Reversible: it's the next thing
   to pick up.
+- **Picture-in-picture is built in** (#30): by its title, as tide's
+  Hyprland rule matches it, `^Picture[- ]in[- ][Pp]icture$`, at that
+  rule's size and corner, rather than a `for_window` rule in tide's config,
+  which would need sway's `resize set` and `move position` commands.
+  Reversible: those commands can come, and the rule move to the config.
 - **Every window that floats as it opens is placed** (#28): dialogs, ones
   a rule floats, and X11 ones too, which may have asked for a place of
   their own; the cap is 80% of the monitor, and the place stays inside its
@@ -222,7 +229,9 @@ lands with a test.
   its surface reads properties synchronously, which leaves X events that
   arrive meanwhile in xcb's queue with nothing to wake its window manager
   for them. Waking it there gets the window paired, but the commit still
-  doesn't come. Not found yet.
+  doesn't come. Not found yet. A window mapped right after another, as an
+  X11 app's dialog right after its window, stalls far more often: four
+  runs in ten, which keeps such a test out of the suite for now.
 - **A leak in dwl's output management**: LeakSanitizer finds 136 bytes
   from `wlr_output_swapchain_manager_prepare()` in
   `outputmgrapplyortest()` after wlr-randr applies a configuration. It's
@@ -231,9 +240,9 @@ lands with a test.
 ## Plan
 
 1. **Dialogs and floating**: a dialog kept above its parent and following
-   it to another workspace or output; a picture-in-picture rule; a
-   hand-floated window's size remembered. Placement and modal came with
-   #28.
+   it to another workspace or output; a hand-floated window's size
+   remembered. Placement and modal came with #28, picture-in-picture with
+   #30.
 2. **Dimming** of every window but the focused one, with tide's
    exceptions.
 3. **Input**: a tap-Super event, which `--release Super_L` nearly is, once

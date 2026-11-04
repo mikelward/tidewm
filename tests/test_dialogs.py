@@ -6,7 +6,7 @@ as big as it asks but no more than 80% of the monitor."""
 
 import unittest
 
-from harness import EVENT_WINDOW, GET_OUTPUTS, GET_WORKSPACES, TidewmTest
+from harness import EVENT_WINDOW, EVENT_WORKSPACE, GET_OUTPUTS, GET_WORKSPACES, TidewmTest
 
 
 class DialogHelpers(TidewmTest):
@@ -102,6 +102,97 @@ class PlacementTest(DialogHelpers):
         self.assertEqual(self.window(window)["type"], "con")
 
     CONFIG = 'for_window [app_id="^test.float$"] floating enable\n'
+
+
+
+class PipTest(DialogHelpers):
+    def test_picture_in_picture_floats_in_the_bottom_right_corner(self):
+        self.open("test.app")
+        window, _ = self.open("test.pip", title="Picture-in-Picture", size="640x360")
+        output, = self.connect().request(GET_OUTPUTS)
+        w, area = self.window(window), self.area()
+        rect = w["rect"]
+        self.assertEqual((w["type"], w["sticky"]), ("floating_con", True))
+        self.assertEqual((rect["width"], rect["height"]),
+                         (output["rect"]["width"] // 4, output["rect"]["height"] // 4))
+        self.assertEqual((rect["x"] + rect["width"], rect["y"] + rect["height"]),
+                         (area["x"] + area["width"] - 16, area["y"] + area["height"] - 16))
+
+    def test_picture_in_picture_is_on_every_workspace(self):
+        window, _ = self.open("test.pip", title="Picture in picture")
+        self.command(self.connect(), "workspace two")
+        w = self.window(window)
+        self.assertEqual((w["workspace"], w["visible"]), ("two", True))
+
+    def test_a_dialog_that_is_picture_in_picture_is_sticky_too(self):
+        _, client = self.open("test.app")
+        client.stdin.write(b"dialog Picture-in-Picture\n")
+        client.stdin.flush()
+        pip = self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new"
+                                  and e["container"]["app_id"] == "test.app.dialog")
+        self.assertTrue(self.window(pip["container"]["id"])["sticky"])
+
+    def test_a_dialog_titled_picture_in_picture_as_it_maps_is_sticky(self):
+        # Its first commit, where the rules run for a Wayland window, comes
+        # before the title; an X11 window has no first commit at all. The
+        # map is where a dialog's stickiness is decided.
+        _, client = self.open("test.app")
+        client.stdin.write(b"retitled-dialog Picture-in-Picture\n")
+        client.stdin.flush()
+        pip = self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new"
+                                  and e["container"]["app_id"] == "test.app.dialog")
+        self.assertTrue(self.window(pip["container"]["id"])["sticky"])
+
+    def test_other_titles_arent_picture_in_picture(self):
+        for title in ("Picture-in-Picture video", "picture-in-picture"):
+            window, _ = self.open("test." + title.replace(" ", "."), title=title)
+            self.assertEqual(self.window(window)["type"], "con", title)
+
+    def test_the_sticky_command_pins_a_floating_window(self):
+        self.open("test.app")
+        window, _ = self.open("test.float")
+        self.command(self.connect(), f"[con_id={window}] sticky enable")
+        self.command(self.connect(), "workspace two")
+        self.assertEqual(self.window(window)["workspace"], "two")
+        self.command(self.connect(), f"[con_id={window}] sticky toggle")
+        self.command(self.connect(), "workspace 1")
+        self.assertEqual((self.window(window)["workspace"], self.window(window)["sticky"]),
+                         ("two", False))
+
+    def test_a_sticky_tiled_window_stays_on_its_workspace(self):
+        window, _ = self.open("test.app")
+        self.command(self.connect(), f"[con_id={window}] sticky enable")
+        self.command(self.connect(), "workspace two")
+        self.assertEqual(self.window(window)["workspace"], "1")
+
+    CONFIG = 'for_window [app_id="^test.float$"] floating enable\n'
+
+
+
+class TwoOutputStickyTest(DialogHelpers):
+    OUTPUTS = 2
+    CONFIG = 'for_window [app_id="^test.float$"] floating enable\n'
+
+    def test_an_urgent_sticky_window_takes_its_urgency_along(self):
+        outputs = [o["name"] for o in self.connect().request(GET_OUTPUTS)]
+        self.command(self.connect(), f"focus output {outputs[1]}")
+        sticky, _ = self.open("test.float")
+        self.command(self.connect(), f"[con_id={sticky}] sticky enable")
+        self.command(self.connect(), f"focus output {outputs[0]}")
+        self.open("test.app")  # keeps workspace 1, and the focus on its output
+        self.command(self.connect(), f"[con_id={sticky}] urgent enable")
+        workspaces = self.connect()
+        workspaces.subscribe("workspace")
+        self.command(self.connect(), "workspace two")
+        # The urgency events come before the switch's focus one
+        changes = {}
+        while True:
+            event = workspaces.next_event(EVENT_WORKSPACE)
+            if event["change"] == "focus":
+                break
+            if event["change"] == "urgent":
+                changes[event["current"]["name"]] = event["current"]["urgent"]
+        self.assertEqual(changes, {"1": False, "two": True})
 
 
 if __name__ == "__main__":
