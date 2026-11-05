@@ -2927,6 +2927,49 @@ settings_json_modes(void)
 	return list;
 }
 
+/* The config file's bindings, for GET_BINDINGS: each mode's bindsym
+ * lines, the top level's first, with their keys as written, after its
+ * variables, then the bindswitch lines, each as sway's identifier for its
+ * switch and state. config.h's keys, which have no commands to show, are
+ * left out: without a file, there are none. */
+static struct json_object *
+settings_json_bindings(void)
+{
+	static const char *const switches[] = {"off", "on", "toggle"};
+	struct json_object *list = json_object_new_array(), *b;
+	const Binding *k;
+	const SwitchBinding *sw;
+	char name[32];
+	size_t i, j;
+	for (i = 0; settings && i < settings->nmodes; i++) {
+		for (j = 0; j < settings->modes[i].nbindings; j++) {
+			k = &settings->modes[i].bindings[j];
+			b = json_object_new_object();
+			json_object_object_add(b, "type", json_object_new_string("key"));
+			json_object_object_add(b, "keys", json_object_new_string(k->keys));
+			json_object_object_add(b, "command", json_object_new_string(k->command));
+			json_object_object_add(b, "mode", json_object_new_string(settings->modes[i].name));
+			json_object_object_add(b, "release", json_object_new_boolean(k->release));
+			json_object_object_add(b, "locked", json_object_new_boolean(k->locked));
+			json_object_array_add(list, b);
+		}
+	}
+	for (i = 0; settings && i < settings->nswitches; i++) {
+		sw = &settings->switches[i];
+		snprintf(name, sizeof(name), "%s:%s", sw->type == WLR_SWITCH_TYPE_LID ? "lid" : "tablet",
+				switches[sw->state]);
+		b = json_object_new_object();
+		json_object_object_add(b, "type", json_object_new_string("switch"));
+		json_object_object_add(b, "keys", json_object_new_string(name));
+		json_object_object_add(b, "command", json_object_new_string(sw->command));
+		json_object_object_add(b, "mode", json_object_new_string("default"));
+		json_object_object_add(b, "release", json_object_new_boolean(0));
+		json_object_object_add(b, "locked", json_object_new_boolean(sw->locked));
+		json_object_array_add(list, b);
+	}
+	return list;
+}
+
 static void
 settings_finish(void)
 {

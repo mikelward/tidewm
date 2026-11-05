@@ -89,6 +89,9 @@ lands with a test.
   `GET_BINDING_STATE`.
 - **Release and locked bindings** (#14): `--release` runs on a tap,
   `--locked` on the lock screen too.
+- **A list of the bindings** (#56): tidewm's own `GET_BINDINGS`, the
+  config file's `bindsym` and `bindswitch` lines as written, for tide's
+  keyboard shortcuts page.
 - **Outputs** (#16, #54): sway's `output NAME|* mode|scale|position|transform|
   enable|disable` lines and command, applied when an output appears and
   on reload. An output is named by its connector or by what it is,
