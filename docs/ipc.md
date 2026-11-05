@@ -38,7 +38,7 @@ the magic, or over 4 MiB, closes that connection only.
 | 0 | `RUN_COMMAND` | One result per command, as below |
 | 1 | `GET_WORKSPACES` | Each workspace, in the order made: `id`, `name`, `num` (the name as a number, or -1), `focused`, `visible`, `urgent` (a window on it is), `persistent`, `output`, `rect`, and tidewm's own `layout`, its part's on the focused monitor (`null` for one it hasn't had yet) |
 | 2 | `SUBSCRIBE` | `{"success": true}`, or `false` for anything but a JSON array of the event names below |
-| 3 | `GET_OUTPUTS` | Each output: `id`, `name`, `make`, `model`, `serial`, `active`, `power`, `primary`, `scale`, `transform`, `focused`, `current_workspace`, `rect`, `current_mode` |
+| 3 | `GET_OUTPUTS` | Each output: `id`, `name`, `make`, `model`, `serial`, `active`, `power`, `primary`, `scale`, `transform`, `focused`, `current_workspace`, `rect`, `current_mode`; and tidewm's own `window_area`, the `rect` less what layer surfaces' exclusive zones take, and `layers`, its mapped layer surfaces from the bottom layer up, each a `namespace`, `layer` (`background`, `bottom`, `top` or `overlay`), `rect` and `exclusive_zone`, for tide's doctor to count bars |
 | 4 | `GET_TREE` | The root, its outputs, every workspace under each output, and in each the windows of that monitor's part, in `nodes` (tiled) and `floating_nodes` |
 | 7 | `GET_VERSION` | `human_readable`, `variant` (`"tidewm"`), `major`, `minor`, `patch`, `loaded_config_file_name` (the loaded config file, or `""`) |
 | 8 | `GET_BINDING_MODES` | Each binding mode's name, `default` first ([`config.md`](config.md)) |

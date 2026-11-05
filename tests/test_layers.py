@@ -424,5 +424,55 @@ class GrabTest(LayerHelpers):
         self.assertEqual(self.line(center), b"unfocused\n")
 
 
+
+class OutputLayersTest(TidewmTest):
+    """GET_OUTPUTS lists each output's mapped layer surfaces, and its
+    window area, for tide's doctor to count bars (tide's SPEC §5.4)."""
+
+    def bar(self):
+        bar = subprocess.Popen([LAUNCHER, "bar"], env=self.wm.env, stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE)
+        self.wm.clients.append(bar)
+        self.assertTrue(select.select([bar.stdout], [], [], TIMEOUT)[0])
+        self.assertEqual(bar.stdout.readline(), b"open\n")
+        return bar
+
+    def test_an_output_with_no_layer_surfaces_has_its_whole_area_for_windows(self):
+        output, = self.connect().request(GET_OUTPUTS)
+        self.assertEqual(output["layers"], [])
+        self.assertEqual(output["window_area"], output["rect"])
+
+    def test_a_bar_is_listed_with_its_namespace_layer_place_and_zone(self):
+        self.bar()
+        output, = self.connect().request(GET_OUTPUTS)
+        rect = output["rect"]
+        self.assertEqual(output["layers"], [{
+            "namespace": "bar", "layer": "top", "exclusive_zone": 30,
+            "rect": {"x": rect["x"], "y": rect["y"], "width": rect["width"], "height": 30},
+        }])
+        self.assertEqual(output["window_area"], dict(rect, y=rect["y"] + 30, height=rect["height"] - 30))
+
+    def test_layers_come_from_the_bottom_layer_up(self):
+        self.bar()
+        launcher = subprocess.Popen([LAUNCHER], env=self.wm.env, stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE)
+        self.wm.clients.append(launcher)
+        self.assertTrue(select.select([launcher.stdout], [], [], TIMEOUT)[0])
+        self.assertEqual(launcher.stdout.readline(), b"open\n")
+        output, = self.connect().request(GET_OUTPUTS)
+        self.assertEqual([(l["namespace"], l["layer"]) for l in output["layers"]],
+                         [("bar", "top"), ("launcher", "overlay")])
+
+    def test_a_closed_bar_goes_from_the_list(self):
+        bar = self.bar()
+        bar.stdin.write(b"close\n")
+        bar.stdin.flush()
+        self.assertTrue(select.select([bar.stdout], [], [], TIMEOUT)[0])
+        self.assertEqual(bar.stdout.readline(), b"closed\n")
+        output, = self.connect().request(GET_OUTPUTS)
+        self.assertEqual(output["layers"], [])
+        self.assertEqual(output["window_area"], output["rect"])
+
+
 if __name__ == "__main__":
     unittest.main()
