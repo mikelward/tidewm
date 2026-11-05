@@ -65,6 +65,7 @@ static int settings_input_command(char *args, char *err, size_t errsize, int *pa
 static struct json_object *settings_json_inputs(void);
 static int fg_command(char *args, char *err, size_t errsize);
 static struct json_object *fg_json_last_input(void);
+static int fg_prompt_may_focus(void);
 static int fg_focus_recent(char *args, char *err, size_t errsize, int *parse);
 /* layout.h, included after this file */
 static const Layout *lt_part_layout(Workspace *ws, Monitor *m);
@@ -1147,7 +1148,8 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 	case IpcGetInputs:
 		return ipc_send_json(cl, type, settings_json_inputs());
 	case IpcGetSeats: {
-		/* sway's one seat, with tidewm's own last_input */
+		/* sway's one seat, with tidewm's own last_input and
+		 * prompt_may_focus */
 		struct json_object *list = json_object_new_array(), *s = json_object_new_object();
 		json_object_object_add(s, "name", json_object_new_string(seat->name));
 		json_object_object_add(s, "capabilities", json_object_new_int((int)seat->capabilities));
@@ -1155,6 +1157,7 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 				focused_client ? ipc_id(&focused_client->ipc_id) : 0));
 		json_object_object_add(s, "devices", settings_json_inputs());
 		json_object_object_add(s, "last_input", fg_json_last_input());
+		json_object_object_add(s, "prompt_may_focus", json_object_new_boolean(fg_prompt_may_focus()));
 		json_object_array_add(list, s);
 		return ipc_send_json(cl, type, list);
 	}

@@ -61,6 +61,17 @@ class SeatTest(SeatHelpers):
         self.assertIsInstance(seat["devices"], list)
         self.assertIsNone(seat["last_input"])
 
+    def test_a_prompt_may_take_the_keyboard_right_after_a_key_press(self):
+        self.open("test.app")
+        self.assertFalse(self.seat()["prompt_may_focus"])
+        self.press("x")
+        self.assertTrue(self.seat()["prompt_may_focus"])
+
+    def test_a_click_alone_lets_no_prompt_take_the_keyboard(self):
+        self.open("test.app")
+        self.pointer("click")
+        self.assertFalse(self.seat()["prompt_may_focus"])
+
     def test_a_key_press_went_to_the_focused_window(self):
         window = self.open("test.app")
         self.press("x")
