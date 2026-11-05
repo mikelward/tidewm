@@ -234,6 +234,11 @@ class IncludeTest(KeysTest):
         self.wm.write_config("include keys.conf\n")
         self.assertIn(f"{path}:1: input type:keyboard: XKB can't make a keymap", self.fails("reload")["error"])
 
+    def test_a_keymap_error_names_its_xkb_lines_file_not_a_later_lines(self):
+        path = self.write("keys.conf", "input type:keyboard xkb_layout nosuchlayout\n")
+        self.wm.write_config("include keys.conf\ninput type:keyboard repeat_rate 30\n")
+        self.assertIn(f"{path}:1: input type:keyboard: XKB can't make a keymap", self.fails("reload")["error"])
+
     def test_a_file_that_includes_itself_is_an_error(self):
         self.write("loop.conf", "include loop.conf\n")
         self.wm.write_config("include loop.conf\n")
