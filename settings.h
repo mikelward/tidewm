@@ -820,10 +820,12 @@ settings_add_input(Settings *s, char *name, char *setting, unsigned int line,
 		settings_error(errors, line, "%s", err);
 		return 0;
 	}
-	for (i = 0; i < InXkbLast; i++)
-		if (!strncmp(setting, settings_xkb_names[i], strlen(settings_xkb_names[i])))
+	for (i = 0; i < InXkbLast; i++) {
+		if (!strncmp(setting, settings_xkb_names[i], strlen(settings_xkb_names[i]))) {
 			ic->xkb_line = line;
 			ic->xkb_file = settings_file;
+		}
+	}
 	return 1;
 }
 
