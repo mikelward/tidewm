@@ -272,7 +272,8 @@ struct Monitor {
 	char ltsymbol[16];
 	int asleep;
 	unsigned long ipc_id; /* the IPC's output id, set on first use */
-	int want_pos, want_x, want_y; /* where it goes in the layout when enabled, if anywhere */
+	int want_place, want_x, want_y; /* where it goes in the layout: settings.h's Place */
+	int head_moved; /* an output management request moves it */
 	int want_mode, want_width, want_height, want_refresh; /* its mode once enabled, if given while off */
 	LayoutMode modes[16]; /* each layout's, but the current one's */
 	const Layout *rule_lt; /* config.h's monitor rule's */
@@ -1356,8 +1357,6 @@ createmon(struct wl_listener *listener, void *data)
 	/* Initialize monitor state using configured rules */
 	for (r = monrules; r < END(monrules); r++) {
 		if (!r->name || strstr(wlr_output->name, r->name)) {
-			m->m.x = r->x;
-			m->m.y = r->y;
 			m->mfact = m->rule_mfact = r->mfact;
 			m->nmaster = m->rule_nmaster = r->nmaster;
 			m->lt[0] = m->rule_lt = r->lt;
@@ -1377,14 +1376,10 @@ createmon(struct wl_listener *listener, void *data)
 	/* config.h's monitor rule, then the config file's output lines over
 	 * it, and the preferred mode unless they give one, as on reload */
 	settings_output_defaults(m, &oc);
-	if ((configured = settings_output_config(wlr_output->name, &file)))
+	if ((configured = settings_output_config(wlr_output, &file)))
 		settings_merge_output(&oc, &file);
 	settings_preferred_mode(wlr_output, &oc);
 	settings_output_state(m, &oc, &state);
-	if (oc.has_position) {
-		m->m.x = oc.x;
-		m->m.y = oc.y;
-	}
 	if (!wlr_output_commit_state(wlr_output, &state) && configured) {
 		/* A mode it can't show, say: rather than a dark screen, its own */
 		fprintf(stderr, "tidewm: output %s refused its settings; using its preferred mode\n",
@@ -1427,10 +1422,8 @@ createmon(struct wl_listener *listener, void *data)
 		/* Disabled by its config, it changes no layout, so nothing else
 		 * would tell the output manager it's there to be enabled */
 		updatemons(NULL, NULL);
-	else if (m->m.x == -1 && m->m.y == -1)
-		wlr_output_layout_add_auto(output_layout, wlr_output);
 	else
-		wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);
+		settings_output_place(m);
 	ipc_event_output();
 }
 
@@ -2803,6 +2796,16 @@ outputmgrapplyortest(struct wlr_output_configuration_v1 *config, int test)
 			wlr_output_state_set_buffer(&states[i].base, wlr_swapchain_acquire(swapchain));
 	}
 
+	/* Which outputs the request moves, from where they are now: the
+	 * commit, and each move after it, places the others beside them
+	 * again, which isn't the client moving those */
+	wl_list_for_each(config_head, &config->heads, link) {
+		Monitor *m = config_head->state.output->data;
+		m->head_moved = config_head->state.enabled
+				&& (m->m.x != config_head->state.x || m->m.y != config_head->state.y
+					|| !wlr_output_layout_get(output_layout, config_head->state.output));
+	}
+
 	if (!(ok = wlr_backend_commit(backend, states, states_len)))
 		goto out;
 
@@ -2817,11 +2820,14 @@ outputmgrapplyortest(struct wlr_output_configuration_v1 *config, int test)
 		m->asleep = 0;
 
 		/* Don't move monitors if position wouldn't change. This avoids
-		 * wlroots marking the output as manually configured.
+		 * wlroots marking the output as manually configured, and keeps
+		 * it beside the others if that's where it was placed. One moved
+		 * stays where it was put, as a position its line gives would.
 		 * wlr_output_layout_add does not like disabled outputs */
-		if (config_head->state.enabled
-				&& (m->m.x != config_head->state.x || m->m.y != config_head->state.y
-					|| !wlr_output_layout_get(output_layout, wlr_output))) {
+		if (m->head_moved) {
+			m->want_place = PlaceAt;
+			m->want_x = config_head->state.x;
+			m->want_y = config_head->state.y;
 			wlr_output_layout_add(output_layout, wlr_output,
 					config_head->state.x, config_head->state.y);
 		}
@@ -3793,11 +3799,16 @@ updatemons(struct wl_listener *listener, void *data)
 	 * positions, focus, and the stored configuration in wlroots'
 	 * output-manager implementation.
 	 */
-	struct wlr_output_configuration_v1 *config
-			= wlr_output_configuration_v1_create();
+	struct wlr_output_configuration_v1 *config;
 	Client *c;
 	struct wlr_output_configuration_head_v1 *config_head;
 	Monitor *m;
+
+	/* Outputs being placed beside each other: the call that's placing
+	 * them carries on once they're placed */
+	if (settings_placing)
+		return;
+	config = wlr_output_configuration_v1_create();
 
 	/* First remove from the layout the disabled monitors */
 	wl_list_for_each(m, &mons, link) {
@@ -3813,12 +3824,14 @@ updatemons(struct wl_listener *listener, void *data)
 		closemon(m);
 		m->m = m->w = (struct wlr_box){0};
 	}
-	/* Insert outputs that need to */
+	/* Insert outputs that need to, and place those that go beside the
+	 * others */
 	wl_list_for_each(m, &mons, link) {
 		if (m->wlr_output->enabled
 				&& !wlr_output_layout_get(output_layout, m->wlr_output))
-			wlr_output_layout_add_auto(output_layout, m->wlr_output);
+			settings_output_place(m);
 	}
+	settings_place_outputs();
 
 	/* Now that we update the output layout we can get its box */
 	wlr_output_layout_get_box(output_layout, NULL, &sgeom);

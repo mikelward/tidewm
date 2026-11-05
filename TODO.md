@@ -89,9 +89,12 @@ lands with a test.
   `GET_BINDING_STATE`.
 - **Release and locked bindings** (#14): `--release` runs on a tap,
   `--locked` on the lock screen too.
-- **Outputs** (#16): sway's `output NAME|* mode|scale|position|transform|
+- **Outputs** (#16, #54): sway's `output NAME|* mode|scale|position|transform|
   enable|disable` lines and command, applied when an output appears and
-  on reload.
+  on reload. An output is named by its connector or by what it is,
+  sway's identifier or Hyprland's description, and `position auto`,
+  `auto-left`, `auto-up` and `auto-down` place it beside the others as
+  Hyprland places monitors.
 - **Window rules** (#15): `for_window [criteria] commands`, matching
   `app_id`, `class`, `instance`, `title` and `shell` by regular
   expression, in place of `config.h`'s rules once a file is loaded.
