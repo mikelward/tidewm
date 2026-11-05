@@ -60,6 +60,14 @@ To enable XWayland, you should uncomment its flags in `config.mk`.
 with XWayland, its X11 tests need Xwayland. A test that lacks one of these
 skips, except in CI, where it fails.
 
+`make install` puts the binary in `$(PREFIX)/bin` as `tidewm`, so it never
+stands in for a distro's dwl, with its man page as `tidewm.1`. It installs
+no session entry: tide's starts it, under uwsm. It does install
+`tidewm-portals.conf`, which has xdg-desktop-portal use
+xdg-desktop-portal-wlr for screen sharing and screenshots, and
+xdg-desktop-portal-gtk for the rest, in a session whose
+`XDG_CURRENT_DESKTOP` starts with `tidewm`.
+
 ## Configuration
 
 All configuration is done by editing `config.h` and recompiling, in the same

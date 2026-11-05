@@ -129,6 +129,17 @@ lands with a test.
 
 ## Decisions needing review
 
+- **Installed as `tidewm`, with no session entry** (#47): `make install`
+  renames the binary and its man page, so a distro's dwl keeps its name,
+  and leaves out upstream's `dwl.desktop`, since tide's entry starts
+  tidewm under uwsm and a bare session has no bar. The build still makes
+  `dwl`, which keeps upstream's Makefile rules. Reversible.
+- **The portals go by the session's first name** (#47):
+  `tidewm-portals.conf` picks wlr, then gtk, for an `XDG_CURRENT_DESKTOP`
+  starting with `tidewm`, as sway's `sway-portals.conf` does for sway.
+  tide's tidewm session puts `tidewm` before `tide` for it, since
+  xdg-desktop-portal reads only the first name's file, and `tide`'s
+  picks Hyprland's portal. Reversible.
 - **X11 at a fractional scale is a setting, scaled by default** (#45):
   `xwayland_scaling disable` turns the scaling off, as tide's config
   will, and the default scales, as sway and dwl do, since an app that
@@ -376,16 +387,15 @@ lands with a test.
 
 ## Plan
 
-1. **Session**: the entry and wrapper tide starts it with.
-2. **Gestures**: pointer-gestures, so a touchpad's pinch and swipe reach
+1. **Gestures**: pointer-gestures, so a touchpad's pinch and swipe reach
    apps, as Chrome's pinch to zoom.
-3. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
+2. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
    desktop can take Super and Alt+Tab.
-4. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
+3. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
    window that opened it.
-5. **Security context**: security-context, so Flatpak apps don't get the
+4. **Security context**: security-context, so Flatpak apps don't get the
    privileged protocols, such as screencopy and the virtual keyboard.
-6. **The rest of sway's**: touchscreens, drawing tablets,
+5. **The rest of sway's**: touchscreens, drawing tablets,
    wlr-foreign-toplevel-management for taskbars and docks, adaptive sync
    and tearing control, and a scratchpad.
 

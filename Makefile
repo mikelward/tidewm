@@ -235,22 +235,24 @@ dist: clean
 	cp -R LICENSE NOTICE Makefile CHANGELOG.md README.md client.h config.def.h \
 		config.mk protocols dwl.1 dwl.c capture.h dim.h floating.h focus.h grab.h ime.h ipc.h layout.h \
 		settings.h util.h workspace.h x11.h \
-		dwl.desktop docs tests \
+		dwl.desktop tidewm-portals.conf docs tests \
 		dwl-$(VERSION)
 	tar -caf dwl-$(VERSION).tar.gz dwl-$(VERSION)
 	rm -rf dwl-$(VERSION)
 
+# Installed as tidewm, so it never stands in for a distro's dwl. tide's
+# session entry starts it; it installs none of its own.
 install: dwl
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
-	rm -f $(DESTDIR)$(PREFIX)/bin/dwl
-	cp -f dwl $(DESTDIR)$(PREFIX)/bin
-	chmod 755 $(DESTDIR)$(PREFIX)/bin/dwl
+	rm -f $(DESTDIR)$(PREFIX)/bin/tidewm
+	cp -f dwl $(DESTDIR)$(PREFIX)/bin/tidewm
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/tidewm
 	mkdir -p $(DESTDIR)$(MANDIR)/man1
-	cp -f dwl.1 $(DESTDIR)$(MANDIR)/man1
-	chmod 644 $(DESTDIR)$(MANDIR)/man1/dwl.1
-	mkdir -p $(DESTDIR)$(DATADIR)/wayland-sessions
-	cp -f dwl.desktop $(DESTDIR)$(DATADIR)/wayland-sessions/dwl.desktop
-	chmod 644 $(DESTDIR)$(DATADIR)/wayland-sessions/dwl.desktop
+	cp -f dwl.1 $(DESTDIR)$(MANDIR)/man1/tidewm.1
+	chmod 644 $(DESTDIR)$(MANDIR)/man1/tidewm.1
+	mkdir -p $(DESTDIR)$(DATADIR)/xdg-desktop-portal
+	cp -f tidewm-portals.conf $(DESTDIR)$(DATADIR)/xdg-desktop-portal/tidewm-portals.conf
+	chmod 644 $(DESTDIR)$(DATADIR)/xdg-desktop-portal/tidewm-portals.conf
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/dwl $(DESTDIR)$(MANDIR)/man1/dwl.1 \
-		$(DESTDIR)$(DATADIR)/wayland-sessions/dwl.desktop
+	rm -f $(DESTDIR)$(PREFIX)/bin/tidewm $(DESTDIR)$(MANDIR)/man1/tidewm.1 \
+		$(DESTDIR)$(DATADIR)/xdg-desktop-portal/tidewm-portals.conf
