@@ -55,13 +55,18 @@ typedef struct {
 	char *command;
 } WindowRule;
 
+/* Where an output goes in the layout: at x, y, or beside the others, as
+ * Hyprland's monitor rules' auto, auto-left, auto-up and auto-down put it
+ * (settings_place_outputs()). Without a position it goes to the right. */
+enum { PlaceRight, PlaceLeft, PlaceUp, PlaceDown, PlaceAt };
+
 /* An output line: what to set on the outputs it names, "*" for all */
 typedef struct {
 	char *name;
 	int has_mode, width, height, refresh; /* refresh in mHz; 0 for the best */
 	int has_scale;
 	float scale;
-	int has_position, x, y;
+	int has_position, place, x, y;
 	int has_transform;
 	enum wl_output_transform transform;
 	int enabled; /* 1 or 0, or -1 to leave it */
@@ -515,6 +520,10 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 		{"flipped-180", WL_OUTPUT_TRANSFORM_FLIPPED_180},
 		{"flipped-270", WL_OUTPUT_TRANSFORM_FLIPPED_270},
 	};
+	static const struct { const char *name; int place; } places[] = {
+		{"auto", PlaceRight}, {"auto-right", PlaceRight}, {"auto-left", PlaceLeft},
+		{"auto-up", PlaceUp}, {"auto-down", PlaceDown},
+	};
 	char *word, *arg, *end, extra;
 	size_t i, len;
 	float hz;
@@ -567,12 +576,19 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 		} else if (!strcmp(word, "position") || !strcmp(word, "pos")) {
 			if (!(arg = settings_arg(&rest)))
 				goto unclosed;
-			if (strchr(arg, ',') ? sscanf(arg, "%d,%d%c", &oc->x, &oc->y, &extra) != 2
+			for (i = 0; i < LENGTH(places) && strcmp(arg, places[i].name); i++)
+				;
+			if (i < LENGTH(places)) {
+				oc->place = places[i].place;
+			} else if (strchr(arg, ',') ? sscanf(arg, "%d,%d%c", &oc->x, &oc->y, &extra) != 2
 					: (sscanf(arg, "%d%c", &oc->x, &extra) != 1
 					|| !(word = settings_arg(&rest))
 					|| sscanf(word, "%d%c", &oc->y, &extra) != 1)) {
-				snprintf(err, errsize, "output %s: position needs X Y", oc->name);
+				snprintf(err, errsize, "output %s: position needs X Y, or auto, "
+						"auto-right, auto-left, auto-up or auto-down", oc->name);
 				return 0;
+			} else {
+				oc->place = PlaceAt;
 			}
 			oc->has_position = 1;
 		} else if (!strcmp(word, "transform")) {
@@ -616,6 +632,7 @@ settings_merge_output(OutputConfig *into, const OutputConfig *from)
 	}
 	if (from->has_position) {
 		into->has_position = 1;
+		into->place = from->place;
 		into->x = from->x;
 		into->y = from->y;
 	}
@@ -1720,18 +1737,59 @@ settings_apply_rules(Client *c)
 	}
 }
 
-/* The file's settings for the output called name: its "*" line, then its
- * own, which overrides it. Returns 0 if neither is there. */
+/* Whether name names output o other than by its connector: as sway's
+ * identifier does, "MAKE MODEL SERIAL" with Unknown for what it doesn't
+ * say, or as Hyprland's description does, with nothing for that, trimmed
+ * and without commas, which tide's settings use. */
 static int
-settings_output_config(const char *name, OutputConfig *out)
+settings_output_described(const char *name, struct wlr_output *o)
+{
+	const char *parts[] = {o->make, o->model, o->serial};
+	char id[512], desc[512], *from, *to;
+	size_t start, end;
+	snprintf(id, sizeof(id), "%s %s %s", parts[0] ? parts[0] : "Unknown",
+			parts[1] ? parts[1] : "Unknown", parts[2] ? parts[2] : "Unknown");
+	if (!strcmp(name, id))
+		return 1;
+	snprintf(desc, sizeof(desc), "%s %s %s", parts[0] ? parts[0] : "",
+			parts[1] ? parts[1] : "", parts[2] ? parts[2] : "");
+	for (start = 0; isspace((unsigned char)desc[start]); start++)
+		;
+	for (end = strlen(desc); end > start && isspace((unsigned char)desc[end - 1]); end--)
+		;
+	desc[end] = '\0';
+	for (from = to = desc + start; *from; from++)
+		if (*from != ',')
+			*to++ = *from;
+	*to = '\0';
+	return desc[start] && !strcmp(name, desc + start);
+}
+
+/* Whether an output line or command naming name sets output o: "*", its
+ * connector, or what it is. */
+static int
+settings_output_named(const char *name, struct wlr_output *o)
+{
+	return !strcmp(name, "*") || !strcmp(name, o->name) || settings_output_described(name, o);
+}
+
+/* The file's settings for output o: its "*" line, then the one naming its
+ * connector, then one naming what it is, as sway lets each override the
+ * one before. Returns 0 if none is there. */
+static int
+settings_output_config(struct wlr_output *o, OutputConfig *out)
 {
 	size_t i;
 	int pass, found = 0;
+	const char *name;
 	memset(out, 0, sizeof(*out));
 	out->enabled = -1;
-	for (pass = 0; settings && pass < 2; pass++) {
+	for (pass = 0; settings && pass < 3; pass++) {
 		for (i = 0; i < settings->noutputs; i++) {
-			if (strcmp(settings->outputs[i].name, pass ? name : "*"))
+			name = settings->outputs[i].name;
+			if (pass == 0 ? strcmp(name, "*") : pass == 1 ? strcmp(name, o->name)
+					: !strcmp(name, "*") || !strcmp(name, o->name)
+					|| !settings_output_described(name, o))
 				continue;
 			settings_merge_output(out, &settings->outputs[i]);
 			found = 1;
@@ -1819,12 +1877,68 @@ settings_output_set(Monitor *m, const OutputConfig *oc, int reset)
 		m->want_refresh = oc->refresh;
 	}
 	if (oc->has_position) {
-		m->want_pos = 1;
+		m->want_place = oc->place;
 		m->want_x = oc->x;
 		m->want_y = oc->y;
 	} else if (reset) {
-		m->want_pos = 0;
+		m->want_place = PlaceRight;
 	}
+}
+
+/* Puts m's output in the layout: where it's put, or, if it isn't there
+ * already, where wlroots would until settings_place_outputs() puts it
+ * beside the others. */
+static void
+settings_output_place(Monitor *m)
+{
+	if (m->want_place == PlaceAt)
+		wlr_output_layout_add(output_layout, m->wlr_output, m->want_x, m->want_y);
+	else if (!wlr_output_layout_get(output_layout, m->wlr_output))
+		wlr_output_layout_add_auto(output_layout, m->wlr_output);
+}
+
+/* Set while settings_place_outputs() moves outputs, so the layout's change
+ * events wait for the updatemons() that called it. */
+static int settings_placing;
+
+/* Places each output in the layout that isn't put at a position, as
+ * Hyprland arranges monitors (src/state/MonitorPositionController.cpp):
+ * in the order they were connected, each beside the outputs put at
+ * positions and those it placed before, and the origin, on the side it
+ * asks for, at 0 across. Another output's size changing, or one going,
+ * moves those beside it. */
+static void
+settings_place_outputs(void)
+{
+	struct wlr_output_layout_output *lo;
+	struct wlr_box b;
+	int left = 0, right = 0, top = 0, bottom = 0, x, y, pass;
+	Monitor *m;
+	settings_placing = 1;
+	for (pass = 0; pass < 2; pass++) {
+		wl_list_for_each_reverse(m, &mons, link) {
+			if ((m->want_place == PlaceAt) != !pass
+					|| !(lo = wlr_output_layout_get(output_layout, m->wlr_output)))
+				continue;
+			wlr_output_layout_get_box(output_layout, m->wlr_output, &b);
+			if (pass) {
+				x = m->want_place == PlaceLeft ? left - b.width
+					: m->want_place == PlaceRight ? right : 0;
+				y = m->want_place == PlaceUp ? top - b.height
+					: m->want_place == PlaceDown ? bottom : 0;
+				/* One that's asleep, which is off, stays put */
+				if (m->wlr_output->enabled && (lo->auto_configured || lo->x != x || lo->y != y))
+					wlr_output_layout_add(output_layout, m->wlr_output, x, y);
+				b.x = lo->x;
+				b.y = lo->y;
+			}
+			left = MIN(left, b.x);
+			right = MAX(right, b.x + b.width);
+			top = MIN(top, b.y);
+			bottom = MAX(bottom, b.y + b.height);
+		}
+	}
+	settings_placing = 0;
 }
 
 /* An output's settings before the file's: config.h's monitor rule's scale,
@@ -1841,6 +1955,7 @@ settings_output_defaults(Monitor *m, OutputConfig *oc)
 			oc->scale = r->scale;
 			oc->transform = r->rr;
 			if ((oc->has_position = r->x != -1 || r->y != -1)) {
+				oc->place = PlaceAt;
 				oc->x = r->x;
 				oc->y = r->y;
 			}
@@ -1865,12 +1980,12 @@ settings_apply_outputs(const OutputConfig *only)
 	int set = 0, refused = 0;
 	wl_list_for_each(m, &mons, link) {
 		if (only) {
-			if (strcmp(only->name, "*") && strcmp(only->name, m->wlr_output->name))
+			if (!settings_output_named(only->name, m->wlr_output))
 				continue;
 			oc = *only;
 		} else {
 			settings_output_defaults(m, &oc);
-			if (settings_output_config(m->wlr_output->name, &file))
+			if (settings_output_config(m->wlr_output, &file))
 				settings_merge_output(&oc, &file);
 			settings_preferred_mode(m->wlr_output, &oc);
 		}
@@ -1879,10 +1994,8 @@ settings_apply_outputs(const OutputConfig *only)
 		if (wlr_output_commit_state(m->wlr_output, &state)) {
 			set++;
 			settings_output_set(m, &oc, !only);
-			if (m->wlr_output->enabled && m->want_pos)
-				wlr_output_layout_add(output_layout, m->wlr_output, m->want_x, m->want_y);
-			else if (m->wlr_output->enabled && !only)
-				wlr_output_layout_add_auto(output_layout, m->wlr_output);
+			if (m->wlr_output->enabled)
+				settings_output_place(m);
 		} else {
 			fprintf(stderr, "tidewm: output %s refused its settings\n", m->wlr_output->name);
 			if (!only)

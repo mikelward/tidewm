@@ -109,9 +109,11 @@ class Tidewm:
     user's own config never leaks in. With parent, another Tidewm, it runs
     nested in that one instead, on wlroots' Wayland backend, which gives it
     a keyboard of its own if the parent's seat has one, as a real keyboard
-    would be, rather than a client's virtual one."""
+    would be, rather than a client's virtual one. With on_x11 too, it runs
+    on wlroots' X11 backend, as a client of the parent's Xwayland, whose
+    outputs have a make and a model, as a headless one hasn't."""
 
-    def __init__(self, outputs=1, config=None, config_arg=True, parent=None):
+    def __init__(self, outputs=1, config=None, config_arg=True, parent=None, on_x11=False):
         self.dir = tempfile.TemporaryDirectory(prefix="tidewm-test-")
         os.chmod(self.dir.name, 0o700)
         self.clients = []
@@ -123,7 +125,10 @@ class Tidewm:
                    WLR_RENDERER="pixman", WLR_LIBINPUT_NO_DEVICES="1",
                    WLR_HEADLESS_OUTPUTS=str(outputs),
                    XDG_CONFIG_HOME=os.path.join(self.dir.name, "xdg"))
-        if parent:
+        if parent and on_x11:
+            env.update(WLR_BACKENDS="x11", WLR_X11_OUTPUTS=str(outputs),
+                       DISPLAY=parent.env["DISPLAY"])
+        elif parent:
             env.update(WLR_BACKENDS="wayland", WLR_WL_OUTPUTS=str(outputs),
                        WAYLAND_DISPLAY=os.path.join(parent.dir.name,
                                                     parent.env["WAYLAND_DISPLAY"]))

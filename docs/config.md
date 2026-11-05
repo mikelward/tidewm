@@ -127,17 +127,23 @@ for_window [title="Picture-in-Picture"] floating enable; move to output right
 
 ## Outputs
 
-As in sway, `output NAME SETTINGS` sets up the output called `NAME`, as
-`GET_OUTPUTS` names it, or every output for `*`. An output's own lines
-override `*`'s, and a later line for a name adds to an earlier one.
-`config.h`'s monitor rules still apply first, for what the file doesn't
-say, such as the layout.
+As in sway, `output NAME SETTINGS` sets up the output called `NAME`, or
+every output for `*`. `NAME` is its connector, as `GET_OUTPUTS` names it,
+or what it is, so its settings follow it from one port to another: sway's
+identifier, its make, model and serial joined by spaces, with `Unknown`
+for any it doesn't give, or Hyprland's description, which leaves those
+out and has no commas, as `"Dell Inc. DELL U2720Q 1234ABC"`. Quote a name
+with spaces. An output's own lines override `*`'s, and one naming what it
+is overrides one naming its connector, as in sway; a later line for a
+name adds to an earlier one. `config.h`'s monitor rules still apply
+first, for what the file doesn't say, such as the layout.
 
 | Setting | Does |
 |---|---|
 | `mode WIDTHxHEIGHT[@HZ]` | The mode, `Hz` or not after the rate, as `2560x1440@144Hz`. It's one the output lists, the fastest at that size if no rate is given, or else a custom mode. `resolution` and `res` say the same |
 | `scale S` | The scale, above 0 and up to 10 |
 | `position X Y` | Where it is in the layout, in logical pixels; `pos` and `X,Y` work too |
+| `position auto-right`, `auto-left`, `auto-up`, `auto-down` | Beside the others, on that side, as Hyprland's monitor rules place it; `auto` is `auto-right`, where an output without a position goes |
 | `transform T` | `normal`, `90`, `180`, `270`, `flipped`, or `flipped-` one of those |
 | `enable`, `disable` | Turns it on or off; a disabled output's windows move to the focused one |
 
@@ -153,9 +159,18 @@ position given while it's disabled, by the command or its line, is used
 once it's enabled. Enabling or disabling an output wakes it from the power
 saving an idle daemon may have put it in.
 
+An output without a position, or with an `auto` one, is placed as
+Hyprland places monitors: in the order they were connected, each beside
+the outputs given positions, those placed before it and the origin, at 0
+across. So one `auto-left` of an output at 0, 0 is at minus its width.
+They move when an output beside them changes size or goes. One that an
+output management tool such as `wlr-randr` or kanshi moves stays where
+it was put, until a reload.
+
 ```
 output eDP-1 scale 1.5
 output DP-1 mode 2560x1440@144Hz position 1707 0
+output "Dell Inc. DELL U2720Q 1234ABC" position auto-up
 output HDMI-A-1 disable
 ```
 
