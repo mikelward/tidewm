@@ -98,10 +98,12 @@ lands with a test.
 - **Window rules** (#15): `for_window [criteria] commands`, matching
   `app_id`, `class`, `instance`, `title` and `shell` by regular
   expression, in place of `config.h`'s rules once a file is loaded.
-- **Layouts** (#19, #20, #21): new windows join the end of the stack;
+- **Layouts** (#19, #20, #21, #55): new windows join the end of the stack;
   three-column and two columns + stack beside tile and monocle, with
   tide's geometry; a layout, mfact and nmaster per workspace part, from
-  its monitor's aspect; the `layout` event.
+  its monitor's aspect; the `layout` event. The config file's
+  `default_layout`, `ultrawide_aspect`, `layout_defaults` and `new_window`
+  lines set them as tide's Layouts page does.
 - **Fullscreen on open** (#27): a window the focus guard holds goes
   fullscreen once you go to it, and leaves a fullscreen window you're in
   as it is until then; focus ends a fullscreen that would hide it; an X11
@@ -262,10 +264,14 @@ lands with a test.
   rest start from `config.h`'s monitor rule. Each workspace's part on a
   monitor keeps each layout's, so switching back finds it as it was.
   Reversible.
-- **A part's first layout** (#21): `threecol` from an aspect of 2.1, else
-  the monitor rule's, built in. tide's SPEC makes the modes and where
-  ultrawide begins settings; they can come to the config file with the
-  layouts' `mfact` and `nmaster`. Reversible.
+- **A part's first layout** (#21, #55): `threecol` from an aspect of 2.1,
+  else the monitor rule's, unless the config file's `default_layout` and
+  `ultrawide_aspect` lines say otherwise. Reversible.
+- **A reload resets mfact and nmaster only when their defaults change**
+  (#55): on Hyprland, tide's layouts reload on their own, and every
+  workspace's layouts start from the defaults again; tidewm has one
+  reload for every setting, so one for another page leaves a split
+  you've changed as it is. Reversible.
 - **The layout event** (#21): tidewm's own event, `0x8000001e`, as sway
   has none, giving the part's layout by tide's name and its symbol; and a
   `layout` field in `GET_WORKSPACES` and the tree. Reversible before

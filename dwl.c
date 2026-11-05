@@ -279,8 +279,6 @@ struct Monitor {
 	const Layout *rule_lt; /* config.h's monitor rule's */
 	int lt_settled; /* its layout fields hold the current workspace's part */
 	int lt_pending; /* its layout event waits until it's arranged */
-	float rule_mfact; /* the rule's, for a layout without defaults of its own */
-	int rule_nmaster;
 };
 
 typedef struct {
@@ -1357,8 +1355,8 @@ createmon(struct wl_listener *listener, void *data)
 	/* Initialize monitor state using configured rules */
 	for (r = monrules; r < END(monrules); r++) {
 		if (!r->name || strstr(wlr_output->name, r->name)) {
-			m->mfact = m->rule_mfact = r->mfact;
-			m->nmaster = m->rule_nmaster = r->nmaster;
+			m->mfact = r->mfact;
+			m->nmaster = r->nmaster;
 			m->lt[0] = m->rule_lt = r->lt;
 			m->lt[1] = &layouts[LENGTH(layouts) > 1 && r->lt != &layouts[1]];
 			strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
@@ -2170,7 +2168,7 @@ void
 mapnotify(struct wl_listener *listener, void *data)
 {
 	/* Called when the surface is mapped, or ready to display on-screen. */
-	Client *p = NULL;
+	Client *p = NULL, *was_focused;
 	Client *w, *c = wl_container_of(listener, c, map);
 	Monitor *m;
 	char *grant_ws;
@@ -2248,7 +2246,10 @@ mapnotify(struct wl_listener *listener, void *data)
 	}
 
 	/* Insert this client into client lists: at the end of the stack, so
-	 * the master stays put */
+	 * the master stays put, unless new_window says otherwise once the
+	 * rules have placed it. The window it may go next after is the one
+	 * that had focus as it opened. */
+	was_focused = focustop(selmon);
 	wl_list_insert(clients.prev, &c->link);
 	wl_list_insert(&fstack, &c->flink);
 
@@ -2281,6 +2282,7 @@ mapnotify(struct wl_listener *listener, void *data)
 	/* The config file's for_window rules, whose events wait for the new one */
 	settings_apply_rules(c);
 	fg_mapping = NULL;
+	lt_place_new(c, was_focused);
 	if (c->isfloating && !c->isfullscreen && c->mon) {
 #ifdef XWAYLAND
 		/* An X11 window's size, at the scale of the monitor it has now,

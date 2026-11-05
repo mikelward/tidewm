@@ -178,6 +178,11 @@ and 60% from 3.2, in any layout, as tide's SPEC §1 has it. Below that it
 has the whole width. The config file's `single_window` lines change the
 widths and where they start.
 
+The config file can also say which layout a workspace starts in on a
+monitor, by its aspect, where ultrawide begins, the `mfact` and `nmaster`
+each layout starts with, and where a new window goes, as tide's Layouts
+page sets them ([`docs/config.md`](docs/config.md)).
+
 ### Dimming
 
 With `dim_inactive 0.07` in the config file, or a `dim_inactive` above 0

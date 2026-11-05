@@ -228,13 +228,43 @@ twocol(Monitor *m)
 	free(boxes);
 }
 
+/* lt's mfact and nmaster on the output called output, before they're
+ * changed: the config file's layout_defaults, then tide's, for the layouts
+ * that have them, then config.h's monitor rule's */
+static void
+lt_mode_defaults(const char *output, const Layout *lt, float *mfact, int *nmaster)
+{
+	const MonitorRule *r;
+	size_t i;
+	for (r = monrules; r < END(monrules); r++) {
+		if (!r->name || strstr(output, r->name)) {
+			*mfact = r->mfact;
+			*nmaster = r->nmaster;
+			break;
+		}
+	}
+	for (i = 0; i < LENGTH(lt_defaults); i++) {
+		if (lt->arrange == lt_defaults[i].arrange) {
+			*mfact = lt_defaults[i].mfact;
+			*nmaster = lt_defaults[i].nmaster;
+		}
+	}
+	for (i = 0; settings && i < LENGTH(settings_lt_modes); i++) {
+		if (lt->arrange != settings_lt_modes[i].arrange)
+			continue;
+		if (settings->layout_defaults[i].has_mfact)
+			*mfact = settings->layout_defaults[i].mfact;
+		if (settings->layout_defaults[i].has_nmaster)
+			*nmaster = settings->layout_defaults[i].nmaster;
+	}
+}
+
 /* Keeps old's mfact and nmaster on m, and gives m those it had for lt, or
- * lt's defaults: its own, else config.h's monitor rule's. */
+ * lt's defaults. */
 static void
 lt_switch(Monitor *m, const Layout *old, const Layout *lt)
 {
 	size_t i;
-	int found = 0;
 	if (old == lt)
 		return;
 	for (i = 0; i < LENGTH(m->modes); i++) {
@@ -252,17 +282,7 @@ lt_switch(Monitor *m, const Layout *old, const Layout *lt)
 			return;
 		}
 	}
-	for (i = 0; i < LENGTH(lt_defaults); i++) {
-		if (lt->arrange == lt_defaults[i].arrange) {
-			m->mfact = lt_defaults[i].mfact;
-			m->nmaster = lt_defaults[i].nmaster;
-			found = 1;
-		}
-	}
-	if (!found) {
-		m->mfact = m->rule_mfact;
-		m->nmaster = m->rule_nmaster;
-	}
+	lt_mode_defaults(m->wlr_output->name, lt, &m->mfact, &m->nmaster);
 }
 
 /* A workspace's part on a monitor, while another workspace is current:
@@ -282,8 +302,13 @@ typedef struct {
 
 static struct wl_list lt_parts = {&lt_parts, &lt_parts};
 
-/* Where an ultrawide monitor begins, as tide's SPEC §6.1 has it */
-#define LT_ULTRAWIDE 2.1
+/* Where an ultrawide monitor begins: the config file's ultrawide_aspect,
+ * else tide's SPEC §6.1's */
+static double
+lt_ultrawide(void)
+{
+	return settings && settings->ultrawide_aspect > 0 ? settings->ultrawide_aspect : 2.1;
+}
 
 static LtPart *
 lt_part(Workspace *ws, Monitor *m, int make)
@@ -301,32 +326,135 @@ lt_part(Workspace *ws, Monitor *m, int make)
 	return p;
 }
 
-/* A new part's layouts: three-column on an ultrawide monitor, if it's in
- * config.h's layouts, else the monitor rule's, as dwl's, with the other
- * layout to toggle to; each with its own mfact and nmaster. */
+/* The layout a new part on m starts in: the config file's default_layout
+ * for the monitor's aspect, else three-column on an ultrawide, else the
+ * monitor rule's, as dwl's, if config.h's layouts have it */
+static const Layout *
+lt_first_layout(Monitor *m)
+{
+	const Layout *lt = m->rule_lt ? m->rule_lt : &layouts[0];
+	int wide = m->m.height > 0 && m->m.width >= lt_ultrawide() * m->m.height;
+	void (*want)(Monitor *) = wide ? threecol : NULL;
+	size_t i;
+	if (settings && settings->first_layout[wide])
+		want = settings->first_layout[wide];
+	for (i = 0; want && i < LENGTH(layouts); i++)
+		if (layouts[i].arrange == want)
+			lt = &layouts[i];
+	return lt;
+}
+
+/* A new part's layouts: lt_first_layout's, with the other layout to
+ * toggle to; each with its own mfact and nmaster. */
 static void
 lt_defaults_for(Monitor *m)
 {
-	const Layout *lt = m->rule_lt ? m->rule_lt : &layouts[0];
-	size_t i;
-	if (m->m.height > 0 && m->m.width >= LT_ULTRAWIDE * m->m.height)
-		for (i = 0; i < LENGTH(layouts); i++)
-			if (layouts[i].arrange == threecol)
-				lt = &layouts[i];
+	const Layout *lt = lt_first_layout(m);
 	memset(m->modes, 0, sizeof(m->modes));
 	m->lt[0] = lt;
 	m->lt[1] = &layouts[LENGTH(layouts) > 1 && lt != &layouts[1]];
 	m->sellt = 0;
 	/* Not the layout before it, which lt_switch would keep: fresh values */
-	m->mfact = m->rule_mfact;
-	m->nmaster = m->rule_nmaster;
-	for (i = 0; i < LENGTH(lt_defaults); i++) {
-		if (lt->arrange == lt_defaults[i].arrange) {
-			m->mfact = lt_defaults[i].mfact;
-			m->nmaster = lt_defaults[i].nmaster;
+	lt_mode_defaults(m->wlr_output->name, lt, &m->mfact, &m->nmaster);
+	strncpy(m->ltsymbol, lt->symbol, LENGTH(m->ltsymbol));
+}
+
+/* Whether t tiles in the same part as c: its monitor's share of its
+ * workspace, not floating, fullscreen or minimized */
+static int
+lt_beside(const Client *t, const Client *c)
+{
+	return t != c && t->mon == c->mon && t->ws == c->ws
+		&& !t->isfloating && !t->isfullscreen && !t->isminimized;
+}
+
+/* How many tiled windows come first as masters in ws's part on m, as its
+ * layout arranges them: monocle's first counting as one, threecol's at
+ * least one, twocol's one to 15. A part not made yet, of a workspace not
+ * shown there since it began, counts as it will start. */
+static int
+lt_masters(Monitor *m, Workspace *ws)
+{
+	const Layout *lt = m->lt[m->sellt];
+	int nmaster = m->nmaster;
+	float mfact;
+	LtPart *p;
+	if (ws != curws || !m->lt_settled) {
+		if ((p = lt_part(ws, m, 0))) {
+			lt = p->lt[p->sellt];
+			nmaster = p->nmaster;
+		} else {
+			lt = lt_first_layout(m);
+			lt_mode_defaults(m->wlr_output->name, lt, &mfact, &nmaster);
 		}
 	}
-	strncpy(m->ltsymbol, lt->symbol, LENGTH(m->ltsymbol));
+	if (lt->arrange == monocle)
+		return 1;
+	if (lt->arrange == threecol)
+		return MAX(nmaster, 1);
+	if (lt->arrange == twocol)
+		return MIN(MAX(nmaster, 1), 15);
+	return nmaster;
+}
+
+/* Puts new window c, once the rules have given it its monitor and
+ * workspace, where the config file's new_window says in the clients'
+ * order, which is the tiled order, as tide's layout does: at the end of
+ * the stack, where it already is, so the master stays put; at its top,
+ * just after the masters; next after focused, the window that had focus
+ * as it opened, if that tiles beside it; or as the master. Where there's
+ * nothing to go after, it stays at the end. */
+static void
+lt_place_new(Client *c, Client *focused)
+{
+	int rule = settings && settings->new_window >= 0 ? settings->new_window : NewEnd;
+	Client *t, *after = NULL, *first = NULL;
+	int masters, n = 0;
+	if (rule == NewEnd || !c->mon || c->isfloating || c->isfullscreen)
+		return;
+	wl_list_remove(&c->link);
+	if (rule == NewMaster) {
+		wl_list_insert(&clients, &c->link);
+	} else if (rule == NewTop) {
+		masters = lt_masters(c->mon, c->ws);
+		wl_list_for_each(t, &clients, link) {
+			if (!lt_beside(t, c))
+				continue;
+			if (!first)
+				first = t;
+			if (n++ == masters)
+				break;
+			after = t;
+		}
+		/* Before the stack's first window, or with no stack, last */
+		wl_list_insert(n <= masters ? clients.prev : after ? &after->link : first->link.prev,
+				&c->link);
+	} else if (focused && lt_beside(focused, c)) {
+		wl_list_insert(&focused->link, &c->link);
+	} else {
+		wl_list_insert(clients.prev, &c->link);
+	}
+	arrange(c->mon);
+}
+
+/* Every part's mfact and nmaster, each layout's, from the defaults again,
+ * once a load changes them, each part keeping its layouts */
+static void
+lt_reset_modes(void)
+{
+	Monitor *m;
+	LtPart *p;
+	wl_list_for_each(p, &lt_parts, link) {
+		memset(p->modes, 0, sizeof(p->modes));
+		lt_mode_defaults(p->output, p->lt[p->sellt], &p->mfact, &p->nmaster);
+	}
+	wl_list_for_each(m, &mons, link) {
+		if (!m->lt_settled)
+			continue;
+		memset(m->modes, 0, sizeof(m->modes));
+		lt_mode_defaults(m->wlr_output->name, m->lt[m->sellt], &m->mfact, &m->nmaster);
+		arrange(m);
+	}
 }
 
 /* Keeps m's layouts as ws's part there */

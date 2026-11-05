@@ -198,6 +198,135 @@ class SingleWindowConfigTest(LayoutHelpers):
             self.assertIn(error, result["error"], line)
 
 
+class LayoutLinesTest(LayoutHelpers):
+    """tidewm's own layout lines, as tide's Layouts page sets them: where a
+    part's first layout is ultrawide's, which layouts parts start in, each
+    layout's mfact and nmaster, and where a new window goes."""
+    CONFIG = "layout_defaults tile mfact 0.6 nmaster 2\n"
+
+    def reload(self, config):
+        self.wm.write_config(config)
+        self.command(self.connect(), "reload")
+
+    def layout_of(self, workspace):
+        self.command(self.connect(), f"workspace {workspace}")
+        return {w["name"]: w["layout"] for w in self.connect().request(GET_WORKSPACES)}[workspace]
+
+    def order(self, cons):
+        """The windows' app IDs in tiled order: tile's master column, then
+        its stack, each from the top."""
+        return [c["app_id"] for c in sorted(cons, key=lambda c: (self.box(c)[0], self.box(c)[1]))]
+
+    def test_a_layout_starts_with_its_lines_mfact_and_nmaster(self):
+        first, second, third = self.windows_in("tile", 3)
+        self.assertEqual(self.box(first), self.column(0, 0.6, 0, 0.5))
+        self.assertEqual(self.box(second), self.column(0, 0.6, 0.5, 1))
+        self.assertEqual(self.box(third)[0], edge(self.x, self.w, 0.6))
+        # threecol has no line: tide's own 0.5
+        self.command(self.connect(), "layout threecol")
+        self.assertEqual(self.box(first), self.column(0.25, 0.75))
+
+    def test_new_parts_start_in_the_default_layout_for_their_aspect(self):
+        self.reload("default_layout normal monocle\ndefault_layout ultrawide twocol\n")
+        self.assertEqual(self.layout_of("narrow"), "monocle")
+        self.command(self.connect(), "output HEADLESS-1 mode 3440x1440")
+        self.assertEqual(self.layout_of("wide"), "twocol")
+
+    def test_ultrawide_begins_where_its_line_says(self):
+        self.reload("ultrawide_aspect 1.5\n")
+        self.assertEqual(self.layout_of("wide"), "threecol")  # 1280x720 is 1.78
+        self.reload("ultrawide_aspect 2\n")
+        self.assertEqual(self.layout_of("narrow"), "tile")
+
+    def test_a_reload_that_changes_a_layouts_defaults_starts_it_again(self):
+        master = self.windows_in("tile", 3)[0]
+        self.command(self.connect(), "mfact 0.7")
+        self.reload(self.CONFIG + "new_window end\n")  # the same defaults
+        self.assertEqual(self.box(master)[2], edge(self.x, self.w, 0.7) - self.x)
+        # Its own nmaster goes too, back to one
+        self.reload("layout_defaults tile mfact 0.4\n")
+        self.assertEqual(self.box(master), self.column(0, 0.4))
+        layouts = {w["name"]: w["layout"] for w in self.connect().request(GET_WORKSPACES)}
+        self.assertEqual(layouts["1"], "tile")
+
+    def test_where_a_new_window_goes(self):
+        for rule, focus, want in [
+            ("end", None, ["w0", "w1", "w2", "w3"]),
+            ("top", None, ["w0", "w3", "w1", "w2"]),
+            ("next", "w1", ["w0", "w1", "w3", "w2"]),
+            ("master", None, ["w3", "w0", "w1", "w2"]),
+        ]:
+            with self.subTest(rule):
+                self.reload("new_window end\n")
+                self.command(self.connect(), f"workspace {rule}")
+                cons = self.windows_in("tile", 3)
+                if focus:
+                    con = next(c for c in cons if c["app_id"] == f"test.{focus}")
+                    self.command(self.connect(), f"[con_id={con['id']}] focus")
+                self.reload(f"new_window {rule}\n")
+                cons.append(self.open_window(self.ipc, "test.w3")[1])
+                self.assertEqual(self.order(cons), [f"test.{w}" for w in want])
+
+    def test_monocles_top_is_after_its_first_window(self):
+        self.reload("new_window top\n")
+        cons = self.windows_in("monocle", 2)
+        cons.append(self.open_window(self.ipc, "test.w2")[1])
+        self.command(self.connect(), "layout tile")
+        self.assertEqual(self.order(cons), ["test.w0", "test.w2", "test.w1"])
+
+    def test_a_window_a_rule_moves_goes_where_new_window_says_there(self):
+        rule = "for_window [app_id=test.away] move to workspace far\n"
+        self.reload(rule)
+        self.command(self.connect(), "workspace far")
+        cons = self.windows_in("tile", 2)
+        self.command(self.connect(), "workspace 1")
+        self.reload(rule + "new_window master\n")
+        cons.append(self.open_window(self.ipc, "test.away")[1])
+        self.command(self.connect(), "workspace far")
+        self.assertEqual(self.order(cons), ["test.away", "test.w0", "test.w1"])
+
+    def test_top_counts_the_masters_the_layout_has(self):
+        # threecol has a master even at nmaster 0
+        master, other = self.windows_in("threecol", 2)
+        self.command(self.connect(), "nmaster 0")
+        self.reload(self.CONFIG + "new_window top\n")
+        new = self.open_window(self.ipc, "test.w2")[1]
+        self.assertEqual(self.box(master), self.column(0.25, 0.75))
+        self.assertEqual(self.box(new), self.column(0.75, 1))
+        self.assertEqual(self.box(other), self.column(0, 0.25))
+
+    def test_top_in_a_part_not_made_yet_counts_the_masters_it_starts_with(self):
+        self.reload("new_window top\nfor_window [app_id=test.far] move to workspace far\n")
+        self.command(self.connect(), "nmaster 2")  # here, not there
+        ids = [self.open_window(self.ipc, "test.far")[1]["id"] for _ in range(3)]
+        self.command(self.connect(), "workspace far")
+        boxes = {i: self.windows()[i]["rect"] for i in ids}
+        order = sorted(ids, key=lambda i: (boxes[i]["x"], boxes[i]["y"]))
+        self.assertEqual(order, [ids[0], ids[2], ids[1]])
+
+    def test_a_bad_line_is_an_error(self):
+        for line, error in [
+            ("ultrawide_aspect 0\n", ":1: ultrawide_aspect takes a number from 0.1 to 100"),
+            ("ultrawide_aspect wide\n", ":1: ultrawide_aspect takes a number from 0.1 to 100"),
+            ("default_layout normal floating\n", ":1: default_layout takes normal or ultrawide"),
+            ("default_layout portrait tile\n", ":1: default_layout takes normal or ultrawide"),
+            ("layout_defaults monocle mfact 0.5\n", ":1: layout_defaults takes tile, threecol or twocol"),
+            ("layout_defaults tile\n", ":1: layout_defaults takes tile, threecol or twocol"),
+            ("layout_defaults tile mfact 0.95\n", ":1: layout_defaults tile: mfact takes a number from 0.1 to 0.9"),
+            ("layout_defaults threecol nmaster 0\n",
+             ":1: layout_defaults threecol: nmaster takes a whole number from 1 to 100"),
+            ("layout_defaults tile nmaster 1.5\n",
+             ":1: layout_defaults tile: nmaster takes a whole number from 0 to 100"),
+            ("layout_defaults tile split 2\n", ":1: layout_defaults tile: no setting is called split"),
+            ("new_window first\n", ":1: new_window takes end, top, next or master"),
+            ("mode m {\nnew_window top\n}\n", ":2: new_window can't be in a mode"),
+        ]:
+            self.wm.write_config(line)
+            result, = self.connect().request(RUN_COMMAND, "reload")
+            self.assertFalse(result["success"], line)
+            self.assertIn(error, result["error"], line)
+
+
 class WorkspaceLayoutTest(TidewmTest):
     """Each workspace's part on a monitor keeps its own layout, mfact and
     nmaster, as tide's SPEC §6.1 has it."""
