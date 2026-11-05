@@ -8,8 +8,8 @@ import subprocess
 import unittest
 
 from harness import (EVENT_BINDING, EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MODES,
-                     GET_BINDING_STATE, GET_CONFIG, GET_VERSION, ROOT, RUN_COMMAND,
-                     TIMEOUT, TidewmTest)
+                     GET_BINDING_STATE, GET_BINDINGS, GET_CONFIG, GET_VERSION, ROOT,
+                     RUN_COMMAND, TIMEOUT, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
 
@@ -154,6 +154,49 @@ class ConfigTest(KeysTest):
         self.alt("2")
         self.assertEqual(self.shown(ipc), "2")
         self.assertEqual(self.connect().request(GET_CONFIG)["config"], "")
+
+
+class BindingsTest(TidewmTest):
+    """GET_BINDINGS, tidewm's own: the config file's bindings, for a shell's
+    list of keyboard shortcuts."""
+    CONFIG = """set $mod Mod4
+bindsym $mod+Return exec foot
+bindsym --release $mod+d exec launcher
+mode resize {
+    bindsym --locked Escape mode default
+}
+bindsym $mod+r mode resize
+bindswitch --locked lid:on output eDP-1 disable
+bindswitch tablet:toggle workspace tablet
+"""
+
+    def test_each_binding_with_its_keys_command_and_mode(self):
+        def key(keys, command, mode="default", release=False, locked=False):
+            return {"type": "key", "keys": keys, "command": command, "mode": mode,
+                    "release": release, "locked": locked}
+
+        def switch(keys, command, locked=False):
+            return {"type": "switch", "keys": keys, "command": command, "mode": "default",
+                    "release": False, "locked": locked}
+
+        self.assertEqual(self.connect().request(GET_BINDINGS), [
+            key("Mod4+Return", "exec foot"),
+            key("Mod4+d", "exec launcher", release=True),
+            key("Mod4+r", "mode resize"),
+            key("Escape", "mode default", mode="resize", locked=True),
+            switch("lid:on", "output eDP-1 disable", locked=True),
+            switch("tablet:toggle", "workspace tablet"),
+        ])
+
+    def test_a_reload_lists_the_new_ones(self):
+        self.wm.write_config("bindsym Mod1+x workspace x\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual([b["keys"] for b in self.connect().request(GET_BINDINGS)], ["Mod1+x"])
+
+
+class NoConfigBindingsTest(TidewmTest):
+    def test_without_a_file_there_are_none(self):
+        self.assertEqual(self.connect().request(GET_BINDINGS), [])
 
 
 class IncludeTest(KeysTest):

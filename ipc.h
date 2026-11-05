@@ -25,7 +25,7 @@
 enum { IpcCommand = 0, IpcGetWorkspaces = 1, IpcSubscribe = 2,
 	IpcGetOutputs = 3, IpcGetTree = 4, IpcGetVersion = 7, IpcGetBindingModes = 8,
 	IpcGetConfig = 9, IpcSendTick = 10, IpcGetBindingState = 12, IpcGetInputs = 100,
-	IpcGetSeats = 101 };
+	IpcGetSeats = 101, IpcGetBindings = 200 /* tidewm's own */ };
 /* Event numbers, as sway sends them with IPC_EVENT_BIT set */
 enum { IpcEvWorkspace = 0, IpcEvOutput = 1, IpcEvMode = 2, IpcEvWindow = 3,
 	IpcEvBinding = 5, IpcEvShutdown = 6, IpcEvTick = 7, IpcEvInput = 21,
@@ -64,6 +64,7 @@ static const char *settings_loaded_path(void);
 static int settings_enter_mode(char *name);
 static const char *settings_mode_now(void);
 static struct json_object *settings_json_modes(void);
+static struct json_object *settings_json_bindings(void);
 static int settings_output_command(char *args, char *err, size_t errsize, int *parse);
 static int settings_input_command(char *args, char *err, size_t errsize, int *parse);
 static struct json_object *settings_json_inputs(void);
@@ -1159,6 +1160,8 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 		return ipc_send_json(cl, type, ipc_json_version());
 	case IpcGetBindingModes:
 		return ipc_send_json(cl, type, settings_json_modes());
+	case IpcGetBindings:
+		return ipc_send_json(cl, type, settings_json_bindings());
 	case IpcGetBindingState: {
 		struct json_object *state = json_object_new_object();
 		json_object_object_add(state, "name", json_object_new_string(settings_mode_now()));
