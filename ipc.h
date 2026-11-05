@@ -243,6 +243,37 @@ ipc_transform_name(enum wl_output_transform t)
 	return (unsigned)t < LENGTH(names) && names[t] ? names[t] : "normal";
 }
 
+/* tidewm's own: the monitor's mapped layer surfaces, from the bottom
+ * layer up, each its namespace, layer, place in the layout and exclusive
+ * zone, so tide's doctor can tell a second bar from its own. */
+static struct json_object *
+ipc_json_layers(Monitor *m)
+{
+	static const char *const names[] = {"background", "bottom", "top", "overlay"};
+	struct json_object *list = json_object_new_array(), *obj;
+	struct wlr_box box;
+	LayerSurface *l;
+	size_t i;
+	for (i = 0; i < LENGTH(m->layers); i++) {
+		wl_list_for_each(l, &m->layers[i], link) {
+			if (!l->mapped)
+				continue;
+			box = (struct wlr_box){l->scene->node.x, l->scene->node.y,
+				l->layer_surface->surface->current.width,
+				l->layer_surface->surface->current.height};
+			obj = json_object_new_object();
+			json_object_object_add(obj, "namespace",
+					json_object_new_string(l->layer_surface->namespace ? l->layer_surface->namespace : ""));
+			json_object_object_add(obj, "layer", json_object_new_string(names[i]));
+			json_object_object_add(obj, "rect", ipc_json_box(box));
+			json_object_object_add(obj, "exclusive_zone",
+					json_object_new_int(l->layer_surface->current.exclusive_zone));
+			json_object_array_add(list, obj);
+		}
+	}
+	return list;
+}
+
 static struct json_object *
 ipc_json_output(Monitor *m)
 {
@@ -268,6 +299,8 @@ ipc_json_output(Monitor *m)
 	json_object_object_add(mode, "height", json_object_new_int(o->height));
 	json_object_object_add(mode, "refresh", json_object_new_int(o->refresh));
 	json_object_object_add(obj, "current_mode", mode);
+	json_object_object_add(obj, "window_area", ipc_json_box(m->w));
+	json_object_object_add(obj, "layers", ipc_json_layers(m));
 	return obj;
 }
 
