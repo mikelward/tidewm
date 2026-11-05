@@ -9,9 +9,12 @@
  * docs/config.md says what a file can hold. dwl.c includes this file,
  * after ipc.h.
  */
+#include <glob.h>
 #include <regex.h>
 
 #define SETTINGS_MAX_SIZE (1u << 20)
+/* How deep include lines may nest: deeper is a file that includes itself */
+#define SETTINGS_MAX_DEPTH 10
 
 typedef struct {
 	uint32_t mods;
@@ -115,7 +118,14 @@ typedef struct {
 	int has_scroll_factor;
 	double scroll_factor; /* 0 or more */
 	unsigned int xkb_line; /* the line that last gave an XKB name */
+	const char *xkb_file; /* the file that line is in; NULL for the config file */
 } InputConfig;
+
+/* A file an include line read, for GET_CONFIG */
+typedef struct {
+	char *path;
+	char *text; /* NULL if it was gone by the time it was read */
+} SettingsInclude;
 
 typedef struct {
 	Mode *modes; /* modes[0] is "default", the file's top level */
@@ -135,6 +145,8 @@ typedef struct {
 	size_t nswitches;
 	double grant_seconds, prompt_seconds; /* 0: not given */
 	char *text; /* the file, as read, for GET_CONFIG */
+	SettingsInclude *includes; /* the files its include lines read, in order */
+	size_t nincludes;
 } Settings;
 
 typedef struct {
@@ -143,6 +155,9 @@ typedef struct {
 } SettingsVar;
 
 static char settings_path[PATH_MAX];
+/* The file being read, for its errors: an included one, or NULL for the
+ * config file */
+static const char *settings_file;
 static Settings *settings; /* NULL: config.h's keys */
 static struct json_object *settings_errors; /* the last load's, as strings */
 static size_t settings_mode; /* the current mode, in settings->modes */
@@ -191,6 +206,11 @@ settings_free(Settings *s)
 	for (i = 0; i < s->nswitches; i++)
 		free(s->switches[i].command);
 	free(s->switches);
+	for (i = 0; i < s->nincludes; i++) {
+		free(s->includes[i].path);
+		free(s->includes[i].text);
+	}
+	free(s->includes);
 	free(s->text);
 	free(s);
 }
@@ -209,11 +229,12 @@ settings_strdup(const char *s, size_t n)
 static void
 settings_error(struct json_object *errors, unsigned int line, const char *fmt, ...)
 {
+	const char *file = settings_file ? settings_file : settings_path;
 	char msg[512];
 	int n;
 	va_list ap;
-	n = line ? snprintf(msg, sizeof(msg), "%s:%u: ", settings_path, line)
-		: snprintf(msg, sizeof(msg), "%s: ", settings_path);
+	n = line ? snprintf(msg, sizeof(msg), "%s:%u: ", file, line)
+		: snprintf(msg, sizeof(msg), "%s: ", file);
 	if (n < 0 || (size_t)n >= sizeof(msg))
 		n = 0;
 	va_start(ap, fmt);
@@ -802,6 +823,7 @@ settings_add_input(Settings *s, char *name, char *setting, unsigned int line,
 	for (i = 0; i < InXkbLast; i++)
 		if (!strncmp(setting, settings_xkb_names[i], strlen(settings_xkb_names[i])))
 			ic->xkb_line = line;
+			ic->xkb_file = settings_file;
 	return 1;
 }
 
@@ -1078,8 +1100,11 @@ settings_check_keymap(const InputConfig *const lines[3], const InputConfig *blam
 		xkb_keymap_unref(keymap);
 		return 1;
 	}
+	/* The error is at that line, in whichever file it's in */
+	settings_file = blame->xkb_file;
 	settings_error(errors, blame->xkb_line, "input %s: XKB can't make a keymap of its xkb_ settings",
 			blame->name);
+	settings_file = NULL;
 	return 0;
 }
 
@@ -1114,23 +1139,22 @@ settings_check_keymaps(Settings *s, struct json_object *errors)
 	return ok;
 }
 
-/* Parses text, which it keeps, into new settings, or returns NULL and
- * adds each error to errors. */
-static Settings *
-settings_parse(char *text, struct json_object *errors)
+static int settings_include(Settings *s, char *pattern, unsigned int line,
+		SettingsVar **vars, size_t *nvars, int depth, struct json_object *errors);
+
+/* Parses one file's text into s, adding each error to errors: the config
+ * file, at depth 0, or one an include line read, at the top level, so a
+ * mode or input block it opens must close in it. Variables carry from file
+ * to file, in the order they're read. Returns whether it had no errors. */
+static int
+settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, int depth,
+		struct json_object *errors)
 {
-	Settings *s = ecalloc(1, sizeof(*s));
-	SettingsVar *vars = NULL;
-	size_t nvars = 0, i, len, mode = 0;
+	size_t len, mode = 0;
 	unsigned int line = 0, mode_line = 0, input_line = 0;
 	char *start, *end, *raw, *expanded, *p, *word, *name, *input = NULL;
 	int ok = 1;
 
-	s->text = text;
-	s->focus_guard = -1;
-	s->dim_inactive = -1;
-	s->xwayland_scaling = -1;
-	settings_add_mode(s, "default");
 	for (start = text; *start; start = *end ? end + 1 : end) {
 		line++;
 		end = strchr(start, '\n');
@@ -1152,13 +1176,13 @@ settings_parse(char *text, struct json_object *errors)
 			while (isspace((unsigned char)*p))
 				p++;
 			name = settings_word(&p);
-			expanded = settings_substitute(p, vars, nvars);
-			ok &= settings_set(&vars, &nvars, name, expanded, line, errors);
+			expanded = settings_substitute(p, *vars, *nvars);
+			ok &= settings_set(vars, nvars, name, expanded, line, errors);
 			free(expanded);
 			free(raw);
 			continue;
 		}
-		expanded = settings_substitute(p, vars, nvars);
+		expanded = settings_substitute(p, *vars, *nvars);
 		p = expanded;
 		/* In an input block, each line is a setting for its devices */
 		if (input && strcmp(p, "}")) {
@@ -1237,6 +1261,16 @@ settings_parse(char *text, struct json_object *errors)
 			} else {
 				ok &= settings_focus_guard(s, p, line, errors);
 			}
+		} else if (!strcasecmp(word, "include")) {
+			if (mode) {
+				settings_error(errors, line, "include can't be in a mode");
+				ok = 0;
+			} else if (!(name = settings_name(&p)) || *p) {
+				settings_error(errors, line, "include needs a file, or a pattern, and nothing after");
+				ok = 0;
+			} else {
+				ok &= settings_include(s, name, line, vars, nvars, depth, errors);
+			}
 		} else if (!strcasecmp(word, "for_window")) {
 			if (mode) {
 				settings_error(errors, line, "for_window can't be in a mode");
@@ -1285,6 +1319,113 @@ settings_parse(char *text, struct json_object *errors)
 		free(input);
 		ok = 0;
 	}
+	return ok;
+}
+
+static int settings_read(const char *path, char **text, struct json_object *errors);
+
+/* src into dst with glob's special characters escaped, so a directory is
+ * taken as it is, not as a pattern. Returns 0 if it doesn't fit. */
+static int
+settings_glob_quote(char *dst, size_t size, const char *src)
+{
+	size_t n = 0;
+	for (; *src; src++) {
+		if (n + 2 >= size)
+			return 0;
+		if (strchr("*?[]\\", *src))
+			dst[n++] = '\\';
+		dst[n++] = *src;
+	}
+	dst[n] = '\0';
+	return 1;
+}
+
+/* include PATTERN: reads each file PATTERN matches, in order, as if its
+ * lines were here, as sway's does. ~/ is $HOME's, and a relative pattern
+ * is from the directory of the file it's in. A pattern nothing matches,
+ * such as a file that isn't written yet, includes nothing. */
+static int
+settings_include(Settings *s, char *pattern, unsigned int line, SettingsVar **vars,
+		size_t *nvars, int depth, struct json_object *errors)
+{
+	const char *home = getenv("HOME"), *outer = settings_file;
+	char path[PATH_MAX], dir[PATH_MAX], quoted[PATH_MAX], *slash, *text;
+	glob_t found;
+	size_t i;
+	int n = -1, r, ok = 1;
+
+	if (depth >= SETTINGS_MAX_DEPTH) {
+		settings_error(errors, line, "include %s: includes nest over %d deep, "
+				"as when a file includes itself", pattern, SETTINGS_MAX_DEPTH);
+		return 0;
+	}
+	/* Only the line's own pattern is one: the directory it's from is
+	 * escaped, whatever its name holds */
+	if (!strncmp(pattern, "~/", 2)) {
+		if (settings_glob_quote(quoted, sizeof(quoted), home ? home : ""))
+			n = snprintf(path, sizeof(path), "%s/%s", quoted, pattern + 2);
+	} else if (*pattern == '/') {
+		n = snprintf(path, sizeof(path), "%s", pattern);
+	} else {
+		snprintf(dir, sizeof(dir), "%s", outer ? outer : settings_path);
+		if ((slash = strrchr(dir, '/')))
+			*slash = '\0';
+		else
+			snprintf(dir, sizeof(dir), ".");
+		if (settings_glob_quote(quoted, sizeof(quoted), dir))
+			n = snprintf(path, sizeof(path), "%s/%s", quoted, pattern);
+	}
+	if (n < 0 || (size_t)n >= sizeof(path)) {
+		settings_error(errors, line, "include %s: the path is too long", pattern);
+		return 0;
+	}
+	if ((r = glob(path, 0, NULL, &found)) == GLOB_NOMATCH)
+		return 1;
+	if (r) {
+		settings_error(errors, line, "include %s: can't list what it matches", pattern);
+		return 0;
+	}
+	for (i = 0; i < found.gl_pathc; i++) {
+		SettingsInclude *inc;
+		s->includes = realloc(s->includes, (s->nincludes + 1) * sizeof(*s->includes));
+		if (!s->includes)
+			die("out of memory reading the config");
+		inc = &s->includes[s->nincludes++];
+		inc->path = settings_strdup(found.gl_pathv[i], strlen(found.gl_pathv[i]));
+		inc->text = NULL;
+		/* Its errors name it; inc may move as it includes others */
+		settings_file = inc->path;
+		if ((r = settings_read(settings_file, &text, errors)) > 0) {
+			inc->text = text;
+			ok &= settings_parse_text(s, text, vars, nvars, depth + 1, errors);
+		} else if (r < 0) {
+			ok = 0;
+		}
+		/* r == 0: gone since it was listed, so it includes nothing */
+		settings_file = outer;
+	}
+	globfree(&found);
+	return ok;
+}
+
+/* Parses text, which it keeps, and the files its include lines name, into
+ * new settings, or returns NULL and adds each error to errors. */
+static Settings *
+settings_parse(char *text, struct json_object *errors)
+{
+	Settings *s = ecalloc(1, sizeof(*s));
+	SettingsVar *vars = NULL;
+	size_t nvars = 0, i;
+	int ok;
+
+	s->text = text;
+	s->focus_guard = -1;
+	s->dim_inactive = -1;
+	s->xwayland_scaling = -1;
+	settings_add_mode(s, "default");
+	settings_file = NULL;
+	ok = settings_parse_text(s, text, &vars, &nvars, 0, errors);
 	ok &= settings_check_keymaps(s, errors);
 	for (i = 0; i < nvars; i++) {
 		free(vars[i].name);
@@ -1422,7 +1563,18 @@ static struct json_object *
 settings_json(void)
 {
 	struct json_object *obj = json_object_new_object();
+	struct json_object *included = json_object_new_array();
+	size_t i;
 	json_object_object_add(obj, "config", json_object_new_string(settings ? settings->text : ""));
+	/* As sway's: each file an include line read, as read */
+	for (i = 0; settings && i < settings->nincludes; i++) {
+		struct json_object *inc = json_object_new_object();
+		json_object_object_add(inc, "path", json_object_new_string(settings->includes[i].path));
+		json_object_object_add(inc, "raw_config", json_object_new_string(
+				settings->includes[i].text ? settings->includes[i].text : ""));
+		json_object_array_add(included, inc);
+	}
+	json_object_object_add(obj, "included_configs", included);
 	json_object_object_add(obj, "path", json_object_new_string(settings_path));
 	json_object_object_add(obj, "errors", json_object_get(settings_errors));
 	return obj;

@@ -138,8 +138,9 @@ To get a list of status bars that work with dwl consult our [wiki].
 
 tidewm also reads a config file in sway's syntax, from `-c FILE` or
 `~/.config/tidewm/config`, and again on `reload`: key bindings and modes,
-window rules, outputs and input devices. Once it's loaded, its bindings
-replace `config.h`'s keys and its rules `config.h`'s rules.
+window rules, outputs and input devices, and other files it includes, as
+a shell's own settings. Once it's loaded, its bindings replace
+`config.h`'s keys and its rules `config.h`'s rules.
 [`docs/config.md`](docs/config.md) says what it takes.
 
 ### Focus guard

@@ -42,7 +42,7 @@ the magic, or over 4 MiB, closes that connection only.
 | 4 | `GET_TREE` | The root, its outputs, every workspace under each output, and in each the windows of that monitor's part, in `nodes` (tiled) and `floating_nodes` |
 | 7 | `GET_VERSION` | `human_readable`, `variant` (`"tidewm"`), `major`, `minor`, `patch`, `loaded_config_file_name` (the loaded config file, or `""`) |
 | 8 | `GET_BINDING_MODES` | Each binding mode's name, `default` first ([`config.md`](config.md)) |
-| 9 | `GET_CONFIG` | `config`, the loaded config file's text, and tidewm's own `path` and `errors` ([`config.md`](config.md)) |
+| 9 | `GET_CONFIG` | `config`, the loaded config file's text; `included_configs`, as sway's, each file its `include` lines read, as `path` and `raw_config`; and tidewm's own `path` and `errors` ([`config.md`](config.md)) |
 | 10 | `SEND_TICK` | `{"success": true}`, after sending the payload in a `tick` event |
 | 12 | `GET_BINDING_STATE` | `{"name": ...}`, the binding mode now |
 | 100 | `GET_INPUTS` | Each input device, in the order they came: `identifier` (as [`config.md`](config.md)'s input lines name it), `name`, `vendor`, `product`, `type` (`keyboard`, `pointer` or `touchpad`); a pointer's or touchpad's `scroll_factor`; a keyboard's `xkb_layout_names`, `xkb_active_layout_index`, `xkb_active_layout_name`, `repeat_delay` and `repeat_rate`; and a libinput device's `libinput` settings, as sway names them |
