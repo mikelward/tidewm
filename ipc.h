@@ -51,8 +51,12 @@ static unsigned long ipc_next_id = 2; /* 1 is the root */
 static int ipc_shutdown_sent;
 /* The client whose request is running, which only its own handler drops */
 static IpcClient *ipc_current;
+/* The focused output's name, as the last output focus event gave it, or
+ * NULL before one or with none focused (ipc_output_focus) */
+static char *ipc_focused_output;
 
 static void ipc_client_destroy(IpcClient *cl);
+static void ipc_output_focus(void);
 /* settings.h, included after this file */
 static int settings_reload(char *buf, size_t size);
 static struct json_object *settings_json(void);
@@ -1039,6 +1043,8 @@ ipc_run_commands(char *payload, int *quit_after, Client *window)
 			json_object_array_add(results, ipc_run_command(cmd, quit_after, window));
 	if (!json_object_array_length(results))
 		json_object_array_add(results, ipc_run_command(payload, quit_after, window));
+	/* A command may have focused another output, as focus output does */
+	ipc_output_focus();
 	return results;
 }
 
@@ -1362,6 +1368,8 @@ ipc_finish(void)
 	ipc_send_shutdown();
 	wl_list_for_each_safe(cl, tmp, &ipc_clients, link)
 		ipc_client_destroy(cl);
+	free(ipc_focused_output);
+	ipc_focused_output = NULL;
 	if (ipc_source)
 		wl_event_source_remove(ipc_source);
 	ipc_source = NULL;
@@ -1501,5 +1509,27 @@ ipc_event_output(void)
 		return;
 	obj = json_object_new_object();
 	json_object_object_add(obj, "change", json_object_new_string("unspecified"));
+	ipc_broadcast(IpcEvOutput, obj);
+}
+
+/* tidewm's own output event: focus moved to another output, by the
+ * pointer, a click, a key, a command or an output going. It's called
+ * wherever selmon may have moved, and sends nothing if it hasn't. */
+static void
+ipc_output_focus(void)
+{
+	const char *name = selmon ? selmon->wlr_output->name : NULL;
+	struct json_object *obj;
+	if (name ? ipc_focused_output && !strcmp(name, ipc_focused_output) : !ipc_focused_output)
+		return;
+	free(ipc_focused_output);
+	ipc_focused_output = NULL;
+	if (name && !(ipc_focused_output = strdup(name)))
+		die("strdup:");
+	if (!ipc_subscribed(IpcEvOutput))
+		return;
+	obj = json_object_new_object();
+	json_object_object_add(obj, "change", json_object_new_string("focus"));
+	json_object_object_add(obj, "output", name ? json_object_new_string(name) : NULL);
 	ipc_broadcast(IpcEvOutput, obj);
 }
