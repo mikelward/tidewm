@@ -67,7 +67,8 @@ class ConfigTest(KeysTest):
 
     def test_get_config_shows_the_file(self):
         config = self.connect().request(GET_CONFIG)
-        self.assertEqual(config, {"config": CONFIG, "path": self.wm.config_path, "errors": []})
+        self.assertEqual(config, {"config": CONFIG, "included_configs": [], "path": self.wm.config_path,
+                                  "errors": []})
         version = self.connect().request(GET_VERSION)
         self.assertEqual(version["loaded_config_file_name"], self.wm.config_path)
 
@@ -153,6 +154,100 @@ class ConfigTest(KeysTest):
         self.alt("2")
         self.assertEqual(self.shown(ipc), "2")
         self.assertEqual(self.connect().request(GET_CONFIG)["config"], "")
+
+
+class IncludeTest(KeysTest):
+    """include lines: each file a pattern matches is read as if its lines
+    were there, as sway's include does, so a shell can write a file of its
+    own that the config takes in."""
+
+    CONFIG = "bindsym Mod1+x workspace main\n"
+
+    def write(self, name, text):
+        path = os.path.join(os.path.dirname(self.wm.config_path), name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def pressed(self, key="z"):
+        ipc = self.workspaces_ipc()
+        self.alt(key)
+        return self.shown(ipc)
+
+    def test_an_included_files_lines_count(self):
+        path = self.write("extra.conf", "bindsym Mod1+z workspace included\n")
+        self.wm.write_config("bindsym Mod1+x workspace main\ninclude extra.conf\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.pressed("z"), "included")
+        self.assertEqual(self.pressed("x"), "main")
+        config = self.connect().request(GET_CONFIG)
+        self.assertEqual(config["included_configs"],
+                         [{"path": path, "raw_config": "bindsym Mod1+z workspace included\n"}])
+
+    def test_variables_carry_into_and_out_of_an_included_file(self):
+        self.write("extra.conf", "bindsym Mod1+z workspace $in\nset $out from_include\n")
+        self.wm.write_config("set $in from_main\ninclude extra.conf\nbindsym Mod1+x workspace $out\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.pressed("z"), "from_main")
+        self.assertEqual(self.pressed("x"), "from_include")
+
+    def test_a_pattern_includes_each_file_it_matches_in_order(self):
+        self.write("tide-a.conf", "bindsym Mod1+z workspace first\n")
+        self.write("tide-b.conf", "bindsym Mod1+z workspace second\n")
+        self.wm.write_config(f"include {os.path.dirname(self.wm.config_path)}/tide-*.conf\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.pressed("z"), "second", "the later file's binding wins")
+
+    def test_a_relative_include_is_from_its_files_directory_taken_as_it_is(self):
+        # A directory whose name is a pattern too: sub[x] would match subx
+        self.write("sub[x]/outer.conf", "include inner.conf\n")
+        self.write("sub[x]/inner.conf", "bindsym Mod1+z workspace inner\n")
+        self.write("subx/inner.conf", "bindsym Mod1+z workspace wrong\n")
+        self.wm.write_config("include sub*/outer.conf\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.pressed("z"), "inner")
+
+    def test_a_missing_file_or_a_pattern_nothing_matches_includes_nothing(self):
+        self.wm.write_config("bindsym Mod1+x workspace main\ninclude nosuch.conf\n"
+                             "include \"not yet/tide-*.conf\"\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.pressed("x"), "main")
+        self.assertEqual(self.connect().request(GET_CONFIG)["included_configs"], [])
+
+    def test_reload_reads_an_included_file_again(self):
+        self.write("extra.conf", "bindsym Mod1+z workspace before\n")
+        self.wm.write_config("include extra.conf\n")
+        self.command(self.connect(), "reload")
+        self.write("extra.conf", "bindsym Mod1+z workspace after\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.pressed("z"), "after")
+
+    def test_an_included_files_errors_name_it_and_the_old_config_stays(self):
+        path = self.write("extra.conf", "bindsym Mod1+z nop\nfrobnicate now\n")
+        self.wm.write_config("include extra.conf\n")
+        self.assertEqual(self.fails("reload")["error"], f"{path}:2: no setting is called frobnicate")
+        self.assertEqual(self.pressed("x"), "main")
+
+    def test_an_included_keymap_error_names_its_file(self):
+        path = self.write("keys.conf", "input type:keyboard xkb_layout nosuchlayout\n")
+        self.wm.write_config("include keys.conf\n")
+        self.assertIn(f"{path}:1: input type:keyboard: XKB can't make a keymap", self.fails("reload")["error"])
+
+    def test_a_file_that_includes_itself_is_an_error(self):
+        self.write("loop.conf", "include loop.conf\n")
+        self.wm.write_config("include loop.conf\n")
+        self.assertIn("includes nest over 10 deep", self.fails("reload")["error"])
+
+    def test_include_needs_a_file_and_is_only_at_the_top_level(self):
+        self.wm.write_config("include\n")
+        self.assertIn(":1: include needs a file", self.fails("reload")["error"])
+        self.wm.write_config("mode m {\n    include extra.conf\n}\n")
+        self.assertIn(":2: include can't be in a mode", self.fails("reload")["error"])
+        self.write("block.conf", "mode m {\n")
+        self.wm.write_config("include block.conf\n}\n")
+        error = self.fails("reload")["error"]
+        self.assertIn("block.conf:1: mode m has no }", error, "a block opened in a file closes in it")
 
 
 MODES = """bindsym Mod1+r mode "resize"
