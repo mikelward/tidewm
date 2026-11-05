@@ -153,7 +153,7 @@ in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
 | Event | Type | Sent when |
 |---|---|---|
 | `workspace` | `0x80000000` | A workspace is made (`init`), goes (`empty`), becomes current (`focus`, with the previous one in `old`), is renamed (`rename`), or a window on it gains or loses urgency (`urgent`): `{"change": ..., "current": ..., "old": ...}` |
-| `output` | `0x80000001` | An output appears or goes: `{"change": "unspecified"}` |
+| `output` | `0x80000001` | An output appears or goes: `{"change": "unspecified"}`. And tidewm's own: focus moves to another output, by the pointer, a click, a key or a command, or as the focused one goes: `{"change": "focus", "output": NAME}`, null with none left. Quickshell's I3 module asks for the outputs again on any output event, so its focused monitor follows |
 | `mode` | `0x80000002` | The binding mode changes: `{"change": NAME, "pango_markup": false}` |
 | `window` | `0x80000003` | A window is `new`, `close`d, gets `focus`, changes `title`, `fullscreen_mode`, `floating` or `urgent`, is maximized or not (tidewm's own `maximize`), or moves to another workspace or output, by a command, a key or a drag (`move`): `{"change": ..., "container": ...}`. A window's first event is `new`, sent once it has an output, workspace and floating state |
 | `binding` | `0x80000005` | A config file's binding runs, as in sway: `{"change": "run", "binding": {"command": ..., "event_state_mask": [...], "input_code": 0, "symbol": ..., "input_type": "keyboard"}}`, the modifiers named `Shift`, `Lock`, `Ctrl` and `Mod1` to `Mod5`, and the symbol as the binding has it. A `bindswitch` line's is `"input_type": "switch"`, with no modifiers and a null symbol. `config.h`'s keys run no command and send none |

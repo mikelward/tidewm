@@ -239,7 +239,8 @@ tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so
 with it. [`docs/ipc.md`](docs/ipc.md) lists what it answers. Its
 workspaces are on ext-workspace too, for Wayland clients that read that.
 Its own `capture` event says when a screen share or screenshot starts
-and stops, and of which window, for tide's Sharing pill.
+and stops, and of which window, for tide's Sharing pill, and its own
+output event when focus moves to another output, for tide's shell.
 
 ### (Known) Java nonreparenting WM issue
 Certain IDEs don't display correctly unless an environmental variable for Java AWT

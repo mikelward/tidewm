@@ -820,6 +820,7 @@ buttonpress(struct wl_listener *listener, void *data)
 		settings_tap_over();
 		cursor_mode = CurPressed;
 		selmon = xytomon(cursor->x, cursor->y);
+		ipc_output_focus();
 		if (locked)
 			break;
 
@@ -865,6 +866,7 @@ buttonpress(struct wl_listener *listener, void *data)
 			/* Drop the window off on its new monitor */
 			selmon = xytomon(cursor->x, cursor->y);
 			movemon(grabc, selmon, 0);
+			ipc_output_focus();
 			grabc = NULL;
 			return;
 		}
@@ -1800,6 +1802,7 @@ focusmon(const Arg *arg)
 		while (!selmon->wlr_output->enabled && i++ < nmons);
 	}
 	focusclient(focusgo(selmon), NULL, 1);
+	ipc_output_focus();
 }
 
 void
@@ -2638,6 +2641,7 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 		/* Update selmon (even while dragging a window) */
 		if (sloppyfocus)
 			selmon = xytomon(cursor->x, cursor->y);
+		ipc_output_focus();
 	}
 
 	/* Update drag icon's position */
@@ -2872,6 +2876,7 @@ printstatus(void)
 		printf("%s layout %s\n", m->wlr_output->name, m->ltsymbol);
 	}
 	fflush(stdout);
+	ipc_output_focus();
 }
 
 void

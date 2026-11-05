@@ -1,9 +1,14 @@
 """tidewm's output settings: the config file's output lines, in sway's
 syntax, and the output command (docs/config.md)."""
 
+import os
+import subprocess
 import unittest
 
-from harness import GET_CONFIG, GET_OUTPUTS, RUN_COMMAND, TidewmTest, power, randr
+from harness import (EVENT_OUTPUT, EVENT_TICK, GET_CONFIG, GET_OUTPUTS, ROOT,
+                     RUN_COMMAND, SEND_TICK, TIMEOUT, TidewmTest, power, randr)
+
+POINTER = os.path.join(ROOT, "tests", "pointer")
 
 
 def mode(output):
@@ -178,6 +183,91 @@ output HEADLESS-2 pos 0,0
         self.command(self.connect(), "output HEADLESS-1 position 3000 0")
         self.command(self.connect(), "output HEADLESS-1 enable")
         self.assertEqual(self.outputs()["HEADLESS-1"]["rect"]["x"], 3000)
+
+
+class FocusedOutputTest(OutputsTest):
+    """tidewm's own output event: focus moving to another output, which
+    Quickshell's I3 module and tide's shell track (docs/ipc.md). The two
+    outputs are side by side, HEADLESS-1 on the left."""
+    OUTPUTS = 2
+
+    def setUp(self):
+        super().setUp()
+        self.command(self.connect(), "focus output HEADLESS-1")
+        self.listener = self.connect()
+        self.listener.subscribe("output", "tick")
+        # Subscribing sends a tick at once
+        self.listener.next_event(EVENT_TICK)
+
+    def focused(self):
+        return [name for name, o in self.outputs().items() if o["focused"]]
+
+    def next_focus(self):
+        """The next output focus event's output, or None if a tick sent
+        now comes first: nothing more was said. Each call's tick is its
+        own, so one an earlier call left queued is passed over."""
+        self.ticks = getattr(self, "ticks", 0) + 1
+        payload = f"after {self.ticks}"
+        self.connect().request(SEND_TICK, payload)
+        while True:
+            kind, event = self.listener.recv()
+            if kind == EVENT_OUTPUT and event["change"] == "focus":
+                self.assertEqual(sorted(event), ["change", "output"])
+                return event["output"]
+            if kind == EVENT_TICK and event["payload"] == payload:
+                return None
+
+    def point(self, x, y):
+        """Moves the pointer to x, y, as a mouse does, which focus follows."""
+        rects = [o["rect"] for o in self.outputs().values()]
+        width = max(r["x"] + r["width"] for r in rects)
+        height = max(r["y"] + r["height"] for r in rects)
+        subprocess.run([POINTER, "cross", str(x), str(y), str(width), str(height)],
+                       env=self.wm.env, check=True, timeout=TIMEOUT)
+
+    def middle(self, name):
+        rect = self.outputs()[name]["rect"]
+        return rect["x"] + rect["width"] // 2, rect["y"] + rect["height"] // 2
+
+    def test_focusing_another_output_says_so(self):
+        self.command(self.connect(), "focus output HEADLESS-2")
+        self.assertEqual(self.next_focus(), "HEADLESS-2")
+        self.assertEqual(self.focused(), ["HEADLESS-2"])
+
+    def test_focusing_the_focused_output_says_nothing(self):
+        self.command(self.connect(), "focus output HEADLESS-1")
+        self.assertIsNone(self.next_focus())
+
+    def test_the_pointer_crossing_to_another_output_says_so(self):
+        self.point(*self.middle("HEADLESS-2"))
+        self.assertEqual(self.next_focus(), "HEADLESS-2")
+        self.assertEqual(self.focused(), ["HEADLESS-2"])
+        self.point(*self.middle("HEADLESS-1"))
+        self.assertEqual(self.next_focus(), "HEADLESS-1")
+
+    def test_the_pointer_moving_within_the_output_says_nothing(self):
+        x, y = self.middle("HEADLESS-1")
+        self.point(x, y)
+        self.point(x + 10, y + 10)
+        self.assertEqual(self.next_focus(), None)
+
+    def test_focusing_a_window_on_another_output_says_so(self):
+        windows = self.connect()
+        windows.subscribe("window")
+        self.command(self.connect(), "focus output HEADLESS-2")
+        _, con = self.open_window(windows, "test.other")
+        self.command(self.connect(), "focus output HEADLESS-1")
+        self.assertEqual(self.next_focus(), "HEADLESS-2")
+        self.assertEqual(self.next_focus(), "HEADLESS-1")
+        self.command(self.connect(), f"[con_id={con['id']}] focus")
+        self.assertEqual(self.next_focus(), "HEADLESS-2")
+
+    def test_disabling_the_focused_output_says_where_focus_went(self):
+        self.command(self.connect(), "focus output HEADLESS-2")
+        self.assertEqual(self.next_focus(), "HEADLESS-2")
+        self.command(self.connect(), "output HEADLESS-2 disable")
+        self.assertEqual(self.next_focus(), "HEADLESS-1")
+        self.assertEqual(self.focused(), ["HEADLESS-1"])
 
 
 class DisabledAtStartTest(OutputsTest):

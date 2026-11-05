@@ -371,6 +371,8 @@ fg_focus(Client *c, const char *workspace)
 		wl_list_insert(&fstack, &c->flink);
 	}
 	focusclient(c, NULL, 1);
+	/* Under the lock, focusclient says nothing of the output */
+	ipc_output_focus();
 	fg_focusing--;
 	fg_defer(c);
 }
