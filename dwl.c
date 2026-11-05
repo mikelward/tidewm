@@ -92,7 +92,7 @@
 
 /* macros */
 #define CLEANMASK(mask)         (mask & ~WLR_MODIFIER_CAPS)
-#define VISIBLEON(C, M)         ((M) && (C)->mon == (M) && (C)->ws == curws)
+#define VISIBLEON(C, M)         ((M) && (C)->mon == (M) && (C)->ws == curws && !(C)->isminimized)
 #define LISTEN(E, L, H)         wl_signal_add((E), ((L)->notify = (H), (L)))
 #define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = ecalloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
 
@@ -192,6 +192,7 @@ typedef struct {
 	Workspace *ws;
 	int isfloating, isurgent, isfullscreen;
 	int ismaximized; /* covers its monitor's window area, above the other tiles */
+	int isminimized; /* hidden, on its workspace still, until it's focused (setminimized) */
 	int issticky; /* floating, it's on every workspace, as sway's sticky */
 	int recenter; /* it followed its parent: to its middle once laid out */
 	struct wlr_scene_buffer *dim; /* dim.h's layer over it */
@@ -425,6 +426,7 @@ static void dialogsfollow(Client *c, Workspace *from);
 static int laidout(Client *c);
 static void raisewithdialogs(Client *c);
 static void setmaximized(Client *c, int maximized);
+static void setminimized(Client *c, int minimized);
 static void uncoverfor(Client *c);
 static void setlayout(const Arg *arg);
 static void setmfact(const Arg *arg);
@@ -632,7 +634,7 @@ void
 arrange(Monitor *m)
 {
 	Client *c, *p;
-	int recentered;
+	int recentered, fullscreen = 0;
 
 	if (!m->wlr_output->enabled)
 		return;
@@ -646,8 +648,12 @@ arrange(Monitor *m)
 		}
 	}
 
-	wlr_scene_node_set_enabled(&m->fullscreen_bg->node,
-			(c = focustop(m)) && c->isfullscreen);
+	/* The black behind a fullscreen window, while one is shown here,
+	 * whatever has focus: its dialog, or another window not yet focused
+	 * over one brought back. Another window here taking focus ends it. */
+	wl_list_for_each(c, &clients, link)
+		fullscreen |= VISIBLEON(c, m) && c->isfullscreen;
+	wlr_scene_node_set_enabled(&m->fullscreen_bg->node, fullscreen);
 
 	strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
 
@@ -1694,6 +1700,11 @@ focusclient(Client *c, LayerSurface *l, int lift)
 	Client *old_c = NULL;
 	LayerSurface *old_l = NULL;
 
+	/* Focus brings a minimized window back first, whatever asks for it: a
+	 * command, a grant, or the lock going with it atop the focus stack */
+	if (c && c->isminimized)
+		setminimized(c, 0);
+
 	if (locked)
 		return;
 
@@ -2302,8 +2313,10 @@ unset_fullscreen:
 	if (c->held)
 		return;
 	m = c->mon ? c->mon : xytomon(c->geom.x, c->geom.y);
+	/* A minimized one covers nothing, so it keeps it for coming back */
 	wl_list_for_each(w, &clients, link) {
-		if (w != c && w != p && w->isfullscreen && m == w->mon && w->ws == c->ws)
+		if (w != c && w != p && w->isfullscreen && !w->isminimized
+				&& m == w->mon && w->ws == c->ws)
 			setfullscreen(w, 0);
 	}
 }
@@ -2523,6 +2536,34 @@ setmaximized(Client *c, int maximized)
 	ipc_event_window(c, "maximize");
 }
 
+/* Minimizes c, or brings it back, as tide's SPEC §6.7 has it. A minimized
+ * window keeps its workspace, monitor and states, so a workspace with one
+ * stays while it waits, but it isn't shown, laid out or focused: focus on
+ * it goes to the top window left on the focused monitor. Brought back, it
+ * joins the end of its part's stack, as a window that arrives does.
+ * Focusing it brings it back (focusclient). An app's own minimize request
+ * does nothing. */
+void
+setminimized(Client *c, int minimized)
+{
+	if (!c->isminimized == !minimized)
+		return;
+	c->isminimized = minimized;
+	if (!minimized) {
+		ws_to_end(c);
+		/* Fullscreen, it covers its output as it is now: one changed
+		 * meanwhile resized only the fullscreen window it showed */
+		if (c->isfullscreen && c->mon)
+			resize(c, c->mon->m, 0);
+	}
+	if (c->mon)
+		arrange(c->mon);
+	if (minimized && c == focused_client)
+		focusclient(focustop(selmon), NULL, 1);
+	printstatus();
+	ipc_event_window(c, "minimize");
+}
+
 /* Focus went to c: no other window on its workspace there covers it, so
  * one maximized or fullscreen is so no more, unless c is its dialog. Focus
  * a command or a notification gives a window, even one the focus guard
@@ -2532,7 +2573,7 @@ uncoverfor(Client *c)
 {
 	Client *w;
 	wl_list_for_each(w, &clients, link) {
-		if (w == c || (!w->ismaximized && !w->isfullscreen)
+		if (w == c || (!w->ismaximized && !w->isfullscreen) || w->isminimized
 				|| w->mon != c->mon || w->ws != c->ws || descendsfrom(c, w))
 			continue;
 		if (w->isfullscreen)
@@ -3700,8 +3741,9 @@ unmapnotify(struct wl_listener *listener, void *data)
 	ipc_event_window(c, "close");
 	if (c == focused_client)
 		focused_client = NULL;
-	/* Mapping again, it's maximized only if it asks again */
+	/* Mapping again, it's maximized only if it asks again, and shown */
 	c->ismaximized = 0;
+	c->isminimized = 0;
 	c->wantsfullscreen = 0;
 	c->unmaximized = (struct wlr_box){0};
 

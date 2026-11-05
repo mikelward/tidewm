@@ -232,6 +232,14 @@ stays where it was tiled. Dialogs, fixed-size windows and
 picture-in-picture place themselves, so their places aren't kept for
 their app.
 
+### Minimized windows
+
+The IPC's `minimize` command hides a window, as tide's SPEC §6.7 has it:
+it leaves the layout, and focus goes to the window you were in before.
+It stays on its workspace, which stays while it waits, and focusing it,
+as tide's shell does from its tray, a grant or `focus`, brings it back.
+Nothing else minimizes a window: an app's own request does nothing.
+
 ### IPC
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so

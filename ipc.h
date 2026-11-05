@@ -361,6 +361,8 @@ ipc_json_window(Client *c)
 	json_object_object_add(obj, "dimmed", json_object_new_boolean(c->dim && c->dim->node.enabled));
 	/* tidewm's own, tide's SPEC §6.3: over the window area, the bar showing */
 	json_object_object_add(obj, "maximized", json_object_new_boolean(c->ismaximized));
+	/* tidewm's own, tide's SPEC §6.7: hidden until it's focused */
+	json_object_object_add(obj, "minimized", json_object_new_boolean(c->isminimized));
 	json_object_object_add(obj, "rect", ipc_json_box(c->geom));
 	json_object_object_add(obj, "workspace", c->ws ? json_object_new_string(c->ws->name) : NULL);
 	json_object_object_add(obj, "output", c->mon ? json_object_new_string(c->mon->wlr_output->name) : NULL);
@@ -862,6 +864,19 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		if (!target)
 			return ipc_json_success(0, "No window to maximize");
 		setmaximized(target, maximized);
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own, as tide's SPEC §6.7 has it: focusing the window, by
+	 * any means, brings it back too */
+	if (ipc_take(&cmd, "minimize")) {
+		int minimized;
+		if ((minimized = ipc_switch(cmd, target ? target->isminimized : 0, 1)) < 0) {
+			error = "Expected minimize [enable|disable|toggle]";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to minimize");
+		setminimized(target, minimized);
 		return ipc_json_success(1, NULL);
 	}
 	if (ipc_take(&cmd, "fullscreen")) {
