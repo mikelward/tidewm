@@ -187,6 +187,11 @@ names, and an `input NAME {` … `}` block takes a `SETTING VALUE` a line.
 - a device's identifier, as `GET_INPUTS` gives it, such as
   `1:1:AT_Translated_Set_2_keyboard`: its vendor and product numbers,
   then its name, with `_` for each space;
+- its name as Hyprland gives it, `GET_INPUTS`' `hyprland_name`, such as
+  `at-translated-set-2-keyboard`: its name in lower case, with `-` for
+  each space, newline or comma, or `unknown-device` for none, and `-1`,
+  `-2` and so on after it for each device already there with the same, as
+  tide's input settings name a device;
 - `type:keyboard`, `type:pointer` or `type:touchpad`, a touchpad being a
   pointer that can tap;
 - `*`, every device.
