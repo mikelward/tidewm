@@ -129,11 +129,11 @@ lands with a test.
   prompt after a key press; the rest open held and urgent. A key press,
   a click or a focus move cancels a grant, and it lapses. Activation,
   Wayland's and X11's, is marked unless a grant names the app.
-- **Input devices** (#17): sway's `input NAME SETTING VALUE` lines and
-  `input NAME { ... }` blocks, for `*`, a type or a device's identifier:
-  XKB and repeat for keyboards, grouped as sway's smart grouping does,
-  and libinput's settings for pointers; the `input` command, `GET_INPUTS`
-  and the `input` event.
+- **Input devices** (#17, #57): sway's `input NAME SETTING VALUE` lines
+  and `input NAME { ... }` blocks, for `*`, a type, or a device's
+  identifier or the name Hyprland gives it: XKB and repeat for keyboards,
+  grouped as sway's smart grouping does, and libinput's settings for
+  pointers; the `input` command, `GET_INPUTS` and the `input` event.
 
 ## Decisions needing review
 

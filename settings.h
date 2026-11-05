@@ -2197,6 +2197,7 @@ typedef struct {
 	struct wl_list link;
 	struct wlr_input_device *dev;
 	char *identifier; /* VENDOR:PRODUCT:NAME, as sway makes it */
+	char *hypr_name; /* its name as Hyprland gives it, which tide's settings use */
 	const char *type; /* "keyboard", "pointer" or "touchpad" */
 	int is_virtual; /* a client's: it keeps its own keymap, and has no libinput */
 	KeyboardGroup *group; /* a keyboard's, unless it's virtual */
@@ -2205,6 +2206,14 @@ typedef struct {
 	double scroll_factor; /* a pointer's scroll times this */
 	struct wl_listener destroy;
 } SettingsInput;
+
+/* Whether the name of an input line or command, other than "*" or a type:,
+ * names in: its identifier, or its name as Hyprland gives it */
+static int
+settings_input_is(const SettingsInput *in, const char *name)
+{
+	return !strcmp(name, in->identifier) || !strcmp(name, in->hypr_name);
+}
 
 /* A keyboard group for keyboards with the same keymap and repeat info, as
  * sway's smart grouping makes them: kb_group, config.h's, is one, which
@@ -2254,6 +2263,7 @@ settings_json_input(const SettingsInput *in)
 	xkb_layout_index_t i, n, active;
 	const char *name;
 	json_object_object_add(obj, "identifier", json_object_new_string(in->identifier));
+	json_object_object_add(obj, "hyprland_name", json_object_new_string(in->hypr_name));
 	json_object_object_add(obj, "name", json_object_new_string(in->dev->name ? in->dev->name : ""));
 	json_object_object_add(obj, "vendor", json_object_new_int(d ? (int)libinput_device_get_id_vendor(d) : 0));
 	json_object_object_add(obj, "product", json_object_new_int(d ? (int)libinput_device_get_id_product(d) : 0));
@@ -2404,7 +2414,9 @@ settings_input_config(const SettingsInput *in, InputConfig *out)
 	snprintf(type, sizeof(type), "type:%s", in->type);
 	for (pass = 0; settings && pass < 3; pass++)
 		for (i = 0; i < settings->ninputs; i++)
-			if (!strcmp(settings->inputs[i].name, pass == 0 ? "*" : pass == 1 ? type : in->identifier))
+			if (pass == 0 ? !strcmp(settings->inputs[i].name, "*")
+					: pass == 1 ? !strcmp(settings->inputs[i].name, type)
+					: settings_input_is(in, settings->inputs[i].name))
 				settings_merge_input(out, &settings->inputs[i]);
 }
 
@@ -2572,7 +2584,42 @@ settings_input_destroyed(struct wl_listener *listener, void *data)
 	for (i = 0; i < InXkbLast; i++)
 		free((char *)in->names[i]);
 	free(in->identifier);
+	free(in->hypr_name);
 	free(in);
+}
+
+/* dev's name as Hyprland gives a device one
+ * (src/helpers/MiscFunctions.cpp's deviceNameToInternalString and
+ * CInputManager::getNameForNewDevice): its name in lower case, with a
+ * space, newline or comma a -, or unknown-device for none, then -1, -2 and
+ * so on after it for each device already here with the same, as tide's
+ * input settings name a device. */
+static char *
+settings_hypr_name(struct wlr_input_device *dev)
+{
+	const char *name = dev->name ? dev->name : "";
+	size_t len = strlen(name), i;
+	char *base = ecalloc(1, len + sizeof("unknown-device")), *out;
+	SettingsInput *in;
+	int n = 0, taken;
+	for (i = 0; i < len; i++)
+		base[i] = name[i] == ' ' || name[i] == '\n' || name[i] == ','
+			? '-' : (char)tolower((unsigned char)name[i]);
+	if (!len)
+		strcpy(base, "unknown-device");
+	out = ecalloc(1, strlen(base) + 16);
+	do {
+		if (n)
+			sprintf(out, "%s-%d", base, n);
+		else
+			strcpy(out, base);
+		taken = 0;
+		wl_list_for_each(in, &settings_inputs, link)
+			taken |= !strcmp(in->hypr_name, out);
+		n++;
+	} while (taken);
+	free(base);
+	return out;
 }
 
 static SettingsInput *
@@ -2581,6 +2628,7 @@ settings_track(struct wlr_input_device *dev, const char *type, int is_virtual)
 	SettingsInput *in = ecalloc(1, sizeof(*in));
 	in->dev = dev;
 	in->identifier = settings_identifier(dev);
+	in->hypr_name = settings_hypr_name(dev);
 	in->type = type;
 	in->is_virtual = is_virtual;
 	in->scroll_factor = 1;
@@ -2694,7 +2742,7 @@ settings_apply_inputs(const InputConfig *only)
 		if (only) {
 			snprintf(type, sizeof(type), "type:%s", in->type);
 			if (strcmp(only->name, "*") && strcmp(only->name, type)
-					&& strcmp(only->name, in->identifier))
+					&& !settings_input_is(in, only->name))
 				continue;
 			ic = *only;
 		} else {
@@ -2748,7 +2796,7 @@ settings_input_named(const SettingsInput *in, const char *name)
 {
 	char type[32];
 	snprintf(type, sizeof(type), "type:%s", in->type);
-	return !strcmp(name, "*") || !strcmp(name, type) || !strcmp(name, in->identifier);
+	return !strcmp(name, "*") || !strcmp(name, type) || settings_input_is(in, name);
 }
 
 /* sway's "input NAME xkb_switch_layout next|prev|INDEX": switches the
@@ -2985,6 +3033,7 @@ settings_finish(void)
 		for (i = 0; i < InXkbLast; i++)
 			free((char *)in->names[i]);
 		free(in->identifier);
+		free(in->hypr_name);
 		free(in);
 	}
 	wl_list_for_each_safe(g, gtmp, &settings_groups, link) {

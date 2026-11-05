@@ -206,6 +206,24 @@ input type:pointer repeat_delay 100
         keyboard = self.keyboard()
         self.assertEqual((keyboard["xkb_layout_names"], keyboard["repeat_rate"]), (["French"], 40))
 
+    def test_a_keyboard_is_named_by_its_hyprland_name_too(self):
+        keyboard = self.keyboard()
+        names = []
+        for device in self.connect().request(GET_INPUTS):
+            base = "".join("-" if ch in " \n," else ch.lower() for ch in device["name"]) or "unknown-device"
+            name, n = base, 0
+            while name in names:
+                n += 1
+                name = f"{base}-{n}"
+            names.append(name)
+            self.assertEqual(device["hyprland_name"], name, device)
+        hyprland_name = keyboard["hyprland_name"]
+        self.wm.write_config(self.CONFIG + f'input "{hyprland_name}" xkb_layout fr\n')
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.keyboard()["xkb_layout_names"], ["French"])
+        self.command(self.connect(), f'input "{hyprland_name}" xkb_layout de')
+        self.assertEqual(self.keyboard()["xkb_layout_names"], ["German"])
+
     def test_names_and_values_may_be_quoted(self):
         identifier = self.keyboard()["identifier"]
         self.wm.write_config(f'input "type:keyboard" repeat_rate "30"\ninput "{identifier}" {{\n'
