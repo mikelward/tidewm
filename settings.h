@@ -126,6 +126,33 @@ typedef struct {
 	const char *xkb_file; /* the file that line is in; NULL for the config file */
 } InputConfig;
 
+/* Where a new tiled window goes among its monitor's, as a new_window line
+ * says, as tide's Layouts page has it: the end of the stack, its top just
+ * after the masters, next after the focused window, or as the master */
+enum { NewEnd, NewTop, NewNext, NewMaster };
+
+/* The layouts a layout_defaults line can name, tide's Layouts page's
+ * modes, with the fewest masters each takes */
+static const struct {
+	const char *name;
+	void (*arrange)(Monitor *);
+	int min_masters;
+} settings_lt_modes[] = {
+	{"tile", tile, 0}, {"threecol", threecol, 1}, {"twocol", twocol, 1},
+};
+
+/* A layout's own mfact and nmaster, as its layout_defaults lines give them */
+typedef struct {
+	int has_mfact;
+	float mfact;
+	int has_nmaster;
+	int nmaster;
+} LayoutDefaults;
+
+/* layout.h's, which comes after: each layout's mfact and nmaster from the
+ * defaults again */
+static void lt_reset_modes(void);
+
 /* A file an include line read, for GET_CONFIG */
 typedef struct {
 	char *path;
@@ -146,6 +173,10 @@ typedef struct {
 	int xwayland_scaling; /* xwayland_scaling enable|disable; -1: not given */
 	SingleRule *singles; /* single_window lines, which replace config.h's */
 	size_t nsingles;
+	double ultrawide_aspect; /* ultrawide_aspect N; 0: not given */
+	void (*first_layout[2])(Monitor *); /* default_layout normal|ultrawide; NULL: not given */
+	LayoutDefaults layout_defaults[LENGTH(settings_lt_modes)];
+	int new_window; /* new_window end|top|next|master; -1: not given */
 	SwitchBinding *switches;
 	size_t nswitches;
 	double grant_seconds, prompt_seconds; /* 0: not given */
@@ -1008,6 +1039,113 @@ settings_single(Settings *s, char *rest, unsigned int line, struct json_object *
 	return 1;
 }
 
+/* An ultrawide_aspect line: how wide for its height a monitor's window
+ * area must be for its new parts to start in default_layout ultrawide's
+ * layout, from 0.1 to 100 */
+static int
+settings_ultrawide(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *end;
+	double v;
+	errno = 0;
+	v = strtod(rest, &end);
+	if (end == rest || *end || errno || !(v >= 0.1 && v <= 100)) {
+		settings_error(errors, line, "ultrawide_aspect takes a number from 0.1 to 100");
+		return 0;
+	}
+	s->ultrawide_aspect = v;
+	return 1;
+}
+
+/* A default_layout line, "normal|ultrawide LAYOUT": the layout a
+ * workspace's new part on a monitor starts in, below ultrawide_aspect or
+ * from it */
+static int
+settings_first_layout(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *which = settings_word(&rest), *name = settings_word(&rest);
+	int wide = !strcmp(which, "ultrawide");
+	size_t i;
+	if ((wide || !strcmp(which, "normal")) && !*rest) {
+		for (i = 0; i < LENGTH(ipc_layouts); i++) {
+			if (ipc_layouts[i].arrange && !strcmp(name, ipc_layouts[i].name)) {
+				s->first_layout[wide] = ipc_layouts[i].arrange;
+				return 1;
+			}
+		}
+	}
+	settings_error(errors, line, "default_layout takes normal or ultrawide, "
+			"then tile, threecol, twocol or monocle");
+	return 0;
+}
+
+/* A layout_defaults line, "LAYOUT [mfact F] [nmaster N]": the mfact, from
+ * 0.1 to 0.9, and nmaster, up to 100, the layout starts with. A later line
+ * for a layout adds to an earlier one. */
+static int
+settings_layout_defaults(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *name = settings_word(&rest), *word, *arg, *end;
+	LayoutDefaults d;
+	size_t i;
+	double v;
+	long n;
+	for (i = 0; i < LENGTH(settings_lt_modes) && strcmp(name, settings_lt_modes[i].name); i++)
+		;
+	if (i == LENGTH(settings_lt_modes) || !*rest) {
+		settings_error(errors, line, "layout_defaults takes tile, threecol or twocol, "
+				"then mfact, nmaster or both");
+		return 0;
+	}
+	d = s->layout_defaults[i];
+	while (*(word = settings_word(&rest))) {
+		arg = settings_word(&rest);
+		errno = 0;
+		if (!strcmp(word, "mfact")) {
+			v = strtod(arg, &end);
+			if (end == arg || *end || errno || !(v >= 0.1 && v <= 0.9)) {
+				settings_error(errors, line, "layout_defaults %s: mfact takes "
+						"a number from 0.1 to 0.9", name);
+				return 0;
+			}
+			d.has_mfact = 1;
+			d.mfact = (float)v;
+		} else if (!strcmp(word, "nmaster")) {
+			n = strtol(arg, &end, 10);
+			if (end == arg || *end || errno || n < settings_lt_modes[i].min_masters || n > 100) {
+				settings_error(errors, line, "layout_defaults %s: nmaster takes "
+						"a whole number from %d to 100", name, settings_lt_modes[i].min_masters);
+				return 0;
+			}
+			d.has_nmaster = 1;
+			d.nmaster = (int)n;
+		} else {
+			settings_error(errors, line, "layout_defaults %s: no setting is called %s", name, word);
+			return 0;
+		}
+	}
+	s->layout_defaults[i] = d;
+	return 1;
+}
+
+/* A new_window line: end, top, next or master */
+static int
+settings_new_window(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	static const char *const names[] = {
+		[NewEnd] = "end", [NewTop] = "top", [NewNext] = "next", [NewMaster] = "master",
+	};
+	size_t i;
+	for (i = 0; i < LENGTH(names); i++) {
+		if (!strcmp(rest, names[i])) {
+			s->new_window = (int)i;
+			return 1;
+		}
+	}
+	settings_error(errors, line, "new_window takes end, top, next or master");
+	return 0;
+}
+
 /* An xwayland_scaling line: enable, as by default, or disable, for X11
  * windows in their outputs' pixels (x11.h) */
 static int
@@ -1259,6 +1397,20 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			} else {
 				ok &= settings_single(s, p, line, errors);
 			}
+		} else if (!strcasecmp(word, "ultrawide_aspect") || !strcasecmp(word, "default_layout")
+				|| !strcasecmp(word, "layout_defaults") || !strcasecmp(word, "new_window")) {
+			if (mode) {
+				settings_error(errors, line, "%s can't be in a mode", word);
+				ok = 0;
+			} else if (!strcasecmp(word, "ultrawide_aspect")) {
+				ok &= settings_ultrawide(s, p, line, errors);
+			} else if (!strcasecmp(word, "default_layout")) {
+				ok &= settings_first_layout(s, p, line, errors);
+			} else if (!strcasecmp(word, "layout_defaults")) {
+				ok &= settings_layout_defaults(s, p, line, errors);
+			} else {
+				ok &= settings_new_window(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "dim_inactive")) {
 			if (mode) {
 				settings_error(errors, line, "dim_inactive can't be in a mode");
@@ -1441,6 +1593,7 @@ settings_parse(char *text, struct json_object *errors)
 	s->text = text;
 	s->focus_guard = -1;
 	s->dim_inactive = -1;
+	s->new_window = -1;
 	s->xwayland_scaling = -1;
 	settings_add_mode(s, "default");
 	settings_file = NULL;
@@ -1491,18 +1644,26 @@ settings_read(const char *path, char **text, struct json_object *errors)
 static int
 settings_load(void)
 {
+	static const LayoutDefaults no_defaults[LENGTH(settings_lt_modes)];
 	struct json_object *errors = json_object_new_array();
 	Settings *loaded = NULL;
 	char *text;
-	int refused, r = settings_read(settings_path, &text, errors);
+	int refused, reset, r = settings_read(settings_path, &text, errors);
 	if (r > 0)
 		loaded = settings_parse(text, errors);
 	json_object_put(settings_errors);
 	settings_errors = errors;
 	if (r < 0 || (r > 0 && !loaded))
 		return 0;
+	/* Each layout's mfact and nmaster start again from new defaults, as a
+	 * reload of tide's layouts has them on Hyprland; a load that keeps them,
+	 * for another setting, leaves them as they are */
+	reset = memcmp(settings ? settings->layout_defaults : no_defaults,
+			loaded ? loaded->layout_defaults : no_defaults, sizeof(no_defaults)) != 0;
 	settings_free(settings);
 	settings = loaded;
+	if (reset)
+		lt_reset_modes();
 	/* A notification's grant lapses by the new grant_seconds */
 	fg_arm();
 	/* Windows dim at the new strength */
