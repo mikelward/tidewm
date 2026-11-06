@@ -164,6 +164,55 @@ output HEADLESS-2 pos 0,0
         self.command(self.connect(), "output HEADLESS-2 disable")
         self.assertEqual(self.windows()[con["id"]]["output"], "HEADLESS-1")
 
+    def test_the_power_command_turns_an_output_off_and_on_keeping_its_windows(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        self.command(self.connect(), "focus output HEADLESS-2")
+        _, con = self.open_window(ipc, "test.dozing")
+        self.command(self.connect(), "output HEADLESS-2 power off")
+        outputs = self.outputs()
+        self.assertEqual((outputs["HEADLESS-1"]["power"], outputs["HEADLESS-2"]["power"]), (True, False))
+        # Off, as an idle daemon turns it off, it keeps its windows and place
+        self.assertEqual(self.windows()[con["id"]]["output"], "HEADLESS-2")
+        self.assertEqual(outputs["HEADLESS-2"]["rect"]["x"], 0)
+        self.command(self.connect(), "output * power on")
+        outputs = self.outputs()
+        self.assertTrue(outputs["HEADLESS-2"]["power"])
+        self.assertTrue(outputs["HEADLESS-2"]["active"])
+        self.assertEqual(outputs["HEADLESS-2"]["scale"], 2)
+        self.assertEqual(self.windows()[con["id"]]["output"], "HEADLESS-2")
+
+    def test_the_power_command_turns_every_output_off_and_toggles(self):
+        self.command(self.connect(), "output * power off")
+        self.assertEqual([o["power"] for o in self.outputs().values()], [False, False])
+        # Asked again, it stays off
+        self.command(self.connect(), "output * power off")
+        self.command(self.connect(), "output HEADLESS-1 power toggle")
+        outputs = self.outputs()
+        self.assertEqual((outputs["HEADLESS-1"]["power"], outputs["HEADLESS-2"]["power"]), (True, False))
+        self.command(self.connect(), "output * power toggle")
+        outputs = self.outputs()
+        self.assertEqual((outputs["HEADLESS-1"]["power"], outputs["HEADLESS-2"]["power"]), (False, True))
+
+    def test_an_output_powered_off_by_an_idle_daemon_comes_on_by_the_command(self):
+        power(self.wm, "HEADLESS-2", "off")
+        self.command(self.connect(), "output HEADLESS-2 power on")
+        self.assertTrue(self.outputs()["HEADLESS-2"]["power"])
+
+    def test_a_disabled_output_stays_off_whatever_its_power(self):
+        self.command(self.connect(), "output HEADLESS-2 disable")
+        self.command(self.connect(), "output * power on")
+        self.assertFalse(self.outputs()["HEADLESS-2"]["active"])
+        result = self.fails("output HEADLESS-2 power on")
+        self.assertIn("HEADLESS-2 is disabled", result["error"])
+
+    def test_the_power_command_takes_on_off_or_toggle(self):
+        result = self.fails("output HEADLESS-1 power sideways")
+        self.assertTrue(result.get("parse_error"), result)
+        self.fails("output HEADLESS-1 power off now")
+        result = self.fails("output HEADLESS-9 power off")
+        self.assertIn("No output is called HEADLESS-9", result["error"])
+
     def test_an_output_enabled_again_keeps_its_mode(self):
         self.command(self.connect(), "output HEADLESS-1 mode 640x480@30Hz")
         self.command(self.connect(), "output HEADLESS-1 disable")

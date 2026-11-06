@@ -2201,14 +2201,76 @@ settings_apply_outputs(const OutputConfig *only)
 	return refused ? -1 : set;
 }
 
+/* The output command's "NAME power on|off|toggle", as sway's: turns the
+ * outputs NAME names off, as an idle daemon does over
+ * wlr-output-power-management, keeping their windows and places, or on
+ * again. An output its settings disable stays off. Returns -1 for an
+ * output command of any other kind, else as settings_output_command. */
+static int
+settings_output_power(const char *args, char *err, size_t errsize, int *parse)
+{
+	struct wlr_output_state state;
+	char buf[1024], *rest = buf, *name, *word;
+	int on, ok, named = 0, found = 0, refused = 0;
+	Monitor *m;
+	if (strlen(args) >= sizeof(buf))
+		return -1;
+	strcpy(buf, args);
+	if (!(name = settings_arg(&rest)) || !*name || strcmp(settings_word(&rest), "power"))
+		return -1;
+	word = settings_word(&rest);
+	if (*rest || (strcmp(word, "on") && strcmp(word, "off") && strcmp(word, "toggle"))) {
+		snprintf(err, errsize, "output %s power takes on, off or toggle", name);
+		*parse = 1;
+		return 0;
+	}
+	*parse = 0;
+	wl_list_for_each(m, &mons, link) {
+		if (!settings_output_named(name, m->wlr_output))
+			continue;
+		named = 1;
+		if (!m->wlr_output->enabled && !m->asleep)
+			continue;
+		found = 1;
+		on = !strcmp(word, "toggle") ? m->asleep : !strcmp(word, "on");
+		if (on != m->asleep)
+			continue;
+		wlr_output_state_init(&state);
+		m->gamma_lut_changed = 1; /* reapplied once it's on again */
+		wlr_output_state_set_enabled(&state, on);
+		ok = wlr_output_commit_state(m->wlr_output, &state);
+		wlr_output_state_finish(&state);
+		if (ok)
+			m->asleep = !on;
+		else
+			refused = 1;
+	}
+	if (found) {
+		updatemons(NULL, NULL);
+		ipc_event_output();
+	}
+	if (found && !refused)
+		return 1;
+	if (found)
+		snprintf(err, errsize, "An output refused to power %s", word);
+	else if (named)
+		snprintf(err, errsize, "Output %s is disabled, so it has no power to turn on or off", name);
+	else
+		snprintf(err, errsize, "No output is called %s", name);
+	return 0;
+}
+
 /* The output command, "NAME SETTING...": sets them now, on the outputs
- * NAME names, "*" for all, without keeping them past a reload. Returns
- * 1, or 0 with err saying why; *parse says it didn't parse. */
+ * NAME names, "*" for all, without keeping them past a reload; or
+ * settings_output_power's "NAME power on|off|toggle". Returns 1, or 0 with
+ * err saying why; *parse says it didn't parse. */
 static int
 settings_output_command(char *args, char *err, size_t errsize, int *parse)
 {
 	OutputConfig oc;
 	int set;
+	if ((set = settings_output_power(args, err, errsize, parse)) >= 0)
+		return set;
 	*parse = !settings_parse_output(&oc, args, err, errsize);
 	if (*parse)
 		return 0;
