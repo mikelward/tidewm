@@ -77,6 +77,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `[con_id=N] focus` | Shows the window's workspace and focuses it |
 | `focus next\|prev` | Focuses the next or previous window on the focused monitor, in stack order, going round |
 | `kill` | Asks the window to close |
+| `send_shortcut MODS+KEY` | tidewm's own, as Hyprland's `sendshortcut`: sends the window a press and release of `KEY`, such as `ctrl+v`, with the modifiers `ctrl`, `shift`, `alt` or `super` held, whether or not it's focused, as tide's picker pastes. `KEY` is a key name, ignoring case, sent as the key that gives it on the keyboard's layout now, at its lowest level, so a shifted one, as `plus` on a US keyboard, wants `shift` too; focus stays where it was. It fails while the screen is locked |
 | `exec COMMAND` | Runs the rest of the payload, `;` and all, with `/bin/sh -c`, in a session of its own. sway ends it at an unquoted `;`; tidewm leaves the shell to read its own quotes |
 | `reload` | Reads the config file again ([`config.md`](config.md)); fails with its errors, keeping what was loaded |
 | `mode NAME` | Makes the config file's mode `NAME`'s bindings the ones in force; `mode default` goes back to the top level. `NAME` may be in `"` |
