@@ -163,7 +163,10 @@ fails for a name no output has. An output enabled again keeps the mode
 it had and goes back to the position it was last given; a mode or
 position given while it's disabled, by the command or its line, is used
 once it's enabled. Enabling or disabling an output wakes it from the power
-saving an idle daemon may have put it in.
+saving an idle daemon may have put it in. The command's `output NAME power
+on|off|toggle` puts it in that power saving, or takes it out, as sway's
+does ([`ipc.md`](ipc.md)); it isn't a setting, and output lines don't take
+it.
 
 An output without a position, or with an `auto` one, is placed as
 Hyprland places monitors: in the order they were connected, each beside
