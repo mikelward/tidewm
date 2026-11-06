@@ -35,6 +35,7 @@ version of `wlroots` should target this branch.
 ### Building dwl
 dwl has the following dependencies:
 - json-c (for tidewm's IPC)
+- PCRE2 (for `for_window` rules' patterns)
 - libinput
 - wayland
 - wlroots (compiled with the libinput backend)

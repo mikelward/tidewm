@@ -111,8 +111,10 @@ runs once, when the window appears; a title that changes later isn't
 matched again.
 
 `CRITERIA` is `key=value` pairs, as in `[app_id="^firefox$" title=Private]`.
-A value is a word or text in `"`, where `\"` is a quote, and is a POSIX
-extended regular expression, matching anywhere unless anchored:
+A value is a word or text in `"`, where `\"` is a quote, and is a PCRE2
+pattern, as sway's are, matching anywhere unless anchored. It's read as
+UTF-8, with Unicode's classes, so `\w` takes `é` too, and `(?i)` ignores
+case:
 
 | Key | Matches |
 |---|---|
