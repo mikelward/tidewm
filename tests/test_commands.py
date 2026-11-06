@@ -66,7 +66,7 @@ class CommandTest(TidewmTest):
     def test_an_escaped_space_at_the_end_of_exec_stays(self):
         self.assertEqual(self.exec_output("exec exec > {out}; printf '<%s>' foo\\ "), b"<foo >")
 
-    def test_commands_before_exec_end_at_a_semicolon_quotes_and_all(self):
+    def test_commands_before_exec_end_at_a_semicolon_apostrophes_and_all(self):
         output = self.exec_output("workspace Bob's tasks; exec echo ran > {out}")
         self.assertEqual(output, b"ran\n")
         self.assertIn("Bob's tasks", self.workspace_names())

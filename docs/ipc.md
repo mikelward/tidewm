@@ -53,8 +53,9 @@ Any other type gets `{"success": false, "error": "unsupported message type"}`.
 
 ### Commands
 
-A `RUN_COMMAND` payload holds commands separated by `;`, quotes and all, so
-a workspace can be named `Bob's tasks`. An `exec` command is different: it
+A `RUN_COMMAND` payload holds commands separated by `;`, but not one in
+double quotes, as in sway. A `'` is no quote, so a workspace can be named
+`Bob's tasks`, and tidewm's quotes take no escapes. An `exec` command is different: it
 takes the rest of the payload, `;` included, and its shell gets it as
 written, so put `exec` last. Empty commands are skipped. Each gets a
 result:
@@ -68,7 +69,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 |---|---|
 | `nop` | Nothing |
 | `exit` | Sends the `shutdown` event, then exits |
-| `workspace NAME` | Shows that workspace on every monitor, making it if it's new. The rest of the line is the name, spaces and all |
+| `workspace NAME` | Shows that workspace on every monitor, making it if it's new. The rest of the line is the name, spaces and all, or it's in double quotes, which may hold a `;`; a name in quotes can't hold a `"`, and is a name even as `"back_and_forth"` |
 | `workspace number N` | The same, for the workspace named `N` |
 | `workspace back_and_forth` | Shows the previous workspace |
 | `move [container\|window] [to] workspace NAME` | Moves the window to that workspace's part on its own monitor, making it if it's new. `number N` and `back_and_forth` work here too |
@@ -97,9 +98,9 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `switch lid\|tablet on\|off` | tidewm's own: moves a switch device of tidewm's own, as if a switch such as the lid had moved, which runs the config file's `bindswitch` lines for it ([`config.md`](config.md)): for a test, which has no lid, or a lid the hardware doesn't report |
 | `unlock` | tidewm's own, tide's SPEC §10: drops a lock whose screen locker has gone, as after it crashed, showing the windows again and focusing the top one: from a TTY (`swaymsg -s "$XDG_RUNTIME_DIR"/tidewm-ipc.*.sock unlock`), the way back in that keeps the session. Until then the screen stays covered, no key or pointer event reaches a window, and a new locker may take the lock over. It fails while a locker holds the lock, which only that locker may end, and with nothing locked |
 | `chvt N` | tidewm's own: switches to virtual terminal `N`; fails without a session, as on the headless backend |
-| `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD` |
-| `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty |
-| `unpersist workspace NAME` | tidewm's own: lets it go once it's empty and not current |
+| `rename workspace [OLD] to NEW` | Renames the current workspace, or `OLD`. Either name may be in double quotes, as for `workspace`; an `OLD` with ` to ` in it must be |
+| `persist workspace NAME` | tidewm's own: keeps that workspace, making it if it's new, even while it's empty. `NAME` may be in double quotes, as for `workspace` |
+| `unpersist workspace NAME` | tidewm's own: lets it go once it's empty and not current. `NAME` may be in double quotes, as for `workspace` |
 | `urgent enable\|disable` | Marks the window urgent, as the most recent mark, or takes its mark away, as in sway. sway's `allow` and `deny` aren't supported: every window may be marked |
 | `grant [--pid PID] [--key KEY] [--workspace NAME] [APP ...]` | tidewm's own: a one-shot grant for the focus guard ([`config.md`](config.md)). The first new window of one of the `APP`s takes focus, or of any app for `*`, which stands alone; `APP`s match ignoring case and a `.desktop`, and a bare name matches a qualified ID's last part, as `files` matches `org.example.Files`. With `--pid`, a window whose process descends from `PID` takes it too, and `APP` may be left out. `--workspace` takes the window to that workspace, made if it's new, with focus. `--key` names the grant for `grant extend`. Options take `--opt VALUE` or `--opt=VALUE` |
 | `grant --or-recent APP ...` | tidewm's own: a notification's click, as tide's shell grants one. The same one-shot grant for the `APP`s, which, if it lapses unused and you've done nothing else, brings up the most recently focused window of any of them, wherever it is (or, with none ever focused, any of them) |
