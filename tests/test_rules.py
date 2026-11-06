@@ -14,6 +14,8 @@ for_window [app_id=twice] move to workspace second
 for_window [app_id=both shell=xdg_shell] move to workspace both; floating enable
 for_window [class="^test\.x11$"] floating enable
 for_window [app_id=hidden] move to workspace elsewhere; zoom
+for_window [app_id="(?i)^TEST\.Caseless$"] floating enable
+for_window [title="^Draft \d+ \w+?$"] move to workspace drafts
 """
 
 
@@ -45,6 +47,14 @@ class RulesTest(TidewmTest):
         ipc = self.window_ipc()
         self.assertEqual(self.new(ipc, "test.secret", "Secret plans")["workspace"], "hidden")
         self.assertEqual(self.new(ipc, "test.open", "Not Secret")["workspace"], "1")
+
+    def test_a_pattern_is_pcre2s_as_sways_are(self):
+        ipc = self.window_ipc()
+        # (?i) makes it ignore case
+        self.assertEqual(self.new(ipc, "test.caseless")["type"], "floating_con")
+        # \d, \w and a lazy count, with \w taking Unicode's letters
+        self.assertEqual(self.new(ipc, "test.draft", "Draft 12 Ünïcode")["workspace"], "drafts")
+        self.assertEqual(self.new(ipc, "test.nodraft", "Draft twelve")["workspace"], "1")
 
     def test_two_matching_rules_run_in_turn_and_leave_no_empty_workspace(self):
         ipc = self.window_ipc()
@@ -104,6 +114,20 @@ class RulesTest(TidewmTest):
             self.assertFalse(result["success"], text)
             self.assertIn(error, result["error"], text)
         self.assertEqual(self.connect().request(GET_CONFIG)["config"], RULES)
+
+
+class RuleMatchErrorTest(TidewmTest):
+    """A match PCRE2 can't finish, here one past the limit the pattern
+    sets itself, runs nothing and says why."""
+    CONFIG = 'for_window [app_id="(*LIMIT_MATCH=1)^(test)+$"] floating enable\n'
+
+    def test_a_match_that_errs_runs_nothing_and_is_logged(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        _, con = self.open_window(ipc, "test")
+        self.assertEqual(con["type"], "con")
+        self.assertIn("tidewm: for_window rule 1: couldn't match its app_id: match limit exceeded",
+                      self.wm.output())
 
 
 class ConfigHRulesTest(TidewmTest):

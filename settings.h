@@ -10,7 +10,8 @@
  * after ipc.h.
  */
 #include <glob.h>
-#include <regex.h>
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
 
 #define SETTINGS_MAX_SIZE (1u << 20)
 /* How deep include lines may nest: deeper is a file that includes itself */
@@ -48,9 +49,10 @@ static const char *const settings_crit_names[CritLast] = {
 	"app_id", "class", "instance", "title", "shell",
 };
 
-/* A for_window rule: commands run on each new window its criteria match */
+/* A for_window rule: commands run on each new window its criteria match,
+ * each criterion a PCRE2 pattern, as sway's are */
 typedef struct {
-	regex_t re[CritLast];
+	pcre2_code *re[CritLast];
 	int has[CritLast];
 	char *command;
 } WindowRule;
@@ -228,7 +230,7 @@ settings_free(Settings *s)
 	for (i = 0; i < s->nrules; i++) {
 		for (j = 0; j < CritLast; j++)
 			if (s->rules[i].has[j])
-				regfree(&s->rules[i].re[j]);
+				pcre2_code_free(s->rules[i].re[j]);
 		free(s->rules[i].command);
 	}
 	free(s->rules);
@@ -879,7 +881,8 @@ settings_add_input(Settings *s, char *name, char *setting, unsigned int line,
 
 /* Reads for_window's criteria, [key=value ...], and its commands into a
  * new rule. A value is a word or text in double quotes, where \" is a
- * quote, and is a POSIX extended regular expression. */
+ * quote, and is a PCRE2 pattern, as sway's criteria are, in UTF-8 with
+ * Unicode's classes, matching anywhere unless anchored. */
 static int
 settings_add_rule(Settings *s, char *rest, unsigned int line, struct json_object *errors)
 {
@@ -887,6 +890,7 @@ settings_add_rule(Settings *s, char *rest, unsigned int line, struct json_object
 	char *p = rest, *key, *value, *out, msg[160];
 	size_t i, n;
 	int err, ok = 1, any = 0;
+	PCRE2_SIZE at;
 
 	if (*p++ != '[') {
 		settings_error(errors, line, "for_window needs [criteria], then commands");
@@ -941,10 +945,12 @@ settings_add_rule(Settings *s, char *rest, unsigned int line, struct json_object
 		{
 			char saved = *out;
 			*out = '\0';
-			err = regcomp(&rule.re[i], value, REG_EXTENDED | REG_NOSUB);
-			if (err) {
-				regerror(err, &rule.re[i], msg, sizeof(msg));
-				settings_error(errors, line, "for_window: %s=%s: %s", key, value, msg);
+			rule.re[i] = pcre2_compile((PCRE2_SPTR)value, PCRE2_ZERO_TERMINATED,
+					PCRE2_UTF | PCRE2_UCP, &err, &at, NULL);
+			if (!rule.re[i]) {
+				pcre2_get_error_message(err, (PCRE2_UCHAR *)msg, sizeof(msg));
+				settings_error(errors, line, "for_window: %s=%s: %s at character %zu",
+						key, value, msg, (size_t)at);
 				*out = saved;
 				ok = 0;
 				break;
@@ -968,7 +974,7 @@ settings_add_rule(Settings *s, char *rest, unsigned int line, struct json_object
 	if (!ok) {
 		for (i = 0; i < CritLast; i++)
 			if (rule.has[i])
-				regfree(&rule.re[i]);
+				pcre2_code_free(rule.re[i]);
 		return 0;
 	}
 	rule.command = settings_strdup(p, strlen(p));
@@ -1874,6 +1880,28 @@ settings_crit_value(Client *c, int crit)
 	}
 }
 
+/* Whether PCRE2 pattern re, rule's criterion crit, matches anywhere in
+ * value. A match PCRE2 can't finish (a value that isn't valid UTF-8, or a
+ * limit reached) is no match, and is logged, naming the rule, so a rule
+ * that never runs says why. */
+static int
+settings_matches(const pcre2_code *re, const char *value, size_t rule, int crit)
+{
+	pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
+	char msg[160];
+	int rc;
+	if (!md)
+		die("out of memory matching a for_window rule");
+	rc = pcre2_match(re, (PCRE2_SPTR)value, PCRE2_ZERO_TERMINATED, 0, 0, md, NULL);
+	pcre2_match_data_free(md);
+	if (rc < 0 && rc != PCRE2_ERROR_NOMATCH) {
+		pcre2_get_error_message(rc, (PCRE2_UCHAR *)msg, sizeof(msg));
+		fprintf(stderr, "tidewm: for_window rule %zu: couldn't match its %s: %s; its commands don't run\n",
+				rule + 1, settings_crit_names[crit], msg);
+	}
+	return rc >= 0;
+}
+
 /* Runs each for_window rule whose criteria all match the new window c, in
  * the file's order, its commands acting on c. Before c's new event, so
  * that says where the rules put it. */
@@ -1889,7 +1917,7 @@ settings_apply_rules(Client *c)
 		const WindowRule *r = &settings->rules[i];
 		for (crit = 0; crit < CritLast; crit++)
 			if (r->has[crit] && (!(value = settings_crit_value(c, crit))
-					|| regexec(&r->re[crit], value, 0, NULL, 0)))
+					|| !settings_matches(r->re[crit], value, i, crit)))
 				break;
 		if (crit < CritLast)
 			continue;
