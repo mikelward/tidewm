@@ -248,6 +248,18 @@ It stays on its workspace, which stays while it waits, and focusing it,
 as tide's shell does from its tray, a grant or `focus`, brings it back.
 Nothing else minimizes a window: an app's own request does nothing.
 
+### Windows kept open
+
+The IPC's `keep_open` command keeps a window open, for tide's pinned
+windows (its SPEC §6.5). `kill`, from a key or the IPC, leaves it open,
+and a `close_refused` window event lets a shell say why. A key bound
+with `--kept-open` counts only while you're typing in such a window, so a
+config can take an app's own close keys, as Ctrl+W, from it alone: every
+other window still gets them. It's kept open on the workspace it's on:
+on any other, however it got there, it isn't, and minimized it closes as
+any other.
+The window's own close button still closes it.
+
 ### IPC
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so

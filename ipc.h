@@ -365,6 +365,8 @@ ipc_json_window(Client *c)
 	json_object_object_add(obj, "maximized", json_object_new_boolean(c->ismaximized));
 	/* tidewm's own, tide's SPEC §6.7: hidden until it's focused */
 	json_object_object_add(obj, "minimized", json_object_new_boolean(c->isminimized));
+	/* tidewm's own, for tide's pinned windows: kill leaves it open */
+	json_object_object_add(obj, "keep_open", json_object_new_boolean(keptopen(c)));
 	json_object_object_add(obj, "rect", ipc_json_box(c->geom));
 	json_object_object_add(obj, "workspace", c->ws ? json_object_new_string(c->ws->name) : NULL);
 	json_object_object_add(obj, "output", c->mon ? json_object_new_string(c->mon->wlr_output->name) : NULL);
@@ -857,7 +859,8 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		}
 		if (!target)
 			return ipc_json_success(0, "No window to close");
-		client_send_close(target);
+		if (!closeclient(target))
+			return ipc_json_success(0, "The window is kept open");
 		return ipc_json_success(1, NULL);
 	}
 	/* tidewm's own, as Hyprland's sendshortcut: tide's picker pastes with it */
@@ -1026,6 +1029,25 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		if (!target)
 			return ipc_json_success(0, "No window to minimize");
 		setminimized(target, minimized);
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own, for tide's pinned windows (its SPEC §6.5): kill
+	 * leaves it open, where it is (closeclient), and --kept-open
+	 * bindings count while the keyboard's in it */
+	if (ipc_take(&cmd, "keep_open")) {
+		int kept, was;
+		if ((kept = ipc_switch(cmd, keptopen(target), 0)) < 0) {
+			error = "Expected keep_open enable|disable|toggle";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to keep open");
+		/* Set or cleared whether or not it shows: minimized, or on
+		 * another workspace, it's kept open, or not, when it's back */
+		was = keptopen(target);
+		setkeptopen(target, kept);
+		if (!was != !keptopen(target))
+			ipc_event_window(target, "keep_open");
 		return ipc_json_success(1, NULL);
 	}
 	if (ipc_take(&cmd, "fullscreen")) {
