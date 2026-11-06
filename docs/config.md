@@ -57,7 +57,8 @@ supported yet. In an `input` or `output` line, a name or value may be in
   `Mod1+Shift+greater` both work on a US keyboard.
 
 A later binding of the same keys replaces an earlier one, though a
-`--release` binding is apart from the press one. Holding a key repeats its
+`--release` binding is apart from the press one, and a `--kept-open` one
+from one for every window. Holding a key repeats its
 press binding, as dwl's keys do. Flags, before the keys:
 
 - **`--release`:** runs when the key comes up, if no other key, pointer
@@ -69,6 +70,13 @@ press binding, as dwl's keys do. Flags, before the keys:
   `bindsym --release Super_L nop launcher` is a tap a shell can listen for.
 - **`--locked`:** runs on the lock screen too. Other bindings, and all of
   `config.h`'s keys, don't.
+- **`--kept-open`:** tidewm's own: counts only while the keyboard is in a
+  window kept open, or a popup of one (the IPC's `keep_open`,
+  [`ipc.md`](ipc.md)), and then before a binding of the same keys for
+  every window. Otherwise the key goes to the window, as if it weren't
+  bound. `bindsym --kept-open Ctrl+w kill` takes Ctrl+W from a window
+  kept open alone, which `kill` then leaves open, and every other window
+  still gets it.
 
 Any other flag is an error.
 

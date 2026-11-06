@@ -22,6 +22,7 @@ typedef struct {
 	xkb_keysym_t sym;
 	int release; /* runs when the key comes up, if it was tapped */
 	int locked; /* runs while the screen is locked, too */
+	int kept_open; /* counts only while the keyboard's in a window kept open */
 	char *keys; /* as written, for messages */
 	char *command;
 } Binding;
@@ -452,7 +453,7 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 	uint32_t mods;
 	xkb_keysym_t sym;
 	size_t i;
-	int release = 0, locked_too = 0;
+	int release = 0, locked_too = 0, kept_open = 0;
 	Binding *b;
 
 	while (rest[0] == '-' && rest[1] == '-') {
@@ -461,6 +462,8 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 			release = 1;
 		} else if (!strcmp(flag, "--locked")) {
 			locked_too = 1;
+		} else if (!strcmp(flag, "--kept-open")) {
+			kept_open = 1;
 		} else {
 			settings_error(errors, line, "bindsym has no flag %s", flag);
 			return 0;
@@ -478,10 +481,12 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 		return 0;
 	}
 	/* A later binding of the same keys replaces an earlier one; a release
-	 * binding is apart from a press one */
+	 * binding is apart from a press one, and a --kept-open one from one
+	 * for every window */
 	for (i = 0; i < mode->nbindings; i++) {
 		b = &mode->bindings[i];
-		if (b->mods == mods && b->sym == sym && b->release == release) {
+		if (b->mods == mods && b->sym == sym && b->release == release
+				&& b->kept_open == kept_open) {
 			free(b->keys);
 			free(b->command);
 			break;
@@ -497,6 +502,7 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 	b->sym = sym;
 	b->release = release;
 	b->locked = locked_too;
+	b->kept_open = kept_open;
 	b->keys = spec;
 	b->command = settings_strdup(rest, strlen(rest));
 	return 1;
@@ -1774,22 +1780,34 @@ settings_loaded_path(void)
 }
 
 /* The current mode's press or release binding for these keys, or NULL.
- * While the screen is locked, only a --locked one counts. */
+ * While the screen is locked, only a --locked one counts. A --kept-open
+ * one counts only while the keyboard's in a window kept open, and then
+ * before one for every window; otherwise the key goes to the window. */
 static const Binding *
 settings_find(uint32_t mods, xkb_keysym_t sym, int release)
 {
+	const Binding *found = NULL;
 	const Mode *mode;
 	size_t i;
+	int kept = -1; /* not asked yet */
 	if (!settings)
 		return NULL;
 	mode = &settings->modes[settings_mode];
 	for (i = 0; i < mode->nbindings; i++) {
 		const Binding *b = &mode->bindings[i];
-		if (b->mods == CLEANMASK(mods) && b->sym == sym && b->release == release
-				&& (!locked || b->locked))
+		if (b->mods != CLEANMASK(mods) || b->sym != sym || b->release != release
+				|| (locked && !b->locked))
+			continue;
+		if (!b->kept_open) {
+			found = found ? found : b;
+			continue;
+		}
+		if (kept < 0)
+			kept = keyboard_kept_open();
+		if (kept)
 			return b;
 	}
-	return NULL;
+	return found;
 }
 
 /* Runs a binding's or a rule's commands, on window if it's given, and
@@ -3089,6 +3107,7 @@ settings_json_bindings(void)
 			json_object_object_add(b, "mode", json_object_new_string(settings->modes[i].name));
 			json_object_object_add(b, "release", json_object_new_boolean(k->release));
 			json_object_object_add(b, "locked", json_object_new_boolean(k->locked));
+			json_object_object_add(b, "kept_open", json_object_new_boolean(k->kept_open));
 			json_object_array_add(list, b);
 		}
 	}
@@ -3103,6 +3122,7 @@ settings_json_bindings(void)
 		json_object_object_add(b, "mode", json_object_new_string("default"));
 		json_object_object_add(b, "release", json_object_new_boolean(0));
 		json_object_object_add(b, "locked", json_object_new_boolean(sw->locked));
+		json_object_object_add(b, "kept_open", json_object_new_boolean(0));
 		json_object_array_add(list, b);
 	}
 	return list;

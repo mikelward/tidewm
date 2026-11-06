@@ -162,6 +162,7 @@ class BindingsTest(TidewmTest):
     CONFIG = """set $mod Mod4
 bindsym $mod+Return exec foot
 bindsym --release $mod+d exec launcher
+bindsym --kept-open Ctrl+w kill
 mode resize {
     bindsym --locked Escape mode default
 }
@@ -171,17 +172,18 @@ bindswitch tablet:toggle workspace tablet
 """
 
     def test_each_binding_with_its_keys_command_and_mode(self):
-        def key(keys, command, mode="default", release=False, locked=False):
+        def key(keys, command, mode="default", release=False, locked=False, kept_open=False):
             return {"type": "key", "keys": keys, "command": command, "mode": mode,
-                    "release": release, "locked": locked}
+                    "release": release, "locked": locked, "kept_open": kept_open}
 
         def switch(keys, command, locked=False):
             return {"type": "switch", "keys": keys, "command": command, "mode": "default",
-                    "release": False, "locked": locked}
+                    "release": False, "locked": locked, "kept_open": False}
 
         self.assertEqual(self.connect().request(GET_BINDINGS), [
             key("Mod4+Return", "exec foot"),
             key("Mod4+d", "exec launcher", release=True),
+            key("Ctrl+w", "kill", kept_open=True),
             key("Mod4+r", "mode resize"),
             key("Escape", "mode default", mode="resize", locked=True),
             switch("lid:on", "output eDP-1 disable", locked=True),

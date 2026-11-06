@@ -193,6 +193,7 @@ typedef struct {
 	int isfloating, isurgent, isfullscreen;
 	int ismaximized; /* covers its monitor's window area, above the other tiles */
 	int isminimized; /* hidden, on its workspace still, until it's focused (setminimized) */
+	unsigned long keptopen_ws; /* the workspace it's kept open on, by IPC id, or 0 (keepopen.h) */
 	int issticky; /* floating, it's on every workspace, as sway's sticky */
 	int recenter; /* it followed its parent: to its middle once laid out */
 	struct wlr_scene_buffer *dim; /* dim.h's layer over it */
@@ -578,6 +579,7 @@ static struct wlr_xwayland *xwayland;
 #include "client.h"
 
 #include "ime.h"
+#include "keepopen.h"
 
 #include "workspace.h"
 #include "ipc.h"
@@ -2129,7 +2131,7 @@ killclient(const Arg *arg)
 {
 	Client *sel = focustop(selmon);
 	if (sel)
-		client_send_close(sel);
+		closeclient(sel); /* keepopen.h */
 }
 
 void
@@ -3749,9 +3751,11 @@ unmapnotify(struct wl_listener *listener, void *data)
 	ipc_event_window(c, "close");
 	if (c == focused_client)
 		focused_client = NULL;
-	/* Mapping again, it's maximized only if it asks again, and shown */
+	/* Mapping again, it's maximized only if it asks again, and shown,
+	 * and kept open only if a shell says so again: it's a new window */
 	c->ismaximized = 0;
 	c->isminimized = 0;
+	c->keptopen_ws = 0;
 	c->wantsfullscreen = 0;
 	c->unmaximized = (struct wlr_box){0};
 
