@@ -100,8 +100,8 @@ tests/client: tests/client.c tests/xdg-shell-client-protocol.h tests/xdg-shell-p
 	$(CC) tests/client.c tests/xdg-shell-protocol.c tests/xdg-activation-v1-protocol.c \
 		tests/xdg-dialog-v1-protocol.c tests/content-type-v1-protocol.c \
 		tests/hyprland-focus-grab-v1-protocol.c -Itests \
-		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
-		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
+		`$(PKG_CONFIG) --cflags wayland-client xkbcommon` $(DWLDEVCFLAGS) $(CFLAGS) \
+		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client xkbcommon` -o $@
 # tests/x11client needs XWayland's xcb libraries. The substitution makes it
 # a prerequisite only when XWAYLAND is set, as it is for CI's tests.
 tests/x11client: tests/x11client.c

@@ -616,6 +616,111 @@ ipc_is_exec(const char *cmd)
 	return !strncasecmp(cmd, "exec", 4) && (!cmd[4] || isspace((unsigned char)cmd[4]));
 }
 
+/* A key, as send_shortcut has it: the keycode giving sym on the keymap's
+ * active layout, at its lowest level, so the app reads the sym it was
+ * sent, given the modifiers that level needs, as shift for plus. */
+struct ipc_key {
+	xkb_layout_index_t layout;
+	xkb_keysym_t sym;
+	xkb_keycode_t code;
+	xkb_level_index_t level;
+};
+
+static void
+ipc_find_key(struct xkb_keymap *keymap, xkb_keycode_t code, void *data)
+{
+	struct ipc_key *key = data;
+	const xkb_keysym_t *syms;
+	xkb_level_index_t level, levels = xkb_keymap_num_levels_for_key(keymap, code, key->layout);
+	int i, n;
+	for (level = 0; level < levels && (!key->code || level < key->level); level++) {
+		n = xkb_keymap_key_get_syms_by_level(keymap, code, key->layout, level, &syms);
+		for (i = 0; i < n; i++)
+			if (syms[i] == key->sym) {
+				key->code = code;
+				key->level = level;
+				return;
+			}
+	}
+}
+
+/* tidewm's own, as Hyprland's sendshortcut: sends the window shortcut, as
+ * "ctrl+v", a press and a release with those modifiers held, whatever has
+ * the keyboard, which keeps it after. Returns an error, or NULL. */
+static const char *
+ipc_send_shortcut(Client *c, const char *shortcut)
+{
+	static const struct { const char *name, *xkb; } modnames[] = {
+		{ "ctrl", XKB_MOD_NAME_CTRL }, { "control", XKB_MOD_NAME_CTRL },
+		{ "shift", XKB_MOD_NAME_SHIFT },
+		{ "alt", XKB_MOD_NAME_ALT }, { "mod1", XKB_MOD_NAME_ALT },
+		{ "super", XKB_MOD_NAME_LOGO }, { "mod4", XKB_MOD_NAME_LOGO },
+		{ "logo", XKB_MOD_NAME_LOGO },
+	};
+	struct wlr_keyboard *kb = wlr_seat_get_keyboard(seat);
+	struct wlr_surface *surface = client_surface(c);
+	struct wlr_surface *had = seat->keyboard_state.focused_surface;
+	struct wlr_keyboard_modifiers held = {0};
+	struct ipc_key key = {0};
+	struct timespec now;
+	uint32_t pressed[WLR_KEYBOARD_KEYS_CAP];
+	size_t npressed = 0;
+	char buf[64], *tok, *next;
+	uint32_t msec;
+	size_t i;
+
+	/* Nothing reaches a window under the lock, as no key does */
+	if (locked)
+		return "The screen is locked";
+	if (!kb || !kb->keymap || !kb->xkb_state)
+		return "No keyboard to send it with";
+	if (!surface || !surface->mapped)
+		return "The window has no surface to send it to";
+	if (snprintf(buf, sizeof(buf), "%s", shortcut) >= (int)sizeof(buf) || !*buf)
+		return "Expected send_shortcut MODS+KEY, such as ctrl+v";
+	held.group = kb->modifiers.group;
+	key.layout = xkb_state_serialize_layout(kb->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE);
+	for (tok = buf; (next = strchr(tok, '+')); tok = next + 1) {
+		xkb_mod_index_t mod = XKB_MOD_INVALID;
+		*next = '\0';
+		for (i = 0; i < LENGTH(modnames); i++)
+			if (!strcasecmp(tok, modnames[i].name))
+				mod = xkb_keymap_mod_get_index(kb->keymap, modnames[i].xkb);
+		if (mod == XKB_MOD_INVALID)
+			return "send_shortcut's modifiers are ctrl, shift, alt and super";
+		held.depressed |= 1u << mod;
+	}
+	if ((key.sym = xkb_keysym_from_name(tok, XKB_KEYSYM_CASE_INSENSITIVE)) == XKB_KEY_NoSymbol)
+		return "send_shortcut's key isn't a key name";
+	xkb_keymap_key_for_each(kb->keymap, ipc_find_key, &key);
+	if (!key.code)
+		return "No key on the keyboard's layout gives send_shortcut's key";
+
+	/* Straight to the window, past any grab, as from its own keyboard */
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	msec = (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
+	if (had != surface)
+		wlr_seat_keyboard_enter(seat, surface, NULL, 0, &held);
+	else
+		wlr_seat_keyboard_send_modifiers(seat, &held);
+	/* An XKB keycode is evdev's plus 8 */
+	wlr_seat_keyboard_send_key(seat, msec, key.code - 8, WL_KEYBOARD_KEY_STATE_PRESSED);
+	wlr_seat_keyboard_send_key(seat, msec, key.code - 8, WL_KEYBOARD_KEY_STATE_RELEASED);
+	if (had == surface)
+		wlr_seat_keyboard_send_modifiers(seat, &kb->modifiers);
+	else if (had) {
+		/* Without the keys a binding took, as client_notify_enter has it,
+		 * whose releases the window won't get */
+		for (i = 0; i < kb->num_keycodes; i++)
+			if (!consumed[kb->keycodes[i]])
+				pressed[npressed++] = kb->keycodes[i];
+		wlr_seat_keyboard_enter(seat, had, pressed, npressed, &kb->modifiers);
+	}
+	else
+		wlr_seat_keyboard_clear_focus(seat);
+	return NULL;
+}
+
 /* Runs one command, as a RUN_COMMAND payload holds several separated by
  * semicolons, and returns its result. Criteria in brackets, [con_id=N],
  * pick the window a command acts on; without them it's window, for a
@@ -734,6 +839,18 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		if (!target)
 			return ipc_json_success(0, "No window to close");
 		client_send_close(target);
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own, as Hyprland's sendshortcut: tide's picker pastes with it */
+	if (ipc_take(&cmd, "send_shortcut")) {
+		if (!*cmd || strpbrk(cmd, " \t")) {
+			error = "Expected send_shortcut MODS+KEY, such as ctrl+v";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to send it to");
+		if ((error = ipc_send_shortcut(target, cmd)))
+			return ipc_json_success(0, error);
 		return ipc_json_success(1, NULL);
 	}
 	if (!has_criteria && ipc_take(&cmd, "rename") && ipc_take(&cmd, "workspace")) {

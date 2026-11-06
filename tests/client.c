@@ -50,7 +50,10 @@
  * for the seat to have a pointer, "scroll AMOUNT" for each vertical
  * scroll it gets, and "button" for each button pressed on it. With
  * GRAB_FIRST set, it grabs focus for itself, as the grab command does,
- * before it first commits, so before it maps.
+ * before it first commits, so before it maps. With KEYS set, it prints
+ * "typing" once the compositor has its wl_keyboard, and for each key
+ * pressed in it, "key " and the key as its keymap reads it, after the
+ * modifiers held, as "key ctrl+v".
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
@@ -63,6 +66,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "hyprland-focus-grab-v1-client-protocol.h"
 #include "xdg-activation-v1-client-protocol.h"
@@ -82,6 +86,10 @@ static struct wl_surface *menu_surface;
 static int menu_configured;
 static struct wl_seat *seat;
 static struct wl_pointer *pointer;
+static struct wl_keyboard *keyboard;
+static struct xkb_context *xkb;
+static struct xkb_keymap *keymap;
+static struct xkb_state *xkb_state;
 static struct xdg_toplevel *window;
 static const char *mapped_app_id;
 static const char *app_id, *title; /* as it was last given them */
@@ -449,9 +457,90 @@ static const struct wl_pointer_listener pointer_listener = {
 };
 
 static void
+keyboard_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd, uint32_t size)
+{
+	char *map;
+	if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1)
+		die("the keymap isn't XKB's");
+	if ((map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0)) == MAP_FAILED)
+		die("can't map the keymap");
+	xkb_state_unref(xkb_state);
+	xkb_keymap_unref(keymap);
+	if (!(keymap = xkb_keymap_new_from_string(xkb, map, XKB_KEYMAP_FORMAT_TEXT_V1,
+				XKB_KEYMAP_COMPILE_NO_FLAGS)))
+		die("can't compile the keymap");
+	xkb_state = xkb_state_new(keymap);
+	munmap(map, size);
+	close(fd);
+}
+
+static void
+keyboard_enter(void *data, struct wl_keyboard *k, uint32_t serial, struct wl_surface *s,
+		struct wl_array *keys)
+{
+}
+
+static void
+keyboard_leave(void *data, struct wl_keyboard *k, uint32_t serial, struct wl_surface *s)
+{
+}
+
+static void
+keyboard_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t time,
+		uint32_t key, uint32_t state)
+{
+	static const struct { const char *name, *xkb; } mods[] = {
+		{ "ctrl", XKB_MOD_NAME_CTRL }, { "shift", XKB_MOD_NAME_SHIFT },
+		{ "alt", XKB_MOD_NAME_ALT }, { "super", XKB_MOD_NAME_LOGO },
+	};
+	char name[64];
+	size_t i;
+	if (state != WL_KEYBOARD_KEY_STATE_PRESSED || !xkb_state)
+		return;
+	printf("key ");
+	for (i = 0; i < sizeof(mods) / sizeof(mods[0]); i++)
+		if (xkb_state_mod_name_is_active(xkb_state, mods[i].xkb, XKB_STATE_MODS_EFFECTIVE) > 0)
+			printf("%s+", mods[i].name);
+	/* An XKB keycode is evdev's plus 8 */
+	xkb_keysym_get_name(xkb_state_key_get_one_sym(xkb_state, key + 8), name, sizeof(name));
+	printf("%s\n", name);
+	fflush(stdout);
+}
+
+static void
+keyboard_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t depressed,
+		uint32_t latched, uint32_t locked, uint32_t group)
+{
+	if (xkb_state)
+		xkb_state_update_mask(xkb_state, depressed, latched, locked, 0, 0, group);
+}
+
+static void
+keyboard_repeat_info(void *data, struct wl_keyboard *k, int32_t rate, int32_t delay)
+{
+}
+
+static const struct wl_keyboard_listener keyboard_listener = {
+	.keymap = keyboard_keymap,
+	.enter = keyboard_enter,
+	.leave = keyboard_leave,
+	.key = keyboard_key,
+	.modifiers = keyboard_modifiers,
+	.repeat_info = keyboard_repeat_info,
+};
+
+static void
 seat_capabilities(void *data, struct wl_seat *s, uint32_t caps)
 {
-	if ((caps & WL_SEAT_CAPABILITY_POINTER) && !pointer) {
+	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && getenv("KEYS") && !keyboard) {
+		xkb = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+		keyboard = wl_seat_get_keyboard(s);
+		wl_keyboard_add_listener(keyboard, &keyboard_listener, NULL);
+		/* The compositor answers in order, so it has the keyboard by then */
+		wl_callback_add_listener(wl_display_sync(display), &synced_listener,
+				(void *)"typing");
+	}
+	if ((caps & WL_SEAT_CAPABILITY_POINTER) && getenv("SCROLLS") && !pointer) {
 		pointer = wl_seat_get_pointer(s);
 		wl_pointer_add_listener(pointer, &pointer_listener, NULL);
 		/* The compositor answers in order, so it has the pointer by then */
@@ -519,7 +608,8 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 				&wp_content_type_manager_v1_interface, 1);
 	else if (!strcmp(interface, hyprland_focus_grab_manager_v1_interface.name))
 		grabs = wl_registry_bind(registry, name, &hyprland_focus_grab_manager_v1_interface, 1);
-	else if (!strcmp(interface, wl_seat_interface.name) && getenv("SCROLLS") && !seat) {
+	else if (!strcmp(interface, wl_seat_interface.name) && (getenv("SCROLLS") || getenv("KEYS"))
+			&& !seat) {
 		seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 5 ? version : 5);
 		wl_seat_add_listener(seat, &seat_listener, NULL);
 	}

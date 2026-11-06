@@ -254,7 +254,8 @@ tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so
 `swaymsg`, Quickshell's I3 module and other clients of sway's socket work
 with it. [`docs/ipc.md`](docs/ipc.md) lists what it answers. Its
 workspaces are on ext-workspace too, for Wayland clients that read that.
-Its own `capture` event says when a screen share or screenshot starts
+Its own `send_shortcut` command sends a window a shortcut, focused or
+not, as tide's picker pastes with it. Its own `capture` event says when a screen share or screenshot starts
 and stops, and of which window, for tide's Sharing pill, and its own
 output event when focus moves to another output, for tide's shell.
 
