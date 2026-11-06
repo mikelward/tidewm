@@ -36,6 +36,26 @@ class WorkspaceTest(TidewmTest):
         self.command(self.connect(), "workspace PR-12 login")
         self.assertEqual(self.workspace_names(), ["PR-12 login"])
 
+    def test_a_name_in_quotes_can_hold_a_semicolon(self):
+        # The ; in quotes is the name's, the one after them ends the command.
+        reply = self.connect().request(RUN_COMMAND, 'persist workspace "PR-12; login"; workspace "PR-12; login"')
+        self.assertEqual(reply, [{"success": True}] * 2)
+        self.assertEqual(self.workspace_names(), ["PR-12; login"])
+        self.command(self.connect(), 'workspace number "a;b"')
+        self.assertEqual(self.workspace_names(), ["PR-12; login", "a;b"])
+        self.command(self.connect(), 'unpersist workspace "PR-12; login"')
+        self.assertEqual(self.workspace_names(), ["a;b"])
+
+    def test_a_quoted_back_and_forth_is_a_name(self):
+        self.command(self.connect(), 'workspace "back_and_forth"')
+        self.assertEqual(self.workspace_names(), ["back_and_forth"])
+
+    def test_a_name_with_an_unclosed_quote_fails(self):
+        for command in ['workspace "PR-12', 'workspace "PR-12" login', 'persist workspace "x']:
+            reply = self.connect().request(RUN_COMMAND, command)
+            self.assertFalse(reply[0]["success"], command)
+        self.assertEqual(self.workspace_names(), ["1"])
+
     def test_an_empty_name_fails(self):
         reply = self.connect().request(RUN_COMMAND, "workspace")
         self.assertFalse(reply[0]["success"])
@@ -179,6 +199,18 @@ class WorkspaceTest(TidewmTest):
         self.command(self.connect(), "persist workspace spare")
         self.command(self.connect(), "rename workspace spare to extra")
         self.assertEqual(self.workspace_names(), ["in", "extra"])
+
+    def test_rename_names_in_quotes_holding_to_and_a_semicolon(self):
+        self.command(self.connect(), 'persist workspace "inbox to do"')
+        self.command(self.connect(), 'rename workspace "inbox to do" to "done; filed"')
+        self.assertEqual(self.workspace_names(), ["1", "done; filed"])
+        self.command(self.connect(), 'rename workspace to "a to b"')
+        self.assertEqual(self.workspace_names(), ["a to b", "done; filed"])
+        reply = self.connect().request(RUN_COMMAND, 'rename workspace "nowhere" to there')
+        self.assertFalse(reply[0]["success"])
+        reply = self.connect().request(RUN_COMMAND, 'rename workspace "a to b" there')
+        self.assertFalse(reply[0]["success"])
+        self.assertEqual(self.workspace_names(), ["a to b", "done; filed"])
 
     def test_rename_to_a_taken_name_fails(self):
         ipc = self.connect()

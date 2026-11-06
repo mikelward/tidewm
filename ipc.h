@@ -68,6 +68,7 @@ static struct json_object *settings_json_bindings(void);
 static int settings_output_command(char *args, char *err, size_t errsize, int *parse);
 static int settings_input_command(char *args, char *err, size_t errsize, int *parse);
 static struct json_object *settings_json_inputs(void);
+static char *settings_arg(char **p);
 static int fg_command(char *args, char *err, size_t errsize);
 static struct json_object *fg_json_last_input(void);
 static int fg_prompt_may_focus(void);
@@ -514,8 +515,24 @@ ipc_find_output(const char *arg)
 	return NULL;
 }
 
+/* A workspace's name in a command, as sway reads one: the rest of it, as
+ * written, or text in double quotes, which may hold a ; or " to ". NULL,
+ * with *error set, for an unclosed quote or more after the closing one. */
+static char *
+ipc_workspace_name(char *arg, const char **error)
+{
+	char *name;
+	if (*arg != '"')
+		return arg;
+	if (!(name = settings_arg(&arg)) || *arg) {
+		*error = "Expected a workspace name, or one in double quotes";
+		return NULL;
+	}
+	return name;
+}
+
 /* The workspace a command names: "number N", "back_and_forth" or a name,
- * made if it's new. */
+ * made if it's new. A name in quotes is a name, back_and_forth too. */
 static Workspace *
 ipc_command_workspace(char *arg, const char **error)
 {
@@ -526,6 +543,8 @@ ipc_command_workspace(char *arg, const char **error)
 		return prevws;
 	}
 	ipc_take(&arg, "number");
+	if (!(arg = ipc_workspace_name(arg, error)))
+		return NULL;
 	if (!(ws = ws_get(arg)))
 		*error = "Invalid workspace name";
 	return ws;
@@ -855,7 +874,17 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 	}
 	if (!has_criteria && ipc_take(&cmd, "rename") && ipc_take(&cmd, "workspace")) {
 		Workspace *from = curws;
-		if (ipc_take(&cmd, "to")) {
+		char *old;
+		if (*cmd == '"') {
+			/* A quoted old name may hold " to " */
+			if (!(old = settings_arg(&cmd)) || !ipc_take(&cmd, "to")) {
+				error = "Expected rename workspace [OLD] to NEW";
+				goto parse_error;
+			}
+			if (!(from = ws_find(old)))
+				return ipc_json_success(0, "No such workspace");
+			to = cmd;
+		} else if (ipc_take(&cmd, "to")) {
 			to = cmd;
 		} else if ((to = strstr(cmd, " to "))) {
 			*to = '\0';
@@ -868,6 +897,8 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			error = "Expected rename workspace [OLD] to NEW";
 			goto parse_error;
 		}
+		if (!(to = ipc_workspace_name(to, &error)))
+			goto parse_error;
 		if (!ws_name_ok(to))
 			return ipc_json_success(0, "Invalid workspace name");
 		if (ws_find(to))
@@ -1128,6 +1159,8 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			error = "Expected persist|unpersist workspace NAME";
 			goto parse_error;
 		}
+		if (!(cmd = ipc_workspace_name(cmd, &error)))
+			goto parse_error;
 		if (!(ws = persist ? ws_get(cmd) : ws_find(cmd)))
 			return ipc_json_success(0, persist ? "Invalid workspace name" : "No such workspace");
 		ws_set_persistent(ws, persist);
@@ -1142,22 +1175,30 @@ parse_error:
 	return result;
 }
 
-/* The next command in *p, ended at a ;, or for exec at the end: exec's
- * command goes to the shell as written, ; and all, so a shell's quoting
- * never has to be read here. Moves *p past the command, or returns NULL
- * once there are no more. */
+/* The next command in *p, ended at a ; that isn't in double quotes, as
+ * sway reads them, though tidewm's quotes take no escapes, or for exec at
+ * the end: exec's command goes to the shell as written, ; and all, so a
+ * shell's quoting never has to be read here. Moves *p past the command,
+ * or returns NULL once there are no more. */
 static char *
 ipc_next_command(char **p)
 {
-	char *cmd = *p, *semi;
+	char *cmd = *p, *c;
+	int quoted = 0;
 	if (!cmd)
 		return NULL;
-	if (ipc_is_exec(cmd) || !(semi = strchr(cmd, ';'))) {
-		*p = NULL;
-		return cmd;
+	if (!ipc_is_exec(cmd)) {
+		for (c = cmd; *c; c++) {
+			if (*c == '"')
+				quoted = !quoted;
+			else if (*c == ';' && !quoted) {
+				*c = '\0';
+				*p = c + 1;
+				return cmd;
+			}
+		}
 	}
-	*semi = '\0';
-	*p = semi + 1;
+	*p = NULL;
 	return cmd;
 }
 
