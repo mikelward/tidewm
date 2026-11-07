@@ -1,7 +1,7 @@
 ---
 trigger: always_on
 alwaysApply: true
-last_modified: 2026-11-04
+last_modified: 2026-11-07
 ---
 
 # tidewm
@@ -119,3 +119,6 @@ Shared by every mikelward repo and the user-level agent config; canonical in mik
   `settings.h`, included from `dwl.c` like `client.h`), so merging upstream dwl touches
   few lines.
 - **Subjects**. Write them for someone using tidewm.
+- **Releases**. Tags `v0.MINOR.PATCH` on `main`, PATCH being `git rev-list --count` of
+  the tagged commit. Bump MINOR for a change that breaks a config or an IPC client.
+  Never 1.x without asking. A pushed tag is never moved.
