@@ -170,6 +170,18 @@ workspace it was launched from: one that opens after you've moved on is
 there, unfocused, and that workspace turns urgent.
 [`docs/config.md`](docs/config.md) says how.
 
+### Focus when a window closes
+
+Closing the window you're in focuses the window under the pointer, as
+tide's SPEC §14.2 and Hyprland's `input:focus_on_close cursor` have it,
+going by where the windows left are once they've moved into its space.
+The pointer stays where it is. A layer surface over a window, such as a
+notification, doesn't count: the window under it takes focus. Focus goes
+to the window you were in before, as in dwl, when the pointer is over
+nothing, or over a window the focus guard holds, or when a dialog closes,
+which hands focus back to its parent. A window you weren't in closing
+moves no focus.
+
 ### Notifications and the keyboard
 
 A layer surface with on-demand keyboard focus, such as a notification's

@@ -8,8 +8,8 @@ import select
 import subprocess
 import unittest
 
-from harness import (CLIENT, EVENT_WINDOW, GET_CONFIG, GET_WORKSPACES, ROOT,
-                     RUN_COMMAND, TIMEOUT, TidewmTest)
+from harness import (CLIENT, EVENT_WINDOW, GET_CONFIG, GET_OUTPUTS, GET_WORKSPACES,
+                     ROOT, RUN_COMMAND, TIMEOUT, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
 LAUNCHER = os.path.join(ROOT, "tests", "launcher")
@@ -26,15 +26,17 @@ class GuardTest(TidewmTest):
     def grant(self, args):
         self.command(self.connect(), f"grant {args}")
 
-    def open(self, app_id, title=None, x11=False):
+    def open(self, app_id, title=None, x11=False, **kwargs):
         """Opens a window, returning its id and its client, whose stdin
-        takes "activate"."""
+        takes "activate". kwargs go to tests/client, as Tidewm.open_window
+        takes them."""
         if x11:
             client = self.wm.open_x11_window(app_id, title or app_id, stdin=True)
             match = lambda e: (e["change"] == "new" and e["container"].get(
                 "window_properties", {}).get("class") == app_id)
         else:
-            client = self.wm.open_window(app_id, title or app_id, stdin=True, stdout=True)
+            client = self.wm.open_window(app_id, title or app_id, stdin=True, stdout=True,
+                                         **kwargs)
             match = lambda e: e["change"] == "new" and e["container"]["app_id"] == app_id
         return self.ipc.next_event(EVENT_WINDOW, match)["container"]["id"], client
 
@@ -750,6 +752,100 @@ class HeldTest(GuardTest):
         held, _ = self.open("test.held")
         self.command(self.connect(), "focus next")
         self.assertEqual(self.state(held), (True, False))
+
+
+class CloseHelpers(GuardTest):
+    """Closing the window you're in focuses the window under the pointer,
+    as tide's SPEC §14.2 has it; the pointer jumps there with no time, so
+    focus doesn't follow it there first."""
+
+    def point(self, x, y):
+        outputs = self.connect().request(GET_OUTPUTS)
+        size = [str(max(o["rect"]["x"] + o["rect"]["width"] for o in outputs)),
+                str(max(o["rect"]["y"] + o["rect"]["height"] for o in outputs))]
+        subprocess.run([POINTER, "move", str(x), str(y), *size], env=self.wm.env,
+                       check=True, timeout=TIMEOUT)
+
+    def point_into(self, con_id):
+        rect = self.windows()[con_id]["rect"]
+        self.point(rect["x"] + 20, rect["y"] + 20)
+
+    def close(self, con_id):
+        self.command(self.connect(), f"[con_id={con_id}] kill")
+        self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "close"
+                            and e["container"]["id"] == con_id)
+
+    def focus(self, con_id):
+        self.command(self.connect(), f"[con_id={con_id}] focus")
+
+
+class CloseTest(CloseHelpers):
+    # A lone window half the width, centered, leaves room either side
+    CONFIG = ('for_window [app_id="^test.float$"] floating enable\n'
+              "single_window 0 0.5\n")
+
+    def test_closing_the_window_youre_in_focuses_the_one_under_the_pointer(self):
+        first, _ = self.open("test.first")
+        second, _ = self.open("test.second")
+        third, _ = self.open("test.third")
+        self.point_into(first)
+        self.assertEqual(self.focused(), [third])
+        self.close(third)
+        self.assertEqual(self.focused(), [first])  # not second, the most recent
+
+    def test_it_goes_by_where_the_windows_are_once_the_others_move_in(self):
+        first, _ = self.open("test.first")
+        second, _ = self.open("test.second")
+        third, _ = self.open("test.third")
+        self.focus(first)
+        self.focus(third)
+        self.point_into(third)  # where second grows into
+        self.close(third)
+        self.assertEqual(self.focused(), [second])  # not first, the most recent
+
+    def test_over_nothing_the_most_recent_window_takes_focus(self):
+        lone, _ = self.open("test.lone")
+        other, _ = self.open("test.float", size="300x200")
+        self.focus(lone)
+        closing, _ = self.open("test.float", size="300x200")
+        rect = self.windows()[lone]["rect"]
+        self.assertGreater(rect["x"], 1)
+        self.point(rect["x"] // 2, rect["y"] + rect["height"] // 2)
+        self.close(closing)
+        self.assertEqual(self.focused(), [lone])  # not nothing, nor other
+
+    def test_a_window_closing_that_you_werent_in_moves_no_focus(self):
+        first, _ = self.open("test.first")
+        second, _ = self.open("test.second")
+        third, _ = self.open("test.third")
+        self.point_into(first)
+        self.close(second)
+        self.assertEqual(self.focused(), [third])
+
+    def test_a_dialog_closing_gives_its_parent_focus_whatevers_under_the_pointer(self):
+        other, _ = self.open("test.other")
+        parent, client = self.open("test.app")
+        client.stdin.write(b"dialog\n")
+        client.stdin.flush()
+        dialog = self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new"
+                                     and e["container"]["app_id"] == "test.app.dialog")
+        dialog = dialog["container"]["id"]
+        self.point_into(other)
+        self.assertEqual(self.focused(), [dialog])
+        self.close(dialog)
+        self.assertEqual(self.focused(), [parent])
+
+
+class HeldCloseTest(CloseHelpers):
+    def test_a_held_window_under_the_pointer_waits_when_the_focused_one_closes(self):
+        self.grant("test.first")
+        first, _ = self.open("test.first")
+        self.grant("test.second")
+        second, _ = self.open("test.second")
+        held, _ = self.open("test.held")
+        self.point_into(held)
+        self.close(second)
+        self.assertEqual((self.state(held), self.focused()), ((False, True), [first]))
 
 
 class FocusedActivationTest(GuardTest):

@@ -66,6 +66,7 @@ static struct wl_event_source *fg_timer; /* for or-recent grants' lapses */
 static int fg_focusing; /* focus that isn't you moving on: the guard's own, or an output change's */
 static Client *fg_mapping; /* the window mapping now: focus moving meanwhile isn't you */
 static Client *fg_granted; /* a new window that used a grant */
+static Client *fg_closing; /* the window with focus that's closing, while it goes */
 static unsigned long fg_deferred; /* the IPC id of a granted window whose focus waits */
 /* A new window a canceled grant sends to the workspace it was launched
  * from, or to its --workspace: by IPC id, 0 for none, else by name */
@@ -737,6 +738,39 @@ fg_focused(Client *c)
 	if (fg_focusing || returned || fg_mapping || deferred)
 		return;
 	fg_cancel();
+}
+
+/* The window to focus as fg_closing, the window you were in, closes, as
+ * tide's SPEC §14.2 and Hyprland's input:focus_on_close cursor have it:
+ * the window under the pointer, once the windows left have moved in.
+ * Its place is its geometry, which arrange() has set though the window
+ * hasn't drawn at its new size yet. Like Hyprland, it looks past layer
+ * surfaces, such as a notification, at the windows under them. The
+ * pointer stays where it is. Otherwise the most recent window, as dwl
+ * has it: when nothing is under the pointer, or the window there is one
+ * the guard holds, which waits for you to go to it (TODO.md's *A held
+ * window waits for you*), or the one closing is a dialog, whose parent
+ * takes focus back. */
+static Client *
+fg_after_close(void)
+{
+	static const int lyrs[] = {LyrFS, LyrFloat, LyrTile}; /* topmost first */
+	struct wlr_scene_node *node;
+	Client *c;
+	size_t i;
+	if (!fg_closing || client_get_parent(fg_closing))
+		return focustop(selmon);
+	for (i = 0; i < LENGTH(lyrs); i++) {
+		wl_list_for_each_reverse(node, &layers[lyrs[i]]->children, link) {
+			if (!node->enabled || node->type != WLR_SCENE_NODE_TREE
+					|| !(c = node->data) || c == fg_closing
+					|| client_is_unmanaged(c) || !VISIBLEON(c, c->mon)
+					|| !wlr_box_contains_point(&c->geom, cursor->x, cursor->y))
+				continue;
+			return c->held ? focustop(selmon) : c;
+		}
+	}
+	return focustop(selmon);
 }
 
 /* A key press, or a click: you moving on. It went to no window until
