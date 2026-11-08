@@ -75,6 +75,7 @@ static int fg_prompt_may_focus(void);
 static int fg_focus_recent(char *args, char *err, size_t errsize, int *parse);
 /* layout.h, included after this file */
 static const Layout *lt_part_layout(Workspace *ws, Monitor *m);
+static int lt_masters(Monitor *m, Workspace *ws);
 /* floating.h, likewise */
 static void fl_by_hand(Client *c, int floating);
 /* dim.h, likewise */
@@ -625,6 +626,112 @@ ipc_zoom(Client *sel)
 	arrange(m);
 }
 
+/* A resize's amount, as sway's: N, or N px, or N ppt (percentage points) */
+enum { IpcUnitNone, IpcUnitPx, IpcUnitPpt };
+typedef struct {
+	int amount;
+	int unit; /* IpcUnitNone, Px or Ppt; -1: not given */
+} IpcAmount;
+
+/* Reads an amount, "N [px|ppt]", from *p, moving past it: 0 if there's
+ * none, -1 if it isn't one. */
+static int
+ipc_amount(char **p, IpcAmount *a)
+{
+	char *end;
+	long n;
+	if (!**p)
+		return 0;
+	errno = 0;
+	n = strtol(*p, &end, 10);
+	if (end == *p || errno || n < 0 || n > 100000 || (*end && !isspace((unsigned char)*end)))
+		return -1;
+	*p = end;
+	while (isspace((unsigned char)**p))
+		(*p)++;
+	a->amount = (int)n;
+	a->unit = ipc_take(p, "px") ? IpcUnitPx : ipc_take(p, "ppt") ? IpcUnitPpt : IpcUnitNone;
+	return 1;
+}
+
+/* sway's resize grow|shrink, for c, by sign times the first amount of
+ * the two with a unit it takes: a floating window in pixels, keeping its
+ * center on axis, or growing or shrinking that side; a tile's width, its
+ * column's share of the window area, in percentage points, mfact going up
+ * for a master and down for the stack. A tile's height is its stack's
+ * equal share. Returns an error, or NULL. */
+static const char *
+ipc_resize(Client *c, int sign, int axis, const IpcAmount a[2])
+{
+	static const int floating_units[] = {IpcUnitPx, IpcUnitNone};
+	static const int tiled_units[] = {IpcUnitPpt, IpcUnitNone, IpcUnitPx};
+	const IpcAmount *by = NULL;
+	struct wlr_box box;
+	Monitor *m = c->mon;
+	Client *t;
+	size_t i, j;
+	int width = !(axis & (WLR_DIRECTION_UP | WLR_DIRECTION_DOWN)), n = 0, dw, dh;
+	float f, step;
+
+	if (!m)
+		return "The window isn't on an output";
+	if (c->isfullscreen || c->ismaximized)
+		return "A fullscreen or maximized window can't resize";
+	if (c->isfloating || !m->lt[m->sellt]->arrange) {
+		if (!c->isfloating)
+			return "The floating layout has no master area";
+		for (i = 0; i < LENGTH(floating_units) && !by; i++)
+			for (j = 0; j < 2 && !by; j++)
+				if (a[j].unit == floating_units[i])
+					by = &a[j];
+		if (!by)
+			return "A floating window resizes in px";
+		box = c->geom;
+		if (width)
+			box.width += sign * by->amount;
+		else
+			box.height += sign * by->amount;
+		box.width = MAX(box.width, 1 + 2 * (int)c->bw);
+		box.height = MAX(box.height, 1 + 2 * (int)c->bw);
+		fitsizehints(c, &box);
+		dw = box.width - c->geom.width;
+		dh = box.height - c->geom.height;
+		if (!dw && !dh)
+			return "The window can't resize any further";
+		/* Both sides of the axis, or the side named */
+		box.x -= axis == WLR_DIRECTION_LEFT ? dw : axis == WLR_DIRECTION_RIGHT ? 0 : dw / 2;
+		box.y -= axis == WLR_DIRECTION_UP ? dh : axis == WLR_DIRECTION_DOWN ? 0 : dh / 2;
+		resize(c, box, 0);
+		return NULL;
+	}
+	/* The split is the shown workspace's part's, which isn't its */
+	if (!VISIBLEON(c, m))
+		return "The window's workspace isn't shown, so its split can't change";
+	if (!width)
+		return "A tile's height is its stack's share, which it can't change";
+	for (i = 0; i < LENGTH(tiled_units) && !by; i++)
+		for (j = 0; j < 2 && !by; j++)
+			if (a[j].unit == tiled_units[i])
+				by = &a[j];
+	step = by->unit == IpcUnitPx ? (float)by->amount / (float)MAX(m->w.width, 1)
+			: (float)by->amount / 100.0f;
+	/* A master grows its column, and one in the stack the stack's, as
+	 * the layout counts its masters */
+	wl_list_for_each(t, &clients, link) {
+		if (t == c)
+			break;
+		if (VISIBLEON(t, m) && !t->isfloating && !t->isfullscreen)
+			n++;
+	}
+	f = m->mfact + (float)sign * (n < lt_masters(m, c->ws) ? step : -step);
+	f = MAX(0.1f, MIN(f, 0.9f));
+	if (f == m->mfact)
+		return "The window can't resize any further";
+	m->mfact = f;
+	arrange(m);
+	return NULL;
+}
+
 /* "enable", "disable" or "toggle" (or nothing, if empty_toggles) against
  * the current value: the new value, or -1 for anything else. */
 static int
@@ -1133,6 +1240,28 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		if (!target)
 			return ipc_json_success(0, "No window to mark");
 		seturgent(target, urgent);
+		return ipc_json_success(1, NULL);
+	}
+	/* As sway's: a floating window in pixels, a tile by its column's share */
+	if (ipc_take(&cmd, "resize")) {
+		IpcAmount amounts[2] = {{10, IpcUnitNone}, {0, -1}};
+		int sign = ipc_take(&cmd, "grow") ? 1 : ipc_take(&cmd, "shrink") ? -1 : 0, axis;
+		axis = ipc_take(&cmd, "width") || ipc_take(&cmd, "horizontal")
+				? WLR_DIRECTION_LEFT | WLR_DIRECTION_RIGHT
+			: ipc_take(&cmd, "height") || ipc_take(&cmd, "vertical")
+				? WLR_DIRECTION_UP | WLR_DIRECTION_DOWN
+			: ipc_direction(&cmd, &dir) ? (int)dir : 0;
+		if (!sign || !axis || ipc_amount(&cmd, &amounts[0]) < 0
+				|| (*cmd && (!ipc_take(&cmd, "or") || ipc_amount(&cmd, &amounts[1]) <= 0))
+				|| *cmd) {
+			error = "Expected resize grow|shrink width|height|left|right|up|down "
+				"[N [px|ppt]] [or N [px|ppt]]";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to resize");
+		if ((error = ipc_resize(target, sign, axis, amounts)))
+			return ipc_json_success(0, error);
 		return ipc_json_success(1, NULL);
 	}
 	/* tidewm's own, after dwl's functions: the focused monitor's layout */
