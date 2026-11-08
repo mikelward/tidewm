@@ -268,6 +268,12 @@ on any other, however it got there, it isn't, and minimized it closes as
 any other.
 The window's own close button still closes it.
 
+### Touchpad gestures
+
+A touchpad's pinches, swipes and holds go to the window under the
+pointer, over pointer-gestures, as in sway, so Chrome zooms on a pinch.
+tidewm binds none itself: sway's `bindgesture` isn't there.
+
 ### IPC
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so
