@@ -74,9 +74,11 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `workspace back_and_forth` | Shows the previous workspace |
 | `move [container\|window] [to] workspace NAME` | Moves the window to that workspace's part on its own monitor, making it if it's new. `number N` and `back_and_forth` work here too |
 | `move [container\|window] [to] output OUTPUT` | Moves the window to another monitor's part of its workspace. `OUTPUT` is a name, or `left`, `right`, `up` or `down` of the focused one |
+| `move [container\|window] [to] left\|right\|up\|down [N [px]]` | As sway's, by tide's rule for its arrow keys (its SPEC §6.6), below: a tiled window swaps with the tile that way on its monitor; past the monitor's edge it joins the next monitor's tiles that way, in the place of the one at the edge it comes in by sharing the most with it, which goes one along. A floating window moves `N` pixels that way, as in sway, or, without `N`, goes straight to the next monitor that way, at the same spot relative to the window area, and its size, shrunk to fit; where sway would move it 10 pixels. A focused window keeps focus. Past the last monitor, nothing moves. It fails for a fullscreen window, or one on a workspace that isn't shown |
 | `focus output OUTPUT` | Focuses that monitor |
 | `[con_id=N] focus` | Shows the window's workspace and focuses it |
 | `focus next\|prev` | Focuses the next or previous window on the focused monitor, in stack order, going round |
+| `focus left\|right\|up\|down` | As sway's, by tide's rule for its arrow keys (its SPEC §6.6), below: focuses the window that way on the focused monitor, or, past its edge, the window at the edge of the next monitor that way, nearest by the same rule, or that monitor, if it shows none. Past the last monitor, nothing; it doesn't go round. A fullscreen window, unless it has a dialog, covers its monitor's others, so focus goes to the next monitor |
 | `kill` | Asks the window to close. It fails for a window kept open (`keep_open`, below), which has a `close_refused` event instead |
 | `send_shortcut MODS+KEY` | tidewm's own, as Hyprland's `sendshortcut`: sends the window a press and release of `KEY`, such as `ctrl+v`, with the modifiers `ctrl`, `shift`, `alt` or `super` held, whether or not it's focused, as tide's picker pastes. `KEY` is a key name, ignoring case, sent as the key that gives it on the keyboard's layout now, at its lowest level, so a shifted one, as `plus` on a US keyboard, wants `shift` too; focus stays where it was. It fails while the screen is locked |
 | `exec COMMAND` | Runs the rest of the payload, `;` and all, with `/bin/sh -c`, in a session of its own. sway ends it at an unquoted `;`; tidewm leaves the shell to read its own quotes |
@@ -122,6 +124,20 @@ wide (21:9 and wider), otherwise the layout of `config.h`'s monitor rule.
 A part is kept by output name, so a monitor plugged in again finds it, and
 a workspace that goes takes its parts with it: one made again starts
 afresh.
+
+### Directions
+
+`focus` and `move` `left`, `right`, `up` and `down` pick a window as tide
+picks one for its arrow keys (its SPEC §6.6), where sway follows its tree:
+of the windows whose center is that way from the focused window's, the one
+sharing the most height with it, or width going up or down, then the one
+whose center is nearest, then the first in stack order. So from tile's
+master, `right` is the stack's top window, and `up` and `down` reach a
+stack window whose center is above or below the master's. The next monitor
+is picked the same way from the focused monitor, and on it, a window at
+the edge it's entered by, picked against the focused window. A window that
+isn't shown, or a status popup, which only the pointer focuses, is never
+picked.
 
 ### Windows
 

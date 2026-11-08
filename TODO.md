@@ -22,6 +22,9 @@ lands with a test.
 
 ## Done
 
+- **Directions** (#?): sway's `focus` and `move` `left`, `right`, `up`
+  and `down`, by tide's rule for its arrow keys, going on to the next
+  monitor past an edge, for tide's Super+arrows.
 - **The mouse from the config** (#?): sway's `floating_modifier`, so
   Super and a drag move or resize a floating window, and its
   `bindsym --whole-window` button and scroll bindings, as Super and the
@@ -144,6 +147,19 @@ lands with a test.
 
 ## Decisions needing review
 
+- **Directions are tide's, by geometry** (#?): `focus` and `move` by
+  direction pick the window whose center is that way, sharing the most
+  height, then nearest, then first in the stack, as tide's SPEC §6.6 and
+  its Hyprland layout have it, rather than the stack order dwl's
+  `focusstack` follows or sway's tree. So up and down from tile's master
+  reach the stack, and monocle's windows, all in one place, have none
+  beside them. Past the last monitor nothing happens, where dwl's
+  `focusmon` goes round. Reversible.
+- **A floating window's `move left` goes to the next monitor** (#?), as
+  tide's Super+Shift+Left does, at the same spot relative to the window
+  area; sway's moves it 10 pixels. `move left N px` moves it `N` pixels,
+  as sway's does. The alternative was sway's 10 pixels, with tide's key
+  needing a command that tells floating from tiled. Reversible.
 - **config.h's buttons stay until the file speaks of the mouse** (#?):
   a file with no `floating_modifier` line and no button binding keeps
   `config.h`'s Alt drags and Alt+middle; with either, they're left out
