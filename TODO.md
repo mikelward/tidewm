@@ -22,6 +22,9 @@ lands with a test.
 
 ## Done
 
+- **The next layout** (#?): tidewm's own `layout next|prev`, through
+  tide's cycle or the config file's `layout_cycle`, for tide's Super+.
+  and Super+, .
 - **The next workspace** (#?): sway's `workspace next|prev` and
   `next_on_output|prev_on_output`, and `move` to them, for tide's
   Super+PgUp and PgDn.
@@ -152,6 +155,13 @@ lands with a test.
 
 ## Decisions needing review
 
+- **The layout cycle is `layout next|prev`** (#?), named after
+  `layout toggle`, with tide's own cycle, `tile`, `threecol`, `twocol`,
+  and from `monocle` the layout before it, and the config file's
+  `layout_cycle` for its Layouts page's. sway's `layout toggle` takes a
+  list to cycle through instead, which tidewm's `layout toggle`, dwl's
+  last layout, already has a meaning for. Reversible before tide's
+  config uses them.
 - **next and prev go in sway's order** (#?): numbered workspaces by
   number, then the rest in the order made, round, through every
   workspace, a persistent empty one too. tide's Super+PgDn goes in its

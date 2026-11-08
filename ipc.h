@@ -83,6 +83,7 @@ static void dim_update(void);
 static void dim_update_one(Client *c);
 /* gesture.h, likewise */
 static int gesture_run(const char *kind, uint32_t fingers);
+static void (*lt_cycle(Monitor *m, int step))(Monitor *);
 /* direction.h's */
 static void dir_focus(enum wlr_direction dir);
 static const char *dir_move(Client *c, enum wlr_direction dir, int px);
@@ -1273,6 +1274,17 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			setlayout(&(const Arg){0}); /* back to the previous one */
 			return ipc_json_success(1, NULL);
 		}
+		if (!strcasecmp(cmd, "next") || !strcasecmp(cmd, "prev")) {
+			void (*next)(Monitor *) = lt_cycle(selmon,
+					tolower((unsigned char)*cmd) == 'n' ? +1 : -1);
+			for (j = 0; j < LENGTH(layouts); j++) {
+				if (layouts[j].arrange == next) {
+					setlayout(&(const Arg){.v = &layouts[j]});
+					return ipc_json_success(1, NULL);
+				}
+			}
+			return ipc_json_success(0, "That layout isn't in config.h's layouts");
+		}
 		for (i = 0; i < LENGTH(ipc_layouts); i++) {
 			if (strcasecmp(cmd, ipc_layouts[i].name))
 				continue;
@@ -1284,7 +1296,7 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			}
 			return ipc_json_success(0, "That layout isn't in config.h's layouts");
 		}
-		error = "Expected layout tile|threecol|twocol|monocle|floating|toggle";
+		error = "Expected layout tile|threecol|twocol|monocle|floating|toggle|next|prev";
 		goto parse_error;
 	}
 	if (!has_criteria && ipc_take(&cmd, "nmaster")) {
