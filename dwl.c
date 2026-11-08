@@ -276,7 +276,8 @@ struct Monitor {
 	unsigned long ipc_id; /* the IPC's output id, set on first use */
 	int want_place, want_x, want_y; /* where it goes in the layout: settings.h's Place */
 	int head_moved; /* an output management request moves it */
-	int want_mode, want_width, want_height, want_refresh; /* its mode once enabled, if given while off */
+	int want_mode, want_width, want_height, want_refresh, want_custom; /* its mode once enabled, if given while off */
+	int want_has_adaptive_sync, want_adaptive_sync; /* its adaptive sync once on, if given while off */
 	LayoutMode modes[16]; /* each layout's, but the current one's */
 	const Layout *rule_lt; /* config.h's monitor rule's */
 	int lt_settled; /* its layout fields hold the current workspace's part */
@@ -3008,7 +3009,11 @@ powermgrsetmode(struct wl_listener *listener, void *data)
 
 	m->gamma_lut_changed = 1; /* Reapply gamma LUT when re-enabling the output */
 	wlr_output_state_set_enabled(&state, event->mode);
-	wlr_output_commit_state(m->wlr_output, &state);
+	if (event->mode && m->want_has_adaptive_sync)
+		settings_adaptive_sync(m, m->want_adaptive_sync, &state);
+	if (wlr_output_commit_state(m->wlr_output, &state) && event->mode)
+		m->want_has_adaptive_sync = 0;
+	wlr_output_state_finish(&state);
 
 	m->asleep = !event->mode;
 	updatemons(NULL, NULL);

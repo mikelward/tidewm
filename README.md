@@ -300,8 +300,8 @@ tidewm binds none itself: sway's `bindgesture` isn't there.
 ### IPC
 
 tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so
-`swaymsg`, Quickshell's I3 module and other clients of sway's socket work
-with it. [`docs/ipc.md`](docs/ipc.md) lists what it answers. Its
+`swaymsg`, Quickshell's I3 module, nwg-displays and other clients of
+sway's socket work with it. [`docs/ipc.md`](docs/ipc.md) lists what it answers. Its
 workspaces are on ext-workspace too, for Wayland clients that read that.
 Its own `send_shortcut` command sends a window a shortcut, focused or
 not, as tide's picker pastes with it. Its own `capture` event says when a screen share or screenshot starts

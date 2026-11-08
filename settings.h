@@ -110,12 +110,15 @@ enum { PlaceRight, PlaceLeft, PlaceUp, PlaceDown, PlaceAt };
 typedef struct {
 	char *name;
 	int has_mode, width, height, refresh; /* refresh in mHz; 0 for the best */
+	int custom; /* mode --custom: that mode, even if the output lists none like it */
 	int has_scale;
 	float scale;
 	int has_position, place, x, y;
 	int has_transform;
 	enum wl_output_transform transform;
 	int enabled; /* 1 or 0, or -1 to leave it */
+	int has_adaptive_sync, adaptive_sync;
+	int power; /* the command's power or dpms: 1 or 0, or -1 to leave it */
 } OutputConfig;
 
 /* What an input line can set, as sway names it: XKB's names, then the
@@ -870,10 +873,18 @@ settings_escaped(const char *s, size_t i)
 	return n % 2;
 }
 
-/* Parses an output line's rest, "NAME SETTING...", into oc, as the config
- * file and the output command share it. On failure, err says why. */
+/* "on" or "off" as 1 or 0, else -1 */
 static int
-settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
+settings_on_off(const char *word)
+{
+	return !strcmp(word, "on") ? 1 : !strcmp(word, "off") ? 0 : -1;
+}
+
+/* Parses an output line's settings, rest, for the outputs name names,
+ * into oc, as the config file, its output blocks and the output command
+ * share it. On failure, err says why. */
+static int
+settings_parse_output_settings(OutputConfig *oc, char *name, char *rest, char *err, size_t errsize)
 {
 	static const struct { const char *name; enum wl_output_transform t; } transforms[] = {
 		{"normal", WL_OUTPUT_TRANSFORM_NORMAL}, {"90", WL_OUTPUT_TRANSFORM_90},
@@ -894,11 +905,12 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 
 	memset(oc, 0, sizeof(*oc));
 	oc->enabled = -1;
-	if (!(word = settings_arg(&rest)) || !*word) {
+	oc->power = -1;
+	if (!name || !*name) {
 		snprintf(err, errsize, "output needs a name, or *, then settings");
 		return 0;
 	}
-	oc->name = word;
+	oc->name = name;
 	if (!*rest) {
 		snprintf(err, errsize, "output %s needs a setting", oc->name);
 		return 0;
@@ -907,6 +919,8 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 		if (!strcmp(word, "mode") || !strcmp(word, "resolution") || !strcmp(word, "res")) {
 			/* WIDTHxHEIGHT, then @HZ, Hz or not, if it's given */
 			if (!(arg = settings_arg(&rest)))
+				goto unclosed;
+			if ((oc->custom = !strcmp(arg, "--custom")) && !(arg = settings_arg(&rest)))
 				goto unclosed;
 			len = strlen(arg);
 			if (len > 2 && !strcasecmp(arg + len - 2, "hz"))
@@ -917,7 +931,9 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 				&& oc->width > 0 && oc->height > 0;
 			if (good && arg[used] == '@') {
 				hz = strtof(arg + used + 1, &end);
-				good = end != arg + used + 1 && !*end && isfinite(hz) && hz > 0 && hz <= 1000;
+				/* @0, as nwg-displays writes for an output with
+				 * no rate, is any rate, as sway takes it */
+				good = end != arg + used + 1 && !*end && isfinite(hz) && hz >= 0 && hz <= 1000;
 			} else if (good && arg[used]) {
 				good = 0;
 			}
@@ -967,6 +983,31 @@ settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
 			oc->has_transform = 1;
 		} else if (!strcmp(word, "enable") || !strcmp(word, "disable")) {
 			oc->enabled = word[0] == 'e';
+		} else if (!strcmp(word, "adaptive_sync")) {
+			if (!(arg = settings_arg(&rest)))
+				goto unclosed;
+			if ((oc->adaptive_sync = settings_on_off(arg)) < 0) {
+				snprintf(err, errsize, "output %s: adaptive_sync takes on or off", oc->name);
+				return 0;
+			}
+			oc->has_adaptive_sync = 1;
+		} else if (!strcmp(word, "power") || !strcmp(word, "dpms")) {
+			/* As sway's: dpms is power's old name */
+			if (!(arg = settings_arg(&rest)))
+				goto unclosed;
+			if ((oc->power = settings_on_off(arg)) < 0) {
+				snprintf(err, errsize, "output %s: %s takes on or off", oc->name, word);
+				return 0;
+			}
+		} else if (!strcmp(word, "scale_filter")) {
+			/* Taken, as sway's, but tidewm always scales linearly */
+			if (!(arg = settings_arg(&rest)))
+				goto unclosed;
+			if (strcmp(arg, "linear") && strcmp(arg, "nearest") && strcmp(arg, "smart")) {
+				snprintf(err, errsize, "output %s: scale_filter takes linear, nearest or smart",
+						oc->name);
+				return 0;
+			}
 		} else {
 			snprintf(err, errsize, "output %s: no setting is called %s", oc->name, word);
 			return 0;
@@ -978,6 +1019,15 @@ unclosed:
 	return 0;
 }
 
+/* Parses an output line's rest, "NAME SETTING...", into oc, as the config
+ * file and the output command share it. On failure, err says why. */
+static int
+settings_parse_output(OutputConfig *oc, char *rest, char *err, size_t errsize)
+{
+	char *name = settings_arg(&rest);
+	return settings_parse_output_settings(oc, name, rest, err, errsize);
+}
+
 /* Puts what from sets into into, as a later output line for the same
  * name adds to and overrides an earlier one. */
 static void
@@ -985,6 +1035,7 @@ settings_merge_output(OutputConfig *into, const OutputConfig *from)
 {
 	if (from->has_mode) {
 		into->has_mode = 1;
+		into->custom = from->custom;
 		into->width = from->width;
 		into->height = from->height;
 		into->refresh = from->refresh;
@@ -1005,15 +1056,24 @@ settings_merge_output(OutputConfig *into, const OutputConfig *from)
 	}
 	if (from->enabled >= 0)
 		into->enabled = from->enabled;
+	if (from->has_adaptive_sync) {
+		into->has_adaptive_sync = 1;
+		into->adaptive_sync = from->adaptive_sync;
+	}
+	if (from->power >= 0)
+		into->power = from->power;
 }
 
+/* An output line, or a line of an output block, for the outputs name
+ * names: rest, its settings */
 static int
-settings_add_output(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+settings_add_output(Settings *s, char *name, char *rest, unsigned int line,
+		struct json_object *errors)
 {
 	OutputConfig oc, *grown;
 	char err[256];
 	size_t i;
-	if (!settings_parse_output(&oc, rest, err, sizeof(err))) {
+	if (!settings_parse_output_settings(&oc, name, rest, err, sizeof(err))) {
 		settings_error(errors, line, "%s", err);
 		return 0;
 	}
@@ -1692,8 +1752,8 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 		struct json_object *errors)
 {
 	size_t len, mode = 0;
-	unsigned int line = 0, mode_line = 0, input_line = 0;
-	char *start, *end, *raw, *expanded, *p, *word, *name, *input = NULL;
+	unsigned int line = 0, mode_line = 0, input_line = 0, output_line = 0;
+	char *start, *end, *raw, *expanded, *p, *word, *name, *input = NULL, *output = NULL;
 	int ok = 1;
 
 	for (start = text; *start; start = *end ? end + 1 : end) {
@@ -1732,10 +1792,20 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			free(raw);
 			continue;
 		}
+		/* In an output block, as sway's, each line is a setting for its outputs */
+		if (output && strcmp(p, "}")) {
+			ok &= settings_add_output(s, output, p, line, errors);
+			free(expanded);
+			free(raw);
+			continue;
+		}
 		word = settings_word(&p);
 		if (input) {
 			free(input);
 			input = NULL;
+		} else if (output) {
+			free(output);
+			output = NULL;
 		} else if (!strcasecmp(word, "bindsym")) {
 			ok &= settings_add_binding(s, mode, p, line, errors);
 		} else if (!strcasecmp(word, "rebind")) {
@@ -1756,8 +1826,11 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			if (mode) {
 				settings_error(errors, line, "output can't be in a mode");
 				ok = 0;
+			} else if ((name = settings_arg(&p)) && *name && !strcmp(p, "{")) {
+				output = settings_strdup(name, strlen(name));
+				output_line = line;
 			} else {
-				ok &= settings_add_output(s, p, line, errors);
+				ok &= settings_add_output(s, name, p, line, errors);
 			}
 		} else if (!strcasecmp(word, "input")) {
 			if (!(name = settings_name(&p)))
@@ -1878,7 +1951,7 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			}
 		} else if (!strcmp(word, "}")) {
 			if (!mode) {
-				settings_error(errors, line, "} closes no mode or input block");
+				settings_error(errors, line, "} closes no mode, input or output block");
 				ok = 0;
 			}
 			mode = 0;
@@ -1896,6 +1969,11 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 	if (input) {
 		settings_error(errors, input_line, "input %s has no }", input);
 		free(input);
+		ok = 0;
+	}
+	if (output) {
+		settings_error(errors, output_line, "output %s has no }", output);
+		free(output);
 		ok = 0;
 	}
 	return ok;
@@ -2463,6 +2541,7 @@ settings_output_config(struct wlr_output *o, OutputConfig *out)
 	const char *name;
 	memset(out, 0, sizeof(*out));
 	out->enabled = -1;
+	out->power = -1;
 	for (pass = 0; settings && pass < 3; pass++) {
 		for (i = 0; i < settings->noutputs; i++) {
 			name = settings->outputs[i].name;
@@ -2490,31 +2569,51 @@ settings_preferred_mode(struct wlr_output *o, OutputConfig *oc)
 	oc->refresh = preferred->refresh;
 }
 
-/* Puts oc's mode, scale, transform and enabling in state, for monitor m.
- * A mode its output lists is used if there is one: with a rate, the
- * closest within 1 Hz, so 59.94 Hz stays apart from 60; without, the
- * fastest. Otherwise it's a custom mode. wlroots won't give an output
- * that's off a mode, so settings_output_set() keeps one for when it's
- * enabled; one enabled without a mode takes that, or keeps the one it
- * had, which wlroots remembers, or, if it never had one, its preferred. */
+/* Puts oc's mode, scale, transform, adaptive sync and enabling in state,
+ * for monitor m. A mode its output lists is used if there is one, unless
+ * it's --custom: with a rate, the closest within 1 Hz, so 59.94 Hz stays
+ * apart from 60; without, the fastest. Otherwise it's a custom mode.
+ * wlroots won't give an output that's off a mode, so settings_output_set()
+ * keeps one for when it's enabled; one enabled without a mode takes that,
+ * or keeps the one it had, which wlroots remembers, or, if it never had
+ * one, its preferred. Adaptive sync the output can't have stays off, as
+ * sway leaves it. */
+/* Puts adaptive sync in state for m's output, if it changes it: one the
+ * output can't have, or a backend that takes no adaptive sync at all, as
+ * a nested session's, leaves it as it is */
+static void
+settings_adaptive_sync(Monitor *m, int enabled, struct wlr_output_state *state)
+{
+	struct wlr_output *o = m->wlr_output;
+	if (!enabled == (o->adaptive_sync_status != WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED))
+		return;
+	if (enabled && !o->adaptive_sync_supported)
+		return;
+	wlr_output_state_set_adaptive_sync_enabled(state, enabled);
+	if (!wlr_output_test_state(o, state))
+		state->committed &= ~WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED;
+}
+
 static void
 settings_output_state(Monitor *m, const OutputConfig *oc, struct wlr_output_state *state)
 {
 	struct wlr_output *o = m->wlr_output;
 	struct wlr_output_mode *mode, *best = NULL;
 	OutputConfig want = *oc;
-	if (!(oc->enabled >= 0 ? oc->enabled : o->enabled)) {
+	int on = oc->enabled >= 0 ? oc->enabled : o->enabled;
+	if (!on) {
 		want.has_mode = 0;
 	} else if (!want.has_mode && !o->enabled) {
 		if ((want.has_mode = m->want_mode)) {
 			want.width = m->want_width;
 			want.height = m->want_height;
 			want.refresh = m->want_refresh;
+			want.custom = m->want_custom;
 		} else if (!o->width || !o->height) {
 			settings_preferred_mode(o, &want);
 		}
 	}
-	if (want.has_mode) {
+	if (want.has_mode && !want.custom) {
 		wl_list_for_each(mode, &o->modes, link) {
 			if (mode->width != want.width || mode->height != want.height
 					|| (want.refresh && abs(mode->refresh - want.refresh) > 1000))
@@ -2524,17 +2623,21 @@ settings_output_state(Monitor *m, const OutputConfig *oc, struct wlr_output_stat
 					: mode->refresh > best->refresh))
 				best = mode;
 		}
-		if (best)
-			wlr_output_state_set_mode(state, best);
-		else
-			wlr_output_state_set_custom_mode(state, want.width, want.height, want.refresh);
 	}
+	if (best)
+		wlr_output_state_set_mode(state, best);
+	else if (want.has_mode)
+		wlr_output_state_set_custom_mode(state, want.width, want.height, want.refresh);
 	if (oc->has_scale)
 		wlr_output_state_set_scale(state, oc->scale);
 	if (oc->has_transform)
 		wlr_output_state_set_transform(state, oc->transform);
 	if (oc->enabled >= 0)
 		wlr_output_state_set_enabled(state, oc->enabled);
+	if (oc->has_adaptive_sync && on)
+		settings_adaptive_sync(m, oc->adaptive_sync, state);
+	else if (on && m->want_has_adaptive_sync)
+		settings_adaptive_sync(m, m->want_adaptive_sync, state);
 }
 
 /* Once m's output has taken oc's settings: keeps the mode and position oc
@@ -2554,6 +2657,13 @@ settings_output_set(Monitor *m, const OutputConfig *oc, int reset)
 		m->want_width = oc->width;
 		m->want_height = oc->height;
 		m->want_refresh = oc->refresh;
+		m->want_custom = oc->custom;
+	}
+	if (m->wlr_output->enabled) {
+		m->want_has_adaptive_sync = 0;
+	} else if (oc->has_adaptive_sync || reset) {
+		m->want_has_adaptive_sync = oc->has_adaptive_sync;
+		m->want_adaptive_sync = oc->adaptive_sync;
 	}
 	if (oc->has_position) {
 		m->want_place = oc->place;
@@ -2628,6 +2738,8 @@ settings_output_defaults(Monitor *m, OutputConfig *oc)
 	const MonitorRule *r;
 	memset(oc, 0, sizeof(*oc));
 	oc->enabled = 1;
+	oc->power = -1;
+	oc->has_adaptive_sync = 1; /* off, as sway's */
 	for (r = monrules; r < END(monrules); r++) {
 		if (!r->name || strstr(m->wlr_output->name, r->name)) {
 			oc->has_scale = oc->has_transform = 1;
@@ -2643,13 +2755,33 @@ settings_output_defaults(Monitor *m, OutputConfig *oc)
 	}
 }
 
+/* Turns m's output off, as an idle daemon does, keeping its windows and
+ * place, or on again. Returns whether it took it. */
+static int
+settings_monitor_power(Monitor *m, int on)
+{
+	struct wlr_output_state state;
+	int ok;
+	if (on != m->asleep)
+		return 1;
+	wlr_output_state_init(&state);
+	m->gamma_lut_changed = 1; /* reapplied once it's on again */
+	wlr_output_state_set_enabled(&state, on);
+	ok = wlr_output_commit_state(m->wlr_output, &state);
+	wlr_output_state_finish(&state);
+	if (ok)
+		m->asleep = !on;
+	return ok;
+}
+
 /* Sets only on the outputs it names, as the output command does. Without
  * it, as on reload, each output starts again from its defaults and its
  * preferred mode, then takes the file's lines, so nothing the command set
  * outlives a reload. An output enabled goes where it was last placed, if
- * it was. Returns how many outputs took their settings, or -1 if any
- * refused them, which it says on stderr, and, on reload, in
- * settings_errors. */
+ * it was. The command's power or dpms then turns an output that's on, or
+ * asleep, off or on; the file's are taken but left, as an output starts
+ * on. Returns how many outputs took their settings, or -1 if any refused
+ * them, which it says on stderr, and, on reload, in settings_errors. */
 static int
 settings_apply_outputs(const OutputConfig *only)
 {
@@ -2669,12 +2801,19 @@ settings_apply_outputs(const OutputConfig *only)
 			settings_preferred_mode(m->wlr_output, &oc);
 		}
 		wlr_output_state_init(&state);
+		/* Powered on again, as power on wakes it, it takes the rest too */
+		if (only && oc.power == 1 && m->asleep && oc.enabled < 0) {
+			oc.enabled = 1;
+			m->gamma_lut_changed = 1;
+		}
 		settings_output_state(m, &oc, &state);
 		if (wlr_output_commit_state(m->wlr_output, &state)) {
 			set++;
 			settings_output_set(m, &oc, !only);
 			if (m->wlr_output->enabled)
 				settings_output_place(m);
+			if (only && oc.power == 0 && m->wlr_output->enabled && !settings_monitor_power(m, 0))
+				refused = 1;
 		} else {
 			fprintf(stderr, "tidewm: output %s refused its settings\n", m->wlr_output->name);
 			if (!only)
@@ -2691,26 +2830,32 @@ settings_apply_outputs(const OutputConfig *only)
 	return refused ? -1 : set;
 }
 
-/* The output command's "NAME power on|off|toggle", as sway's: turns the
- * outputs NAME names off, as an idle daemon does over
- * wlr-output-power-management, keeping their windows and places, or on
- * again. An output its settings disable stays off. Returns -1 for an
+/* The output command's "NAME power on|off|toggle", alone, as sway's, or
+ * dpms, its old name: turns the outputs NAME names off, as an idle daemon
+ * does over wlr-output-power-management, keeping their windows and
+ * places, or on again. An output its settings disable stays off. Returns -1 for an
  * output command of any other kind, else as settings_output_command. */
 static int
 settings_output_power(const char *args, char *err, size_t errsize, int *parse)
 {
-	struct wlr_output_state state;
-	char buf[1024], *rest = buf, *name, *word;
-	int on, ok, named = 0, found = 0, refused = 0;
+	char buf[1024], *rest = buf, *name, *key, *word;
+	int on, named = 0, found = 0, refused = 0;
 	Monitor *m;
 	if (strlen(args) >= sizeof(buf))
 		return -1;
 	strcpy(buf, args);
-	if (!(name = settings_arg(&rest)) || !*name || strcmp(settings_word(&rest), "power"))
+	if (!(name = settings_arg(&rest)) || !*name)
+		return -1;
+	key = settings_word(&rest);
+	if (strcmp(key, "power") && strcmp(key, "dpms"))
 		return -1;
 	word = settings_word(&rest);
+	/* With other settings, it's one of them, as settings_apply_outputs()
+	 * takes it */
+	if (*rest && settings_on_off(word) >= 0)
+		return -1;
 	if (*rest || (strcmp(word, "on") && strcmp(word, "off") && strcmp(word, "toggle"))) {
-		snprintf(err, errsize, "output %s power takes on, off or toggle", name);
+		snprintf(err, errsize, "output %s %s takes on, off or toggle", name, key);
 		*parse = 1;
 		return 0;
 	}
@@ -2723,16 +2868,7 @@ settings_output_power(const char *args, char *err, size_t errsize, int *parse)
 			continue;
 		found = 1;
 		on = !strcmp(word, "toggle") ? m->asleep : !strcmp(word, "on");
-		if (on != m->asleep)
-			continue;
-		wlr_output_state_init(&state);
-		m->gamma_lut_changed = 1; /* reapplied once it's on again */
-		wlr_output_state_set_enabled(&state, on);
-		ok = wlr_output_commit_state(m->wlr_output, &state);
-		wlr_output_state_finish(&state);
-		if (ok)
-			m->asleep = !on;
-		else
+		if (!settings_monitor_power(m, on))
 			refused = 1;
 	}
 	if (found) {

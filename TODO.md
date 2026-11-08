@@ -21,6 +21,11 @@ lands with a test.
 
 ## Done
 
+- **nwg-displays** (#71): it takes tidewm for sway by `SWAYSOCK`, so
+  `GET_OUTPUTS` and the tree's outputs give what it reads, as sway names
+  them (`dpms`, `scale_filter`, `adaptive_sync_status`, `modes`), the
+  `output` command takes what it sends, and the file it saves, with its
+  `output NAME {` blocks, loads.
 - **The workspace it was launched from** (#70): a grant you move on from
   gives no focus, but its window opens on the workspace the grant was
   made on, or its `--workspace`, unfocused and urgent, as tide's SPEC
@@ -192,6 +197,21 @@ lands with a test.
 
 ## Decisions needing review
 
+- **nwg-displays' settings, as sway takes them** (#71):
+  `adaptive_sync` sets wlroots' adaptive sync, and stays off where the
+  output can't have it, as sway leaves it. `scale_filter` is taken and
+  left: wlroots' scene scales every buffer linearly, so `GET_OUTPUTS`
+  says `linear`; `nearest` and `smart` would mean setting a filter on
+  every buffer. `power` and `dpms` work in the `output` command, alone or
+  with other settings, but an output line takes them and leaves them, so
+  every output starts on: nwg-displays saves `dpms off` for an output
+  that was off when it saved, which sway would keep off on reload. A
+  mode's `@0Hz`, as it writes for an output with no rate, is any rate.
+- **The tree's outputs are the active ones** (#71), as sway's:
+  a disabled output is in `GET_OUTPUTS` but not `GET_TREE`, or
+  nwg-displays would save a block for it without `disable`, and it would
+  come on at the next login. One powered off is still `active`, as in
+  sway, where tidewm said it wasn't.
 - **A key press or click keeps a grant's place** (#70): anything you do
   cancels a grant's focus, as before, but the grant stays, canceled, to
   place its window, until it's used or lapses after `grant_seconds`.

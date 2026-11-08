@@ -290,31 +290,61 @@ ipc_json_layers(Monitor *m)
 	return list;
 }
 
+/* A mode, as sway's output modes are given: the rate in mHz */
+static struct json_object *
+ipc_json_mode(int width, int height, int refresh, enum wlr_output_mode_aspect_ratio aspect)
+{
+	static const char *const aspects[] = {
+		[WLR_OUTPUT_MODE_ASPECT_RATIO_NONE] = "none",
+		[WLR_OUTPUT_MODE_ASPECT_RATIO_4_3] = "4:3",
+		[WLR_OUTPUT_MODE_ASPECT_RATIO_16_9] = "16:9",
+		[WLR_OUTPUT_MODE_ASPECT_RATIO_64_27] = "64:27",
+		[WLR_OUTPUT_MODE_ASPECT_RATIO_256_135] = "256:135",
+	};
+	struct json_object *mode = json_object_new_object();
+	json_object_object_add(mode, "width", json_object_new_int(width));
+	json_object_object_add(mode, "height", json_object_new_int(height));
+	json_object_object_add(mode, "refresh", json_object_new_int(refresh));
+	json_object_object_add(mode, "picture_aspect_ratio", json_object_new_string(
+			(unsigned)aspect < LENGTH(aspects) && aspects[aspect] ? aspects[aspect] : "none"));
+	return mode;
+}
+
 static struct json_object *
 ipc_json_output(Monitor *m)
 {
 	struct wlr_output *o = m->wlr_output;
-	struct json_object *obj = json_object_new_object(), *mode;
+	struct json_object *obj = json_object_new_object(), *modes = json_object_new_array();
+	struct wlr_output_mode *mode;
 	json_object_object_add(obj, "id", json_object_new_uint64(ipc_id(&m->ipc_id)));
 	json_object_object_add(obj, "type", json_object_new_string("output"));
 	json_object_object_add(obj, "name", json_object_new_string(o->name));
 	json_object_object_add(obj, "make", json_object_new_string(o->make ? o->make : ""));
 	json_object_object_add(obj, "model", json_object_new_string(o->model ? o->model : ""));
 	json_object_object_add(obj, "serial", json_object_new_string(o->serial ? o->serial : ""));
-	json_object_object_add(obj, "active", json_object_new_boolean(o->enabled));
+	/* As sway's: one powered off, asleep, is still active */
+	json_object_object_add(obj, "active", json_object_new_boolean(o->enabled || m->asleep));
 	json_object_object_add(obj, "power", json_object_new_boolean(o->enabled && !m->asleep));
+	/* power's old name, as sway still gives it */
+	json_object_object_add(obj, "dpms", json_object_new_boolean(o->enabled && !m->asleep));
 	json_object_object_add(obj, "primary", json_object_new_boolean(0));
 	json_object_object_add(obj, "scale", json_object_new_double(o->scale));
 	json_object_object_add(obj, "transform", json_object_new_string(ipc_transform_name(o->transform)));
+	/* wlroots' scene, as tidewm uses it, scales every buffer linearly */
+	json_object_object_add(obj, "scale_filter", json_object_new_string("linear"));
+	json_object_object_add(obj, "adaptive_sync_status", json_object_new_string(
+			o->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED ? "enabled" : "disabled"));
 	json_object_object_add(obj, "focused", json_object_new_boolean(m == selmon));
 	/* A workspace spans every monitor, so each shows the current one. */
 	json_object_object_add(obj, "current_workspace", curws ? json_object_new_string(curws->name) : NULL);
 	json_object_object_add(obj, "rect", ipc_json_box(m->m));
-	mode = json_object_new_object();
-	json_object_object_add(mode, "width", json_object_new_int(o->width));
-	json_object_object_add(mode, "height", json_object_new_int(o->height));
-	json_object_object_add(mode, "refresh", json_object_new_int(o->refresh));
-	json_object_object_add(obj, "current_mode", mode);
+	wl_list_for_each(mode, &o->modes, link)
+		json_object_array_add(modes, ipc_json_mode(mode->width, mode->height,
+				mode->refresh, mode->picture_aspect_ratio));
+	json_object_object_add(obj, "modes", modes);
+	json_object_object_add(obj, "current_mode", ipc_json_mode(o->width, o->height, o->refresh,
+			o->current_mode ? o->current_mode->picture_aspect_ratio
+			: WLR_OUTPUT_MODE_ASPECT_RATIO_NONE));
 	json_object_object_add(obj, "window_area", ipc_json_box(m->w));
 	json_object_object_add(obj, "layers", ipc_json_layers(m));
 	return obj;
@@ -409,7 +439,7 @@ ipc_json_workspace(Workspace *ws, Monitor *m)
 }
 
 /* root > outputs > workspaces > windows. Every workspace is under every
- * output, holding that monitor's part of it. */
+ * active output, holding that monitor's part of it. */
 static struct json_object *
 ipc_json_tree(void)
 {
@@ -419,8 +449,13 @@ ipc_json_tree(void)
 	Client *c;
 
 	wl_list_for_each(m, &mons, link) {
-		struct json_object *out = ipc_json_output(m), *parts = json_object_new_array();
+		struct json_object *out, *parts;
 		Workspace *ws;
+		/* As sway's, the tree has only the outputs that are active */
+		if (!m->wlr_output->enabled && !m->asleep)
+			continue;
+		out = ipc_json_output(m);
+		parts = json_object_new_array();
 		wl_list_for_each(ws, &workspaces, link) {
 			struct json_object *part = ipc_json_workspace(ws, m);
 			struct json_object *tiled = json_object_new_array(), *floating = json_object_new_array();
