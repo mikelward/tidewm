@@ -2,8 +2,7 @@
 
 tidewm is tide's compositor: dwl with what tide needs from a compositor
 added. The requirements, each with a check, are mikelward/tide's
-`docs/compositor.md`, and *dwl 0.9 against this list* there says what dwl
-already does. Items go in this order, one PR each unless split; a feature
+`docs/compositor.md`, and its *tidewm today* says which tidewm meets. Items go in this order, one PR each unless split; a feature
 lands with a test.
 
 ## Decided
@@ -42,11 +41,35 @@ lands with a test.
   Alt drags stay until the file says what the mouse does.
 - **Gestures** (#64): pointer-gestures, so a touchpad's pinch, swipe and
   hold reach the window under the pointer, as Chrome's pinch to zoom.
-- **X11 at a fractional scale** (#45): with `xwayland_scaling disable`,
+- **Windows kept open** (#62): tidewm's own `keep_open`, so `kill`
+  leaves a window tide pins open, with a `close_refused` event, and
+  `--kept-open` bindings take an app's own close keys from it alone.
+- **Output power** (#61): sway's `output NAME power on|off|toggle`, so
+  an idle daemon's command can blank the screens.
+- **Quoted workspace names** (#60): a name in double quotes, as sway's,
+  may hold a `;` or ` to `, and a `;` in quotes doesn't end a command.
+- **Sending a shortcut** (#59): tidewm's own `send_shortcut`, as
+  Hyprland's `sendshortcut`, so tide's picker pastes into the window it
+  was opened over.
+- **PCRE2 rules** (#58): `for_window` criteria are PCRE2 patterns, as
+  sway's are, so tide hands tidewm its Hyprland rules' patterns.
+- **Includes** (#52, #53): sway's `include`, so a shell keeps its own
+  settings in files the config takes in, and an error names the file
+  it's in.
+- **Minimize** (#51): tidewm's own `minimize`, for tide's SPEC §6.7: a
+  minimized window leaves the layout until focusing it brings it back.
+- **Output focus** (#50): an `output` event says when focus moves to
+  another output, so a shell puts its popups on the monitor you're using.
+- **A polkit prompt's focus** (#49): GET_SEATS's `prompt_may_focus`, for
+  tide's own polkit prompt, by the focus guard's rule.
+- **Layers in GET_OUTPUTS** (#48): each output's layer surfaces and
+  window area, for tide's doctor.
+- **X11 at a fractional scale** (#45, #46): with `xwayland_scaling disable`,
   X11 windows are in their outputs' own pixels, as with Hyprland's
   `xwayland:force_zero_scaling`, so they're sharp at a fractional scale,
   and Xwayland sees each output at its pixels, over an xdg-output of
-  tidewm's own. The Plan's other half, starting Xwayland ahead of
+  tidewm's own; a floating one opening on another monitor is sized at
+  that monitor's scale. The Plan's other half, starting Xwayland ahead of
   clients, wasn't needed: Xwayland takes no client until the window
   manager owns WM_S0, which wlroots takes after it watches the root.
 - **Outside clicks** (#44): hyprland-focus-grab-v1, so Quickshell's
@@ -336,7 +359,7 @@ lands with a test.
   the tree lists every workspace under every output, holding that monitor's
   part. The alternative was a sway-style entry per monitor's part, as tide
   names them on Hyprland (`NAME@OUT`). Reversible: only tide's shell reads
-  it, and it has no tidewm backend yet.
+  it.
 - **Keeping a workspace** (#8): tidewm's own `persist workspace NAME` and
   `unpersist workspace NAME` commands, for tide's home workspace, since
   sway has none. It could move to the runtime config instead.
@@ -491,8 +514,6 @@ lands with a test.
 4. **The rest of sway's**: touchscreens, drawing tablets,
    wlr-foreign-toplevel-management for taskbars and docks, adaptive sync
    and tearing control, and a scratchpad.
-
-Then tide's shell gets a tidewm backend beside its Hyprland one.
 
 Deferred: tide's launcher and notifications hidden from capture (Decided,
 above).
