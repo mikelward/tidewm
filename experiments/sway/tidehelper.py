@@ -328,7 +328,10 @@ class Upstream:
 
     async def command(self, command):
         stamp("cmd", cmd=command[:200])
-        return await self.request(RUN_COMMAND, command)
+        replies = await self.request(RUN_COMMAND, command)
+        if isinstance(replies, list) and not all(r.get("success") for r in replies):
+            log(f"sway refused {command[:300]!r}: {replies}")
+        return replies
 
 
 class Client:
@@ -635,21 +638,22 @@ class Helper:
             self.emit("binding", event)
             return
         if name == "workspace":
-            if event.get("current", {}).get("name", "").startswith("__i3"):
+            current = event.get("current") or {}
+            if (current.get("name") or "").startswith("__i3"):
                 return
-            if event["change"] == "focus":
+            if event["change"] == "focus" and current:
                 if self.focused_ws and event["current"]["name"] != self.focused_ws:
                     self.cancel_grants("workspace")
                 self.focused_ws = event["current"]["name"]
-            if event["change"] == "empty" and event["current"]["name"] not in self.persistent:
-                self.parts.pop(event["current"]["name"], None)
-                self.order.pop(event["current"]["name"], None)
+            if event["change"] == "empty" and current and current["name"] not in self.persistent:
+                self.parts.pop(current["name"], None)
+                self.order.pop(current["name"], None)
             tree = await self.relayout()
             if event["change"] in ("init", "empty", "focus", "urgent", "rename"):
                 for key in ("current", "old"):
                     if event.get(key):
                         event[key] = self.ws_info(event[key])
-            if event["change"] == "rename":
+            if event["change"] == "rename" and current:
                 self.rename(event)
             self.emit("workspace", event)
             return
@@ -766,6 +770,9 @@ class Helper:
                 cmds.append(f"[con_id={cid}] urgent enable")
         if give and not g:
             self.cancel_grants("new")
+        log(f"new {cid} app={app!r} on {here!r}, focused ws {self.focused_ws!r}, grant "
+            f"{ {k: g[k] for k in ('apps', 'canceled', 'made_ws', 'workspace')} if g else None}: "
+            f"{cmds}")
         if cmds:
             await self.ctl.command(";".join(cmds))
         tree = await self.relayout()
@@ -1259,11 +1266,20 @@ class Helper:
             self.clients.remove(client)
             writer.close()
 
-    async def events(self):
+    async def subscribe(self):
+        """Subscribes before anything is served, so no sync's tick is missed"""
         r, w = await asyncio.open_unix_connection(self.real)
         names = ["workspace", "output", "mode", "window", "binding", "shutdown", "tick", "input"]
         w.write(pack(SUBSCRIBE, json.dumps(names).encode()))
         await w.drain()
+        while True:
+            kind, data = await read_msg(r)
+            if kind == SUBSCRIBE:
+                break
+        self.ev = (r, w)
+
+    async def events(self):
+        r, w = self.ev
         while True:
             try:
                 kind, data = await read_msg(r)
@@ -1287,6 +1303,7 @@ class Helper:
         TIMES = open(os.path.join(self.state_dir, "helper-times.jsonl"), "a")
         self.load_settings()
         await self.ctl.open()
+        await self.subscribe()
         asyncio.ensure_future(self.events())
         path = os.path.join(os.environ["XDG_RUNTIME_DIR"],
                             f"tidewm-ipc.{os.getuid()}.{os.getpid()}.sock")
