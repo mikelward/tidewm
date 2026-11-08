@@ -284,7 +284,7 @@ class CancelTest(GuardTest):
         late, _ = self.open("test.late")
         self.assertEqual(self.state(late), (False, True))
 
-    def test_a_workspace_switch_cancels_the_grant(self):
+    def test_a_workspace_switch_cancels_the_grants_focus(self):
         self.grant("test.app")
         self.command(self.connect(), "workspace two")
         window, _ = self.open("test.app")
@@ -344,7 +344,7 @@ class CancelTest(GuardTest):
         b, _ = self.open("test.b")
         self.assertEqual(self.focused(), [b])
 
-    def test_going_from_an_empty_workspace_to_another_cancels_the_grant(self):
+    def test_going_from_an_empty_workspace_to_another_cancels_the_grants_focus(self):
         self.grant("test.app")
         self.command(self.connect(), "workspace two")
         self.command(self.connect(), "workspace three")
@@ -359,6 +359,130 @@ class CancelTest(GuardTest):
         self.open("test.app", "Dialog")
         late, _ = self.open("test.late")
         self.assertEqual(self.state(late), (False, True))
+
+
+class LaunchedWorkspaceTest(GuardTest):
+    """A window opens on the workspace it was launched from (tide's SPEC
+    §14.2), as Hyprland's initial_workspace_tracking has it: a grant you've
+    moved on from still places its window there, unfocused and urgent."""
+
+    def workspaces(self):
+        return {w["name"]: w for w in self.connect().request(GET_WORKSPACES)}
+
+    def where(self, con_id):
+        """The window's workspace, whether it's focused and urgent, and the
+        focused workspace."""
+        current = [n for n, w in self.workspaces().items() if w["focused"]]
+        return (self.windows()[con_id]["workspace"], *self.state(con_id), current)
+
+    def test_a_window_launched_before_you_switch_opens_where_it_was_launched(self):
+        self.grant("test.app")
+        self.command(self.connect(), "workspace two")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("1", False, True, ["two"]))
+        self.assertTrue(self.workspaces()["1"]["urgent"])
+
+    def test_staying_where_you_launched_it_gives_it_focus(self):
+        self.grant("test.app")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("1", True, False, ["1"]))
+
+    def test_a_key_press_with_no_switch_opens_it_where_you_are_unfocused(self):
+        self.grant("test.app")
+        self.press("x")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("1", False, True, ["1"]))
+
+    def test_a_key_press_then_a_switch_still_opens_it_where_it_was_launched(self):
+        # A binding's key press is how you'd usually switch
+        self.grant("test.app")
+        self.press("x")
+        self.command(self.connect(), "workspace two")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("1", False, True, ["two"]))
+
+    def test_coming_back_before_it_opens_leaves_it_unfocused_here(self):
+        self.grant("test.app")
+        self.command(self.connect(), "workspace two")
+        self.command(self.connect(), "workspace 1")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("1", False, True, ["1"]))
+
+    def test_extend_widens_the_new_grant_not_one_moved_on_from(self):
+        # The same key and app again: the canceled grant must not shadow it
+        self.grant("--key 7 test.prog")
+        self.command(self.connect(), "workspace two")
+        self.grant("--key 7 test.prog")
+        self.command(self.connect(), "grant extend --key=7 test.prog org.example.App")
+        window, _ = self.open("org.example.App")
+        self.assertEqual(self.where(window), ("two", True, False, ["two"]))
+
+    def test_it_keeps_its_workspaces_new_name_when_that_empties_and_goes(self):
+        # Not persistent: leaving the renamed, empty workspace prunes it
+        self.grant("test.app")
+        self.command(self.connect(), "rename workspace to docs")
+        self.command(self.connect(), "workspace review")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("docs", False, True, ["review"]))
+
+    def test_a_grants_workspace_still_wins(self):
+        self.grant("--workspace three test.app")
+        self.command(self.connect(), "workspace two")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("three", False, True, ["two"]))
+        self.assertTrue(self.workspaces()["three"]["urgent"])
+
+    def test_it_follows_its_workspace_through_a_rename(self):
+        self.command(self.connect(), "persist workspace 1")
+        self.grant("test.app")
+        self.command(self.connect(), "rename workspace to docs")
+        self.command(self.connect(), "workspace review")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("docs", False, True, ["review"]))
+
+    def test_a_pids_grant_places_a_window_from_its_processes(self):
+        self.grant(f"--pid {os.getpid()}")
+        self.command(self.connect(), "workspace two")
+        window, _ = self.open("test.from-shell")
+        self.assertEqual(self.where(window), ("1", False, True, ["two"]))
+
+    def test_a_wildcard_grant_without_a_pid_places_nothing(self):
+        # It can't tell its window from any other
+        self.grant("*")
+        self.command(self.connect(), "workspace two")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("two", False, True, ["two"]))
+
+    def test_the_grant_is_used_once(self):
+        self.grant("test.app")
+        self.command(self.connect(), "workspace two")
+        self.open("test.app", "First")
+        second, _ = self.open("test.app", "Second")
+        self.assertEqual(self.windows()[second]["workspace"], "two")
+
+    def test_a_grant_made_here_comes_first(self):
+        self.grant("test.app")
+        self.command(self.connect(), "workspace two")
+        self.grant("test.app")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.where(window), ("two", True, False, ["two"]))
+
+    def test_a_notification_grant_places_nothing(self):
+        self.grant("--or-recent test.app")
+        self.command(self.connect(), "workspace two")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.windows()[window]["workspace"], "two")
+
+
+class LaunchedWorkspaceNoGuardTest(GuardTest):
+    CONFIG = None
+
+    def test_without_the_guard_it_still_opens_where_it_was_launched(self):
+        self.grant("test.app")
+        self.command(self.connect(), "workspace two")
+        window, _ = self.open("test.app")
+        self.assertEqual(self.windows()[window]["workspace"], "1")
+        self.assertEqual(self.state(window), (False, True))
 
 
 class BindingTest(GuardTest):

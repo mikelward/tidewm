@@ -631,8 +631,10 @@ applyrules(Client *c)
 {
 	const char *wsname;
 	Monitor *mon = matchrules(c, &wsname);
-	/* Only the last rule's workspace is made: an earlier one would be left empty */
-	setmon(c, mon, wsname ? ws_get(wsname) : NULL);
+	/* Only the last rule's workspace is made: an earlier one would be left
+	 * empty. Without one, a window opens where it was launched from, if
+	 * the focus guard says so (focus.h). */
+	setmon(c, mon, wsname ? ws_get(wsname) : fg_placed(c));
 }
 
 void

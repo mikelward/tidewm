@@ -165,7 +165,9 @@ With `focus_guard enable` in the config file, or `focus_guard` in
 `config.h`, a new window takes focus only when you asked for it: a grant
 over the IPC names its app, or it's from the app you're in. The rest open
 unfocused and urgent, as tide's SPEC §14 has it. An app's activation
-marks its window urgent, unless a grant names it.
+marks its window urgent, unless a grant names it. A window opens on the
+workspace it was launched from: one that opens after you've moved on is
+there, unfocused, and that workspace turns urgent.
 [`docs/config.md`](docs/config.md) says how.
 
 ### Notifications and the keyboard

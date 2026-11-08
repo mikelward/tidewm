@@ -20,9 +20,17 @@
  *
  * A grant is one-shot: the first window that matches uses it, and so does
  * an activation of a window the app already had. Anything you do after it
- * cancels it: a key press, a click, or focus moving to another window by
- * any means. It lapses after grant_seconds. A notification's click makes
- * one that, lapsing unused, brings up the app's most recent window.
+ * cancels its focus: a key press, a click, or focus moving to another
+ * window by any means, a workspace switch among them. It lapses after
+ * grant_seconds. A notification's click makes one that, lapsing unused,
+ * brings up the app's most recent window.
+ *
+ * A canceled grant still says where its window opens, as Hyprland's
+ * initial_workspace_tracking does (tide's SPEC §14.2): if you've left the
+ * workspace it was made on, its window opens there, or on its --workspace,
+ * held from focus and marked urgent, and that workspace with it. A
+ * wildcard one does only for a window from its --pid's processes, and a
+ * notification's not at all.
  *
  * Activation, xdg-activation's or X11's _NET_ACTIVE_WINDOW, marks a window
  * urgent rather than focusing it, unless a grant names it, with the guard
@@ -39,6 +47,9 @@ typedef struct {
 	char *workspace; /* where its window goes, focus following; NULL for where it opens */
 	int or_recent; /* lapsing unused, it brings up the app's most recent window */
 	uint64_t at; /* when, in monotonic microseconds */
+	unsigned long origin; /* the IPC id of the workspace current as it was made */
+	char *origin_name; /* that workspace's name then, to make it again; NULL for none */
+	int canceled; /* by you moving on: it gives no focus, only a place */
 } FgGrant;
 
 static struct wl_list fg_grants = {&fg_grants, &fg_grants};
@@ -56,6 +67,9 @@ static int fg_focusing; /* focus that isn't you moving on: the guard's own, or a
 static Client *fg_mapping; /* the window mapping now: focus moving meanwhile isn't you */
 static Client *fg_granted; /* a new window that used a grant */
 static unsigned long fg_deferred; /* the IPC id of a granted window whose focus waits */
+/* A new window a canceled grant sends to the workspace it was launched
+ * from, or to its --workspace: by IPC id, 0 for none, else by name */
+static struct { Client *c; unsigned long id; char *name; } fg_place;
 
 static uint64_t
 fg_now(void)
@@ -169,7 +183,25 @@ fg_free(FgGrant *g)
 		free(g->apps[i]);
 	free(g->apps);
 	free(g->workspace);
+	free(g->origin_name);
 	free(g);
+}
+
+/* ws has been renamed: a grant made on it keeps its new name, to make it
+ * again by if it's pruned before the grant's window opens */
+static void
+fg_renamed(Workspace *ws)
+{
+	FgGrant *g;
+	char *copy;
+	wl_list_for_each(g, &fg_grants, link) {
+		if (!g->origin_name || g->origin != ipc_id(&ws->ipc_id))
+			continue;
+		if (!(copy = strdup(ws->name)))
+			die("out of memory renaming workspace");
+		free(g->origin_name);
+		g->origin_name = copy;
+	}
 }
 
 /* Whether g has lapsed: one that brings up the app's window waits for
@@ -192,16 +224,6 @@ fg_expire(void)
 			fg_free(g);
 }
 
-/* Anything you do after a grant cancels every grant: a slow app mustn't
- * take focus from whatever you moved on to */
-static void
-fg_cancel(void)
-{
-	FgGrant *g, *tmp;
-	wl_list_for_each_safe(g, tmp, &fg_grants, link)
-		fg_free(g);
-}
-
 static int
 fg_names(const FgGrant *g, const char *app)
 {
@@ -218,19 +240,45 @@ fg_wildcard(const FgGrant *g)
 	return g->napps == 1 && !strcmp(g->apps[0], "*");
 }
 
-/* The grant for c's app, if one holds, taken off the list for the caller
- * to free: one naming it before a wildcard, which any app's window uses */
+/* Anything you do after a grant cancels every grant: a slow app mustn't
+ * take focus from whatever you moved on to. One that can still place its
+ * window stays, canceled, until it's used or lapses: not a notification's,
+ * nor a wildcard that can't tell its window from any other. */
+static void
+fg_cancel(void)
+{
+	FgGrant *g, *tmp;
+	wl_list_for_each_safe(g, tmp, &fg_grants, link) {
+		if (g->origin_name && (!fg_wildcard(g) || g->pid))
+			g->canceled = 1;
+		else
+			fg_free(g);
+	}
+}
+
+/* Drops every grant, canceled or not */
+static void
+fg_drop(void)
+{
+	FgGrant *g, *tmp;
+	wl_list_for_each_safe(g, tmp, &fg_grants, link)
+		fg_free(g);
+}
+
+/* The grant for c's app, if one holds, canceled or not as asked, taken
+ * off the list for the caller to free: one naming it before a wildcard,
+ * which any app's window uses, if it isn't canceled */
 static FgGrant *
-fg_take(Client *c)
+fg_take(Client *c, int canceled)
 {
 	FgGrant *g;
 	char *app = fg_normalize(fg_raw_appid(c));
 	uint64_t now = fg_now();
 	int wildcard;
 	fg_expire();
-	for (wildcard = 0; wildcard < 2; wildcard++) {
+	for (wildcard = 0; wildcard < 2 - canceled; wildcard++) {
 		wl_list_for_each(g, &fg_grants, link) {
-			if (!fg_lapsed(g, now) && fg_wildcard(g) == wildcard
+			if (!fg_lapsed(g, now) && g->canceled == canceled && fg_wildcard(g) == wildcard
 					&& (wildcard || fg_names(g, app))) {
 				free(app);
 				wl_list_remove(&g->link);
@@ -283,7 +331,7 @@ fg_descends(pid_t pid, pid_t ancestor)
  * whose process descends from it. A launch grant names none, so it never
  * matches this way. */
 static FgGrant *
-fg_take_by_ancestry(Client *c)
+fg_take_by_ancestry(Client *c, int canceled)
 {
 	FgGrant *g;
 	pid_t pid = ipc_client_pid(c);
@@ -291,7 +339,7 @@ fg_take_by_ancestry(Client *c)
 	if (pid <= 0)
 		return NULL;
 	wl_list_for_each(g, &fg_grants, link) {
-		if (g->pid && fg_descends(pid, g->pid)) {
+		if (g->pid && g->canceled == canceled && fg_descends(pid, g->pid)) {
 			wl_list_remove(&g->link);
 			wl_list_init(&g->link);
 			return g;
@@ -508,15 +556,72 @@ out:
 	return ok;
 }
 
+/* A workspace by its IPC id, or, with none that has it, by its name: one
+ * renamed since keeps its id, and one gone since, as you left it empty,
+ * may have been made again. NULL for none. */
+static Workspace *
+fg_find(unsigned long id, const char *name)
+{
+	Workspace *ws;
+	wl_list_for_each(ws, &workspaces, link)
+		if (id && ws->ipc_id == id)
+			return ws;
+	return name ? ws_find(name) : NULL;
+}
+
+/* Aims c, a new window, where a canceled grant g says, if you've left the
+ * workspace g was made on: on its --workspace, or back on that one, made
+ * again if it's gone. Returns whether it did; applyrules puts it there,
+ * by fg_placed. */
+static int
+fg_aim(Client *c, const FgGrant *g)
+{
+	Workspace *target;
+	unsigned long id = g->workspace ? 0 : g->origin;
+	const char *name = g->workspace ? g->workspace : g->origin_name;
+	if (!curws || fg_find(g->origin, g->origin_name) == curws)
+		return 0;
+	if ((target = fg_find(id, name)) == curws)
+		return 0;
+	free(fg_place.name);
+	if (!(fg_place.name = strdup(name)))
+		die("out of memory placing a window");
+	fg_place.c = c;
+	fg_place.id = target ? ipc_id(&target->ipc_id) : 0;
+	return 1;
+}
+
+/* The workspace fg_aim chose for c, made if it's gone, or NULL for the
+ * current one: for the rules, whose own workspace comes first */
+static Workspace *
+fg_placed(Client *c)
+{
+	Workspace *ws;
+	if (c != fg_place.c)
+		return NULL;
+	return (ws = fg_find(fg_place.id, NULL)) ? ws : ws_get(fg_place.name);
+}
+
+static void
+fg_unaim(void)
+{
+	free(fg_place.name);
+	fg_place.name = NULL;
+	fg_place.c = NULL;
+	fg_place.id = 0;
+}
+
 /* A new window, before it maps: whether it may take focus. With the
  * guard, one that may not is held from it, and marked urgent unless it's
  * a status popup. A grant is used either way, so it's one-shot, and its
- * workspace taken. Returns that workspace, for fg_opened, or NULL. */
+ * workspace taken. Returns that workspace, for fg_opened, or NULL. A
+ * canceled grant's window may be aimed at another workspace (fg_aim). */
 static char *
 fg_open(Client *c)
 {
 	FgGrant *g;
 	char *ws;
+	int placed;
 	/* A window mapping again is new again: nothing holds it yet */
 	c->held = FgFree;
 	/* A status popup opens on screen as it is: unfocused even from the
@@ -528,12 +633,25 @@ fg_open(Client *c)
 	}
 	/* Grants first, so one is used up even by a window of the app you're
 	 * in: a second terminal from a terminal */
-	if ((g = fg_take(c)) || (g = fg_take_by_ancestry(c))) {
+	if ((g = fg_take(c, 0)) || (g = fg_take_by_ancestry(c, 0))) {
 		ws = g->workspace;
 		g->workspace = NULL;
 		fg_free(g);
 		fg_granted = c;
 		return ws;
+	}
+	/* Then a canceled one, for a window that isn't a dialog, which goes
+	 * with its parent: it opens where it was launched from, if you've gone
+	 * elsewhere, held and marked, with the guard or without it */
+	if (!client_get_parent(c) && ((g = fg_take(c, 1)) || (g = fg_take_by_ancestry(c, 1)))) {
+		placed = fg_aim(c, g);
+		fg_free(g);
+		if (placed) {
+			c->held = FgWaiting;
+			c->isurgent = 1;
+			c->urgent_seq = ++urgent_count;
+			return NULL;
+		}
 	}
 	if (!fg_enabled())
 		return NULL;
@@ -562,6 +680,7 @@ fg_opened(Client *c, char *workspace)
 {
 	int granted = fg_granted == c;
 	fg_granted = NULL;
+	fg_unaim();
 	if (workspace)
 		fg_focus(c, workspace);
 	free(workspace);
@@ -679,8 +798,15 @@ static int
 fg_activate(Client *c)
 {
 	FgGrant *g;
-	if (!client_surface(c) || !client_surface(c)->mapped || !(g = fg_take(c)))
+	if (!client_surface(c) || !client_surface(c)->mapped)
 		return 0;
+	if (!(g = fg_take(c, 0))) {
+		/* A canceled one is used too, giving nothing: its app answered
+		 * with the window it had, so no new one is coming */
+		if ((g = fg_take(c, 1)))
+			fg_free(g);
+		return 0;
+	}
 	fg_free(g);
 	fg_focus(c, NULL);
 	return 1;
@@ -790,7 +916,8 @@ fg_command(char *args, char *err, size_t errsize)
 		 * one canceled, used or lapsed in between stays gone */
 		fg_expire();
 		wl_list_for_each(g, &fg_grants, link) {
-			if (g->key != key || g->pid != (pid_t)pid || !g->napps || strcmp(g->apps[0], apps[0]))
+			if (g->canceled || g->key != key || g->pid != (pid_t)pid || !g->napps
+					|| strcmp(g->apps[0], apps[0]))
 				continue;
 			for (i = 1; i < napps; i++) {
 				size_t j;
@@ -826,6 +953,11 @@ fg_command(char *args, char *err, size_t errsize)
 	g->workspace = workspace;
 	g->or_recent = or_recent;
 	g->at = fg_now();
+	if (curws && !or_recent) {
+		g->origin = ipc_id(&curws->ipc_id);
+		if (!(g->origin_name = strdup(curws->name)))
+			die("out of memory granting focus");
+	}
 	wl_list_insert(fg_grants.prev, &g->link);
 	if (or_recent)
 		fg_arm();
@@ -845,7 +977,8 @@ fg_finish(void)
 	if (fg_timer)
 		wl_event_source_remove(fg_timer);
 	fg_timer = NULL;
-	fg_cancel();
+	fg_drop();
+	fg_unaim();
 	free(fg_active_app);
 	fg_active_app = NULL;
 }
