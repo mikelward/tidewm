@@ -21,6 +21,10 @@ lands with a test.
 
 ## Done
 
+- **Focus on close** (#72): closing the window you're in focuses the
+  window under the pointer once the rest have moved in, as tide's SPEC
+  §14.2 and Hyprland's `input:focus_on_close cursor` have it, unless the
+  guard holds it.
 - **nwg-displays** (#71): it takes tidewm for sway by `SWAYSOCK`, so
   `GET_OUTPUTS` and the tree's outputs give what it reads, as sway names
   them (`dpms`, `scale_filter`, `adaptive_sync_status`, `modes`), the
@@ -501,9 +505,24 @@ lands with a test.
   its own process instead. Reversible.
 - **A held window waits for you** (#22): it's never handed focus by
   another window closing, an output change or a window mapping, only by
-  going to it: the pointer, a click, `focus next`, its workspace, or
-  `[con_id=N] focus`. Hyprland would focus the window under the pointer
-  when one closes. Reversible.
+  going to it: the pointer moving onto it, a click, `focus next`, its
+  workspace, or `[con_id=N] focus`. Since #72, closing the window you're
+  in focuses the window under the pointer, as Hyprland does, but not a
+  held one: the pointer resting on it then, focus goes to the window you
+  were in before, where Hyprland would focus it. Reversible.
+- **Focus on close looks past layer surfaces** (#72): as Hyprland's
+  hit test for `input:focus_on_close cursor` does, a notification or
+  other layer surface over a window doesn't stop that window taking
+  focus as the window you're in closes. Reversible.
+- **Focus on close falls back to the most recent window** (#72): with
+  nothing under the pointer, Hyprland leaves focus on nothing while the
+  workspace has windows; tidewm focuses the window you were in before,
+  as dwl did. Reversible.
+- **A dialog closing hands focus to its parent** (#72): a closing
+  window with a parent focuses the window you were in before, normally
+  that parent, whatever is under the pointer, where Hyprland would hit
+  test as for any window. Closing a file chooser shouldn't send you
+  elsewhere. Reversible.
 - **Marks are the urgent flag** (#22): a window the guard holds is
   `urgent` in the tree and in events, so a restarted shell reads the
   marks there, with no `tide-attention` event or `announce_waiting`.

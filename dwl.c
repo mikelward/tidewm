@@ -3421,7 +3421,8 @@ setmon(Client *c, Monitor *m, Workspace *ws)
 		arrange(m);
 		ipc_event_window(c, "move");
 	}
-	focusclient(focustop(selmon), NULL, 1);
+	/* The window you were in closing, the one under the pointer (focus.h) */
+	focusclient(!m && c == fg_closing ? fg_after_close() : focustop(selmon), NULL, 1);
 }
 
 void
@@ -3821,8 +3822,10 @@ unmapnotify(struct wl_listener *listener, void *data)
 		grabc = NULL;
 	}
 	ipc_event_window(c, "close");
-	if (c == focused_client)
+	if (c == focused_client) {
 		focused_client = NULL;
+		fg_closing = c; /* for setmon(), below */
+	}
 	/* Mapping again, it's maximized only if it asks again, and shown,
 	 * and kept open only if a shell says so again: it's a new window */
 	c->ismaximized = 0;
@@ -3843,6 +3846,7 @@ unmapnotify(struct wl_listener *listener, void *data)
 	} else if (client_wants_focus(c)) {
 		focusclient(focustop(selmon), NULL, 1);
 	}
+	fg_closing = NULL;
 
 	if (c->foreign_toplevel_handle) {
 		wlr_ext_foreign_toplevel_handle_v1_destroy(c->foreign_toplevel_handle);

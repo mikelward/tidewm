@@ -397,7 +397,10 @@ first, as `tide launch` does: `bindsym Mod4+Return grant foot; exec foot`.
 
 Any other new window opens where it would, held from focus and marked
 urgent. Going to it takes it out of that: the pointer, a click,
-`focus next`, its workspace, or `[con_id=N] focus`. A window with neither
+`focus next`, its workspace, or `[con_id=N] focus`. The pointer resting
+on it as the window you're in closes doesn't: focus goes to the window
+you were in before ([README](../README.md#focus-when-a-window-closes)).
+A window with neither
 an app ID nor a title, such as Chrome's own notification, is a status
 popup: it's held too, but never marked, and only the pointer or a click
 focuses it.
