@@ -240,7 +240,7 @@ clean:
 
 dist: clean
 	mkdir -p dwl-$(VERSION)
-	cp -R LICENSE NOTICE Makefile CHANGELOG.md README.md client.h config.def.h \
+	cp -R LICENSE NOTICE Makefile README.md client.h config.def.h \
 		config.mk protocols dwl.1 dwl.c capture.h dim.h floating.h focus.h gesture.h grab.h ime.h ipc.h keepopen.h layout.h \
 		settings.h util.h workspace.h x11.h \
 		dwl.desktop tidewm-portals.conf docs tests \

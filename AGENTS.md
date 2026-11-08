@@ -1,7 +1,7 @@
 ---
 trigger: always_on
 alwaysApply: true
-last_modified: 2026-11-07
+last_modified: 2026-11-08
 ---
 
 # tidewm
@@ -9,8 +9,7 @@ last_modified: 2026-11-07
 A Wayland compositor forked from dwl, the compact wlroots one, in C with a plain POSIX
 `Makefile`, carrying tide's workspaces, sway's config syntax and sway's IPC. `main`
 builds against the latest wlroots release (`wlroots-0.20` in `config.mk`). `README.md`
-and `CHANGELOG.md` are the normative documents; `config.def.h` is copied to `config.h`
-on first build.
+is the normative document; `config.def.h` is copied to `config.h` on first build.
 
 ## Fleet conventions
 
