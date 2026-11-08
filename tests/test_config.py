@@ -100,8 +100,8 @@ class ConfigTest(KeysTest):
         self.assertIn("bindsym needs keys and a command", self.fails("reload")["error"])
 
     def test_an_unknown_flag_is_an_error(self):
-        self.wm.write_config("bindsym --whole-window Mod1+x nop\n")
-        self.assertIn(":1: bindsym has no flag --whole-window", self.fails("reload")["error"])
+        self.wm.write_config("bindsym --border Mod1+x nop\n")
+        self.assertIn(":1: bindsym has no flag --border", self.fails("reload")["error"])
 
     def test_set_needs_a_name(self):
         self.wm.write_config("set mod Mod1\n")

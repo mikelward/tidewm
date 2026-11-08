@@ -773,6 +773,7 @@ axisnotify(struct wl_listener *listener, void *data)
 	struct wlr_pointer_axis_event *event = data;
 	const Axis *a;
 	unsigned int adir;
+	LayerSurface *l = NULL;
 	struct wlr_keyboard *keyboard;
 	uint32_t mods;
 	double factor;
@@ -781,14 +782,22 @@ axisnotify(struct wl_listener *listener, void *data)
 	/* Super with a scroll isn't Super tapped */
 	settings_tap_over();
 
-	if (!locked) {
+	/* A scroll's end, with no delta, went no way, so runs no binding */
+	if (!locked && event->delta != 0) {
 		if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL)
 			adir = event->delta > 0 ? AxisDown : AxisUp;
 		else
 			adir = event->delta > 0 ? AxisRight : AxisLeft;
 		keyboard = wlr_seat_get_keyboard(seat);
 		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
-		for (a = axes; a < END(axes); a++) {
+		/* The config file's, as sway's button4 to button7, over a
+		 * window or none; then config.h's, unless the file has its own */
+		xytonode(cursor->x, cursor->y, NULL, NULL, &l, NULL, NULL);
+		if (!l && settings_run_button(mods, adir == AxisUp ? SettingsScrollUp
+				: adir == AxisDown ? SettingsScrollDown
+				: adir == AxisLeft ? SettingsScrollLeft : SettingsScrollRight))
+			return;
+		for (a = axes; !settings_mouse() && a < END(axes); a++) {
 			if (CLEANMASK(mods) == CLEANMASK(a->mod) && adir == a->dir && a->func) {
 				focus_asked++;
 				a->func(&a->arg);
@@ -817,6 +826,7 @@ buttonpress(struct wl_listener *listener, void *data)
 	LayerSurface *l = NULL;
 	struct wlr_surface *surface = NULL;
 	const Button *b;
+	unsigned int drag;
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 
@@ -850,7 +860,18 @@ buttonpress(struct wl_listener *listener, void *data)
 
 		keyboard = wlr_seat_get_keyboard(seat);
 		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
-		for (b = buttons; b < END(buttons); b++) {
+		/* The config file's: its --whole-window bindings, over a window
+		 * or none, as sway's, then its floating_modifier's drags */
+		if (!l && settings_run_button(mods, event->button))
+			return;
+		if (!l && (drag = settings_floating_drag(mods, event->button)) != CurNormal) {
+			focus_asked++;
+			moveresize(&(const Arg){.ui = drag});
+			focus_asked--;
+			return;
+		}
+		/* config.h's, unless the file says what the mouse does */
+		for (b = buttons; !settings_mouse() && b < END(buttons); b++) {
 			if (CLEANMASK(mods) == CLEANMASK(b->mod) &&
 					event->button == b->button && b->func) {
 				focus_asked++;
