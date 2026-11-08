@@ -22,6 +22,9 @@ lands with a test.
 
 ## Done
 
+- **The next workspace** (#?): sway's `workspace next|prev` and
+  `next_on_output|prev_on_output`, and `move` to them, for tide's
+  Super+PgUp and PgDn.
 - **Resize** (#?): sway's `resize grow|shrink`, a floating window in
   pixels and a tile by its column's share, for tide's resize mode.
 - **Directions** (#?): sway's `focus` and `move` `left`, `right`, `up`
@@ -149,6 +152,13 @@ lands with a test.
 
 ## Decisions needing review
 
+- **next and prev go in sway's order** (#?): numbered workspaces by
+  number, then the rest in the order made, round, through every
+  workspace, a persistent empty one too. tide's Super+PgDn goes in its
+  bar's order and passes empty workspaces, which its shell knows and
+  tidewm doesn't; its tidewm keys can ask the shell, as its Hyprland ones
+  ask Lua. A workspace named `next` or `prev` now needs quotes in a
+  command, as `back_and_forth` does. Reversible.
 - **A tile's resize is mfact** (#?): sway's `resize grow width` on a
   tile takes space from its neighbors in its tree; tidewm's master and
   stack have one split, so it moves that, the master's column growing
