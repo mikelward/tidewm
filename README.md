@@ -191,10 +191,25 @@ and 60% from 3.2, in any layout, as tide's SPEC §1 has it. Below that it
 has the whole width. The config file's `single_window` lines change the
 widths and where they start.
 
+Dragging a lone window's left or right side sets its width, which stays
+centered, for that workspace on that monitor; `single_width reset` gives
+the rules back.
+
 The config file can also say which layout a workspace starts in on a
 monitor, by its aspect, where ultrawide begins, the `mfact` and `nmaster`
 each layout starts with, and where a new window goes, as tide's Layouts
 page sets them ([`docs/config.md`](docs/config.md)).
+
+### Dragging the master/stack edge
+
+A left press on the edge between the masters and the stack, within 4
+pixels either side, drags it, as tide's SPEC §6.6 has it. A resize drag, as Super and the
+right button with `floating_modifier Mod4`, or `config.h`'s Alt, drags a
+tile's nearest edge from anywhere on it. A press over a floating window, a layer surface
+or a popup goes to it as usual, as does one on a monitor that isn't
+focused or under a fullscreen or maximized window. The config file's
+`resize_grab` sets how wide the grab is, and `0` turns it off
+([`docs/config.md`](docs/config.md#the-mouse)).
 
 ### Dimming
 

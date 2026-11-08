@@ -46,6 +46,7 @@ supported yet. In an `input` or `output` line, a name or value may be in
 | `new_window end\|top\|next\|master` | tidewm's own: where a new tiled window goes, at the `end` of the stack, its `top`, just after the masters, `next` after the focused window, or as the `master`. `end` without it, so the master stays put |
 | `dim_inactive STRENGTH` | tidewm's own, tide's SPEC §6.2: dims every window but the focused one, from 0, none, to 1, black; tide's is 0.07. Without the line, `config.h`'s `dim_inactive`, 0 as it comes. A monitor showing one window, or a fullscreen one, doesn't dim, and nor do picture-in-picture, video, by the app's content type, and a window `dim disable` exempts ([`ipc.md`](ipc.md)) |
 | `xwayland_scaling enable\|disable` | tidewm's own, tide's SPEC §17: with `disable`, as Hyprland's `xwayland:force_zero_scaling`, X11 windows are in their outputs' own pixels, so they're sharp at a fractional scale, and an app that scales itself, as by `GDK_SCALE`, `QT_SCALE_FACTOR` or `Xft.dpi`, is the size it would be scaled, while one that doesn't is small. `enable`, as without the line, scales them, as sway does, so they're blurry at a fractional scale. A reload changes it at once |
+| `resize_grab PIXELS` | tidewm's own, tide's `resize_grab`: how many pixels either side of the master/stack edge a plain left press drags it from, from 0 to 32; `0` turns the drag off. 4 without it, `config.h`'s `resize_grab` ([The mouse](#the-mouse)) |
 | `floating_modifier MOD [normal\|inverse]`, `floating_modifier none` | As sway's: holding `MOD`, the left button drags a floating window and the right one resizes it, or the other way round with `inverse` ([The mouse](#the-mouse)) |
 | `focus_guard enable\|disable` | tidewm's own: turns the focus guard on or off, as below |
 | `focus_guard grant_seconds S`, `focus_guard prompt_seconds S` | How long a grant holds, 10 by default, and how soon after a key press a polkit prompt may take focus, 2 by default, in seconds, more than 0 and at most a day |
@@ -146,7 +147,32 @@ right corner, which the pointer jumps to, as dwl's Alt does;
 `floating_modifier none` turns both off. The modifier counts whenever
 it's held, with others or not, as in sway; one of several, as
 `Mod4+Shift`, counts when all of them are. A tiled window floats as it's dragged, as in dwl, where sway would
-move it among the tiles.
+move it among the tiles. A tiled window's resize drags its master/stack
+edge nearest the pointer instead, as below, and only one with no edge,
+as in `monocle`, floats.
+
+With no modifier, a left press within `resize_grab` pixels, 4 by default,
+either side of the edge between the masters and the stack drags it, as
+tide's SPEC §6.6 has it: the edge follows the pointer until the button
+comes up, setting the layout's `mfact`, as the `mfact` command does. The
+pointer shows a resize cursor over the edge, and the windows either side
+see neither the press nor the drag.
+
+- **The edges** are `tile`'s, `twocol`'s, and `threecol`'s with one
+  stack window. With stacks either side of `threecol`'s master, either
+  of its sides drags it, and it grows or shrinks both ways.
+- **A lone window's** left and right sides drag its width, and it stays
+  centered. The width is its workspace's own on that monitor, in place of
+  the `single_window` lines, whenever that workspace is down to one
+  window there, until `single_width reset` ([`ipc.md`](ipc.md)).
+- **There's no edge** between a stack's rows, which are always equal,
+  between `twocol`'s masters, which share their side equally, or in
+  `monocle`.
+- **The press goes to what's there**, as usual, over a floating window,
+  a layer surface, such as a notification or a bar's popover, or a
+  window's popup; on a monitor that isn't focused; under a fullscreen or
+  maximized window; and while a menu grabs the pointer or a focus grab
+  holds, so a click outside it closes it.
 
 `bindsym --whole-window` binds a button, with modifiers or not, as
 `bindsym --whole-window Mod4+button2 maximize toggle`. Its commands run

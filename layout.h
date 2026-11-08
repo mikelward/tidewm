@@ -121,9 +121,10 @@ lt_place(Monitor *m, struct wlr_box *boxes, int n)
 	}
 }
 
-/* The width, as a fraction, for m's lone window: the config file's
- * single_window rules, or config.h's, whichever the window area's aspect
- * reaches with the largest min_aspect, and the whole width for none */
+/* The width, as a fraction, for m's lone window: its part's own, which a
+ * drag of its side sets (split.h), else the config file's single_window
+ * rules, or config.h's, whichever the window area's aspect reaches with
+ * the largest min_aspect, and the whole width for none */
 static double
 lt_single_width(Monitor *m)
 {
@@ -131,6 +132,8 @@ lt_single_width(Monitor *m)
 	size_t n = settings && settings->nsingles ? settings->nsingles : LENGTH(single_window), i;
 	double aspect = m->w.height > 0 ? m->w.width / (double)m->w.height : 0, best = -1;
 	double width = 1;
+	if (m->single > 0)
+		return MAX(0.1, MIN(m->single, 1));
 	for (i = 0; i < n; i++) {
 		if (aspect >= r[i].min_aspect && r[i].min_aspect > best) {
 			best = r[i].min_aspect;
@@ -140,23 +143,29 @@ lt_single_width(Monitor *m)
 	return MAX(0.1, MIN(width, 1));
 }
 
+/* m's lone window's box: centered at its single-window width */
+static struct wlr_box
+lt_single_box(Monitor *m)
+{
+	struct wlr_box cols[3];
+	double f = lt_single_width(m), side = (1 - f) / 2;
+	if (f >= 1)
+		return m->w;
+	lt_columns(m->w, (double[]){side, f, side}, 3, cols);
+	return cols[1];
+}
+
 /* Places m's tiled window, if it's alone, centered at its single-window
  * width, in any layout, as tide's geometry does (tide's SPEC §1). Returns
  * whether it was alone, so the layout needn't place it. */
 static int
 lt_single(Monitor *m)
 {
-	struct wlr_box cols[3];
-	double f, side;
+	struct wlr_box box;
 	if (lt_count(m) != 1)
 		return 0;
-	f = lt_single_width(m);
-	side = (1 - f) / 2;
-	if (f >= 1)
-		cols[1] = m->w;
-	else
-		lt_columns(m->w, (double[]){side, f, side}, 3, cols);
-	lt_place(m, &cols[1], 1);
+	box = lt_single_box(m);
+	lt_place(m, &box, 1);
 	/* As monocle counts its windows */
 	if (m->lt[m->sellt]->arrange == monocle)
 		snprintf(m->ltsymbol, LENGTH(m->ltsymbol), "[1]");
@@ -318,6 +327,7 @@ typedef struct {
 	unsigned int sellt;
 	float mfact;
 	int nmaster;
+	double single; /* its lone window's width of its own; 0: the rules' */
 	LayoutMode modes[LENGTH(((Monitor *)0)->modes)];
 } LtPart;
 
@@ -375,6 +385,7 @@ lt_defaults_for(Monitor *m)
 	m->lt[0] = lt;
 	m->lt[1] = &layouts[LENGTH(layouts) > 1 && lt != &layouts[1]];
 	m->sellt = 0;
+	m->single = 0;
 	/* Not the layout before it, which lt_switch would keep: fresh values */
 	lt_mode_defaults(m->wlr_output->name, lt, &m->mfact, &m->nmaster);
 	strncpy(m->ltsymbol, lt->symbol, LENGTH(m->ltsymbol));
@@ -487,6 +498,7 @@ lt_store(Monitor *m, Workspace *ws)
 	p->sellt = m->sellt;
 	p->mfact = m->mfact;
 	p->nmaster = m->nmaster;
+	p->single = m->single;
 	memcpy(p->modes, m->modes, sizeof(p->modes));
 }
 
@@ -504,6 +516,7 @@ lt_restore(Monitor *m, Workspace *ws)
 	m->sellt = p->sellt;
 	m->mfact = p->mfact;
 	m->nmaster = p->nmaster;
+	m->single = p->single;
 	memcpy(m->modes, p->modes, sizeof(m->modes));
 	strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
 }

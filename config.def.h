@@ -47,6 +47,11 @@ static const SingleRule single_window[] = {
 	{ 3.2,          0.6 },
 };
 
+/* How many pixels either side of the master/stack edge a plain left press
+ * drags it from, as Hyprland's resize_grab in tide's layout; 0 turns the
+ * drag off (split.h) */
+static const int resize_grab               = 4;
+
 /* How dark the dim over every window but the focused one is, from 0, none,
  * to 1, black; tide's is 0.07 (its SPEC §6.2) */
 static const float dim_inactive            = 0;

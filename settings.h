@@ -216,6 +216,7 @@ typedef struct {
 	size_t ninputs;
 	int focus_guard; /* focus_guard enable|disable; -1: not given */
 	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
+	int resize_grab; /* resize_grab PIXELS; -1: not given */
 	int xwayland_scaling; /* xwayland_scaling enable|disable; -1: not given */
 	int floating_mod; /* floating_modifier's modifiers, 0 for none; -1: not given */
 	int floating_inverse; /* floating_modifier's inverse: left resizes, right moves */
@@ -1545,6 +1546,23 @@ settings_dim(Settings *s, char *rest, unsigned int line, struct json_object *err
 	return 1;
 }
 
+/* A resize_grab line: how many pixels either side of the master/stack
+ * edge a press drags it from, from 0, none, to 32 */
+static int
+settings_resize_grab(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *end;
+	long v;
+	errno = 0;
+	v = strtol(rest, &end, 10);
+	if (!*rest || *end || errno || v < 0 || v > 32) {
+		settings_error(errors, line, "resize_grab takes a whole number of pixels from 0 to 32");
+		return 0;
+	}
+	s->resize_grab = (int)v;
+	return 1;
+}
+
 /* A mode's or input selector's name: a word, or text in double quotes,
  * as sway takes it. Moves *p past it. Returns NULL for an empty name or an
  * unclosed quote. */
@@ -1794,6 +1812,13 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			} else {
 				ok &= settings_dim(s, p, line, errors);
 			}
+		} else if (!strcasecmp(word, "resize_grab")) {
+			if (mode) {
+				settings_error(errors, line, "resize_grab can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_resize_grab(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "xwayland_scaling")) {
 			if (mode) {
 				settings_error(errors, line, "xwayland_scaling can't be in a mode");
@@ -1976,6 +2001,7 @@ settings_parse(char *text, struct json_object *errors)
 	s->text = text;
 	s->focus_guard = -1;
 	s->dim_inactive = -1;
+	s->resize_grab = -1;
 	s->new_window = -1;
 	s->xwayland_scaling = -1;
 	s->floating_mod = -1;

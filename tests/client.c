@@ -28,6 +28,10 @@
  * menu      opens a menu, an xdg popup of 50x50 by the window's top left
  *           corner, and prints "menu" once the compositor has it, and
  *           "menu closed" if the compositor closes it.
+ * popup menu
+ *           opens the menu with an xdg popup grab, as a popup menu takes
+ *           the pointer, by the last button pressed on the window, which
+ *           SCROLLS has it hear.
  * grab      grabs focus for the window, over hyprland-focus-grab-v1, as
  *           Quickshell's HyprlandFocusGrab does, and prints "grabbing" once
  *           the compositor has the grab, and "cleared" when it ends it.
@@ -355,8 +359,10 @@ static const struct xdg_popup_listener popup_listener = {
 	.repositioned = popup_repositioned,
 };
 
+static uint32_t button_serial; /* the last button pressed on the window's */
+
 static void
-open_menu(void)
+open_menu(int grab)
 {
 	struct xdg_surface *menu_xdg;
 	struct xdg_positioner *positioner;
@@ -369,6 +375,8 @@ open_menu(void)
 	xdg_positioner_set_anchor_rect(positioner, 0, 0, 1, 1);
 	popup = xdg_surface_get_popup(menu_xdg, window_xdg, positioner);
 	xdg_popup_add_listener(popup, &popup_listener, NULL);
+	if (grab)
+		xdg_popup_grab(popup, seat, button_serial);
 	xdg_positioner_destroy(positioner);
 	wl_surface_commit(menu_surface);
 }
@@ -419,6 +427,7 @@ pointer_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t time,
 {
 	if (state != WL_POINTER_BUTTON_STATE_PRESSED)
 		return;
+	button_serial = serial;
 	printf("button\n");
 	fflush(stdout);
 }
@@ -774,7 +783,9 @@ command(const char *line)
 	} else if (!strcmp(line, "subdialog")) {
 		open_dialog(1, "Dialog", NULL);
 	} else if (!strcmp(line, "menu")) {
-		open_menu();
+		open_menu(0);
+	} else if (!strcmp(line, "popup menu")) {
+		open_menu(1);
 	} else if (!strcmp(line, "grab")) {
 		grab_surface(surface);
 	} else if (!strcmp(line, "grab menu")) {

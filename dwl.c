@@ -97,7 +97,7 @@
 #define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = ecalloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
 
 /* enums */
-enum { CurNormal, CurPressed, CurMove, CurResize }; /* cursor */
+enum { CurNormal, CurPressed, CurMove, CurResize, CurEdge }; /* cursor; CurEdge: split.h's drag */
 enum { XDGShell, LayerShell, X11 }; /* client types */
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrUnmanaged, LyrOverlay,
 	LyrIMPopup, LyrBlock, NUM_LAYERS }; /* scene layers */
@@ -270,6 +270,7 @@ struct Monitor {
 	float mfact;
 	int gamma_lut_changed;
 	int nmaster;
+	double single; /* a lone window's width of its part's own (layout.h); 0: the rules' */
 	char ltsymbol[16];
 	int asleep;
 	unsigned long ipc_id; /* the IPC's output id, set on first use */
@@ -587,6 +588,7 @@ static struct wlr_xwayland *xwayland;
 #include "layout.h"
 #include "focus.h"
 #include "grab.h"
+#include "split.h"
 #include "floating.h"
 #include "dim.h"
 #include "capture.h"
@@ -828,20 +830,34 @@ buttonpress(struct wl_listener *listener, void *data)
 	struct wlr_surface *surface = NULL;
 	const Button *b;
 	unsigned int drag;
+	SplitEdge edge;
+	Monitor *edge_mon;
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 
 	switch (event->state) {
 	case WL_POINTER_BUTTON_STATE_PRESSED:
+		/* A second button while the edge is dragged goes nowhere */
+		if (cursor_mode == CurEdge)
+			return;
 		/* A click is you moving on, from whatever a grant was for */
 		fg_click();
 		/* Super+click and Super+drag aren't Super tapped */
 		settings_tap_over();
+		keyboard = wlr_seat_get_keyboard(seat);
+		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
+		/* The master/stack edge, on the monitor focused before the press */
+		edge_mon = event->button == BTN_LEFT && !CLEANMASK(mods)
+				? split_edge_at(cursor->x, cursor->y, &edge) : NULL;
 		cursor_mode = CurPressed;
 		selmon = xytomon(cursor->x, cursor->y);
 		ipc_output_focus();
 		if (locked)
 			break;
+		if (edge_mon) {
+			split_start(edge_mon, &edge, cursor->x);
+			return;
+		}
 
 		/* Change focus if the button was _pressed_ over a client
 		   or a layer surface with on-demand keyboard interactivity */
@@ -859,8 +875,6 @@ buttonpress(struct wl_listener *listener, void *data)
 		}
 		focus_asked--;
 
-		keyboard = wlr_seat_get_keyboard(seat);
-		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
 		/* The config file's: its --whole-window bindings, over a window
 		 * or none, as sway's, then its floating_modifier's drags */
 		if (!l && settings_run_button(mods, event->button))
@@ -885,6 +899,14 @@ buttonpress(struct wl_listener *listener, void *data)
 	case WL_POINTER_BUTTON_STATE_RELEASED:
 		if (grab_release(event->button)) {
 			cursor_mode = CurNormal;
+			return;
+		}
+		/* A button up ends a drag of the edge, and the windows never saw
+		 * its press */
+		if (cursor_mode == CurEdge) {
+			cursor_mode = CurNormal;
+			wlr_seat_pointer_clear_focus(seat);
+			motionnotify(0, NULL, 0, 0, 0, 0);
 			return;
 		}
 		/* If you released any buttons, we exit interactive move/resize mode. */
@@ -1008,6 +1030,7 @@ cleanupmon(struct wl_listener *listener, void *data)
 
 	/* Its part of the current workspace, for when it's plugged in again */
 	lt_unplug(m);
+	split_unplug(m);
 	/* m->layers[i] are intentionally not unlinked */
 	for (i = 0; i < LENGTH(m->layers); i++) {
 		wl_list_for_each_safe(l, tmp, &m->layers[i], link)
@@ -2652,6 +2675,7 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 	LayerSurface *l = NULL, *focusedl = NULL;
 	struct wlr_surface *surface = NULL;
 	struct wlr_pointer_constraint_v1 *constraint;
+	SplitEdge edge;
 
 	/* Find the client under the pointer and send the event along. */
 	xytonode(cursor->x, cursor->y, &surface, &c, &l, &sx, &sy);
@@ -2729,6 +2753,17 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 		resize(grabc, (struct wlr_box){.x = grabc->geom.x, .y = grabc->geom.y,
 			.width = (int)round(cursor->x) - grabc->geom.x, .height = (int)round(cursor->y) - grabc->geom.y}, 1);
 		return;
+	} else if (cursor_mode == CurEdge) {
+		split_follow(cursor->x);
+		return;
+	}
+
+	/* Over the master/stack edge, the pointer is the edge's, not a
+	 * window's, and shows that it resizes */
+	if (cursor_mode == CurNormal && split_edge_at(cursor->x, cursor->y, &edge)) {
+		wlr_seat_pointer_clear_focus(seat);
+		wlr_cursor_set_xcursor(cursor, cursor_mgr, "ew-resize");
+		return;
 	}
 
 	/* If there's no client surface under the cursor, set the cursor image to a
@@ -2763,6 +2798,11 @@ moveresize(const Arg *arg)
 	xytonode(cursor->x, cursor->y, NULL, &grabc, NULL, NULL, NULL);
 	if (!grabc || client_is_unmanaged(grabc) || grabc->isfullscreen)
 		return;
+	/* A tile's resize drags its master/stack edge, if it has one */
+	if (arg->ui == CurResize && split_start_tile(grabc, cursor->x)) {
+		grabc = NULL;
+		return;
+	}
 
 	/* Float the window and tell motionnotify to grab it */
 	setfloating(grabc, 1);
