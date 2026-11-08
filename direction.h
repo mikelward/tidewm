@@ -186,6 +186,50 @@ dir_swap(Client *a, Client *b)
 	wl_list_insert(before_b, &a->link);
 }
 
+/* dwl-patches' movestack, for c: swaps it with the next tile in its
+ * monitor's stack, or the previous one, for step below 0; past the end it
+ * goes round to the top, and past the top to the end. Returns an error,
+ * or NULL. */
+static const char *
+dir_movestack(Client *c, int step)
+{
+	Client *t, *found = NULL, *first = NULL, *last = NULL;
+	Monitor *m = c->mon;
+	int passed = 0;
+	if (!m)
+		return "The window isn't on an output";
+	if (!m->lt[m->sellt]->arrange)
+		return "The floating layout has no stack";
+	if (!dir_counts(c, m, 1))
+		return "A floating or fullscreen window isn't in the stack";
+	wl_list_for_each(t, &clients, link) {
+		if (!dir_counts(t, m, 1))
+			continue;
+		if (t == c)
+			passed = 1;
+		else if (step > 0 && passed && !found)
+			found = t;
+		else if (step < 0 && !passed)
+			found = t;
+		first = first ? first : t;
+		last = t;
+	}
+	if (first == last)
+		return NULL;
+	if (found) {
+		dir_swap(c, found);
+	} else if (step > 0) {
+		/* From the end, round to the top */
+		wl_list_remove(&c->link);
+		wl_list_insert(first->link.prev, &c->link);
+	} else {
+		wl_list_remove(&c->link);
+		wl_list_insert(&last->link, &c->link);
+	}
+	arrange(m);
+	return NULL;
+}
+
 /* sway's focus left|right|up|down: the window that way from the focused
  * one on its monitor, or, past the monitor's edge, the nearest at the edge
  * of the next monitor that way, or that monitor, if it shows none. Past

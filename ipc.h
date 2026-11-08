@@ -87,6 +87,7 @@ static void (*lt_cycle(Monitor *m, int step))(Monitor *);
 /* direction.h's */
 static void dir_focus(enum wlr_direction dir);
 static const char *dir_move(Client *c, enum wlr_direction dir, int px);
+static const char *dir_movestack(Client *c, int step);
 
 /* config.h's layouts' names over the IPC: tide's modes, and dwl's floating */
 static const struct { const char *name; void (*arrange)(Monitor *); } ipc_layouts[] = {
@@ -1328,6 +1329,18 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			return ipc_json_success(0, "mfact must stay between 0.1 and 0.9");
 		selmon->mfact = f;
 		arrange(selmon);
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own, after dwl-patches' movestack: down or up the stack */
+	if (ipc_take(&cmd, "movestack")) {
+		if (strcasecmp(cmd, "next") && strcasecmp(cmd, "prev")) {
+			error = "Expected movestack next|prev";
+			goto parse_error;
+		}
+		if (!target)
+			return ipc_json_success(0, "No window to move");
+		if ((error = dir_movestack(target, tolower((unsigned char)*cmd) == 'n' ? +1 : -1)))
+			return ipc_json_success(0, error);
 		return ipc_json_success(1, NULL);
 	}
 	if (!has_criteria && !strcasecmp(cmd, "zoom")) {
