@@ -120,4 +120,5 @@ Shared by every mikelward repo and the user-level agent config; canonical in mik
 - **Subjects**. Write them for someone using tidewm.
 - **Releases**. Tags `v0.MINOR.PATCH` on `main`, PATCH being `git rev-list --count` of
   the tagged commit. Bump MINOR for a change that breaks a config or an IPC client.
-  Never 1.x without asking. A pushed tag is never moved.
+  Never 1.x without asking. A pushed tag is never moved. The `release` workflow tags
+  each push to main; MINOR is `RELEASE_MINOR` in `config.mk`.

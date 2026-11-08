@@ -1,0 +1,64 @@
+name: release
+
+# Every push to main is a release, tagged `make release-tag`
+# (v0.MINOR.<commits on main>), as mesh and tideco do. Pull requests only
+# merge green and up to date, so the pushed commit has passed ci already.
+#
+# No workflow_dispatch: a dispatch runs this file from the chosen ref, so a
+# branch could tag a commit that isn't on main with a number main will reach
+# later. A re-run of a push whose tag exists publishes nothing, so a tag is
+# never moved.
+#
+# Cost: a sub-minute job per push to main, free on a public repository. A tag
+# made with this token starts no workflow, so nothing runs twice.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.sha }}
+
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # PATCH is the commit count, so it needs all of them.
+          fetch-depth: 0
+      - id: tag
+        run: echo "tag=$(make -s release-tag)" >> "$GITHUB_OUTPUT"
+      # --exit-code makes ls-remote exit 2 when no such tag exists yet.
+      - id: check
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          status=0
+          git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null || status=$?
+          case "$status" in
+            0)
+              echo "$TAG is already released"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              ;;
+            2)
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::couldn't check for tag $TAG (git ls-remote exited $status)"
+              exit 1
+              ;;
+          esac
+      # gh creates the tag at this commit.
+      - if: steps.check.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "tidewm $TAG" --generate-notes
