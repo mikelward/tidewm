@@ -481,6 +481,13 @@ class Helper:
         for ws, out in self.workspaces_in(tree):
             if ws["name"].startswith("__i3"):
                 continue
+            # Moving a floating window, on any workspace, takes it to the
+            # workspace its output shows (sway's container_floating_move_to),
+            # so a hidden workspace is laid out once it's shown
+            if not ws.get("visible") and not any(
+                    o["current_workspace"] == ws["name"] for o in tree["nodes"]
+                    if o.get("current_workspace")):
+                continue
             r = ws["rect"]
             area = (r["x"], r["y"], r["width"], r["height"])
             p = self.part(ws["name"], area)
@@ -1081,7 +1088,11 @@ class Helper:
                 if args not in ("next", "prev"):
                     return error("movestack takes next or prev")
                 j = (i + (1 if args == "next" else -1)) % len(lst)
-            lst[i], lst[j] = lst[j], lst[i]
+            if verb == "zoom":
+                # dwl's zoom: the window goes to the top, the rest move down
+                lst.insert(0, lst.pop(j if i == 0 else i))
+            else:
+                lst[i], lst[j] = lst[j], lst[i]
             if verb == "zoom" and i == 0 and len(lst) > 1:
                 await self.ctl.command(f"[con_id={lst[0]}] focus")
             await self.relayout()
