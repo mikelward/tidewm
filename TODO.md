@@ -22,6 +22,8 @@ lands with a test.
 
 ## Done
 
+- **Gestures** (#64): pointer-gestures, so a touchpad's pinch, swipe and
+  hold reach the window under the pointer, as Chrome's pinch to zoom.
 - **X11 at a fractional scale** (#45): with `xwayland_scaling disable`,
   X11 windows are in their outputs' own pixels, as with Hyprland's
   `xwayland:force_zero_scaling`, so they're sharp at a fractional scale,
@@ -137,6 +139,20 @@ lands with a test.
 
 ## Decisions needing review
 
+- **Gestures go to apps, and none are bound** (#64): tidewm passes a
+  touchpad's pinches, swipes and holds to the window under the pointer,
+  as sway does and as dwl-patches' pointer-gestures patch does, but has
+  no `bindgesture`, sway's gesture bindings: tide binds no gesture on
+  Hyprland either, and sway's take a parser, `GET_BINDINGS` entries and
+  its own tracking of a gesture's direction and distance. A gesture's
+  start ends a tap of Super, as a scroll does. Reversible: `bindgesture`
+  can come when something wants a three-finger swipe between workspaces.
+- **A gesture command for the tests** (#64): tidewm's own `gesture
+  swipe|pinch|hold FINGERS` makes a gesture on the cursor's events, as
+  `switch` makes a lid move, since the headless backend has no touchpad
+  and wlr-virtual-pointer no gestures. The alternative was a test that
+  only sees pointer-gestures advertised, which says nothing of a gesture
+  reaching a window. Reversible: only the tests use it.
 - **Installed as `tidewm`, with no session entry** (#47): `make install`
   renames the binary and its man page, so a distro's dwl keeps its name,
   and leaves out upstream's `dwl.desktop`, since tide's entry starts
@@ -399,15 +415,13 @@ lands with a test.
 
 ## Plan
 
-1. **Gestures**: pointer-gestures, so a touchpad's pinch and swipe reach
-   apps, as Chrome's pinch to zoom.
-2. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
+1. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
    desktop can take Super and Alt+Tab.
-3. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
+2. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
    window that opened it.
-4. **Security context**: security-context, so Flatpak apps don't get the
+3. **Security context**: security-context, so Flatpak apps don't get the
    privileged protocols, such as screencopy and the virtual keyboard.
-5. **The rest of sway's**: touchscreens, drawing tablets,
+4. **The rest of sway's**: touchscreens, drawing tablets,
    wlr-foreign-toplevel-management for taskbars and docks, adaptive sync
    and tearing control, and a scratchpad.
 

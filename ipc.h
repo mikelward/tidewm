@@ -80,6 +80,8 @@ static void fl_by_hand(Client *c, int floating);
 /* dim.h, likewise */
 static void dim_update(void);
 static void dim_update_one(Client *c);
+/* gesture.h, likewise */
+static int gesture_run(const char *kind, uint32_t fingers);
 
 /* config.h's layouts' names over the IPC: tide's modes, and dwl's floating */
 static const struct { const char *name; void (*arrange)(Monitor *); } ipc_layouts[] = {
@@ -1148,6 +1150,17 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			goto parse_error;
 		}
 		switchset(type, on);
+		return ipc_json_success(1, NULL);
+	}
+	/* tidewm's own: a touchpad gesture of tidewm's own, for a test */
+	if (!has_criteria && ipc_take(&cmd, "gesture")) {
+		char kind[8], extra;
+		unsigned int fingers;
+		if (sscanf(cmd, "%7s %u %c", kind, &fingers, &extra) != 2 || !fingers
+				|| !gesture_run(kind, fingers)) {
+			error = "Expected gesture swipe|pinch|hold FINGERS";
+			goto parse_error;
+		}
 		return ipc_json_success(1, NULL);
 	}
 	/* tidewm's own: drops a lock whose locker has gone */

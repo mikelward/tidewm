@@ -3020,8 +3020,9 @@ settings_key_pressed(uint32_t keycode, uint32_t mods, const xkb_keysym_t syms[2]
 	}
 }
 
-/* A pointer button went down, or the pointer scrolled, while a release
- * binding's key was down: that key is a modifier now, not a tap */
+/* A pointer button went down, or the pointer scrolled, or a touchpad
+ * gesture began, while a release binding's key was down: that key is a
+ * modifier now, not a tap */
 static void
 settings_tap_over(void)
 {

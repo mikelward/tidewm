@@ -53,12 +53,18 @@
  * before it first commits, so before it maps. With KEYS set, it prints
  * "typing" once the compositor has its wl_keyboard, and for each key
  * pressed in it, "key " and the key as its keymap reads it, after the
- * modifiers held, as "key ctrl+v".
+ * modifiers held, as "key ctrl+v". With GESTURES set, it takes the
+ * touchpad's gestures over pointer-gestures, prints "pointing" as SCROLLS
+ * does, and for each gesture over it, "swipe begin FINGERS",
+ * "swipe update DX DY", "swipe end", "pinch begin FINGERS",
+ * "pinch update DX DY SCALE ROTATION", "pinch end", "hold begin FINGERS"
+ * and "hold end".
  *
  * Usage: client APP_ID TITLE [MAPPED_APP_ID]
  */
 #define _GNU_SOURCE /* memfd_create */
 #include <poll.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,6 +75,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "hyprland-focus-grab-v1-client-protocol.h"
+#include "pointer-gestures-unstable-v1-client-protocol.h"
 #include "xdg-activation-v1-client-protocol.h"
 #include "content-type-v1-client-protocol.h"
 #include "xdg-dialog-v1-client-protocol.h"
@@ -81,6 +88,7 @@ static struct xdg_activation_v1 *activation;
 static struct xdg_wm_dialog_v1 *wm_dialog;
 static struct wp_content_type_manager_v1 *content_types;
 static struct hyprland_focus_grab_manager_v1 *grabs;
+static struct zwp_pointer_gestures_v1 *gestures;
 static struct xdg_surface *window_xdg; /* the window's */
 static struct wl_surface *menu_surface;
 static int menu_configured;
@@ -457,6 +465,91 @@ static const struct wl_pointer_listener pointer_listener = {
 };
 
 static void
+said(const char *format, ...)
+{
+	va_list ap;
+	va_start(ap, format);
+	vprintf(format, ap);
+	va_end(ap);
+	putchar('\n');
+	fflush(stdout);
+}
+
+static void
+swipe_begin(void *data, struct zwp_pointer_gesture_swipe_v1 *g, uint32_t serial,
+		uint32_t time, struct wl_surface *s, uint32_t fingers)
+{
+	said("swipe begin %u", fingers);
+}
+
+static void
+swipe_update(void *data, struct zwp_pointer_gesture_swipe_v1 *g, uint32_t time,
+		wl_fixed_t dx, wl_fixed_t dy)
+{
+	said("swipe update %.2f %.2f", wl_fixed_to_double(dx), wl_fixed_to_double(dy));
+}
+
+static void
+swipe_end(void *data, struct zwp_pointer_gesture_swipe_v1 *g, uint32_t serial,
+		uint32_t time, int32_t cancelled)
+{
+	said("swipe end");
+}
+
+static const struct zwp_pointer_gesture_swipe_v1_listener swipe_listener = {
+	.begin = swipe_begin,
+	.update = swipe_update,
+	.end = swipe_end,
+};
+
+static void
+pinch_begin(void *data, struct zwp_pointer_gesture_pinch_v1 *g, uint32_t serial,
+		uint32_t time, struct wl_surface *s, uint32_t fingers)
+{
+	said("pinch begin %u", fingers);
+}
+
+static void
+pinch_update(void *data, struct zwp_pointer_gesture_pinch_v1 *g, uint32_t time,
+		wl_fixed_t dx, wl_fixed_t dy, wl_fixed_t scale, wl_fixed_t rotation)
+{
+	said("pinch update %.2f %.2f %.2f %.2f", wl_fixed_to_double(dx), wl_fixed_to_double(dy),
+			wl_fixed_to_double(scale), wl_fixed_to_double(rotation));
+}
+
+static void
+pinch_end(void *data, struct zwp_pointer_gesture_pinch_v1 *g, uint32_t serial,
+		uint32_t time, int32_t cancelled)
+{
+	said("pinch end");
+}
+
+static const struct zwp_pointer_gesture_pinch_v1_listener pinch_listener = {
+	.begin = pinch_begin,
+	.update = pinch_update,
+	.end = pinch_end,
+};
+
+static void
+hold_begin(void *data, struct zwp_pointer_gesture_hold_v1 *g, uint32_t serial,
+		uint32_t time, struct wl_surface *s, uint32_t fingers)
+{
+	said("hold begin %u", fingers);
+}
+
+static void
+hold_end(void *data, struct zwp_pointer_gesture_hold_v1 *g, uint32_t serial,
+		uint32_t time, int32_t cancelled)
+{
+	said("hold end");
+}
+
+static const struct zwp_pointer_gesture_hold_v1_listener hold_listener = {
+	.begin = hold_begin,
+	.end = hold_end,
+};
+
+static void
 keyboard_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd, uint32_t size)
 {
 	char *map;
@@ -540,9 +633,23 @@ seat_capabilities(void *data, struct wl_seat *s, uint32_t caps)
 		wl_callback_add_listener(wl_display_sync(display), &synced_listener,
 				(void *)"typing");
 	}
-	if ((caps & WL_SEAT_CAPABILITY_POINTER) && getenv("SCROLLS") && !pointer) {
+	if ((caps & WL_SEAT_CAPABILITY_POINTER) && (getenv("SCROLLS") || getenv("GESTURES"))
+			&& !pointer) {
 		pointer = wl_seat_get_pointer(s);
 		wl_pointer_add_listener(pointer, &pointer_listener, NULL);
+		if (getenv("GESTURES")) {
+			if (!gestures)
+				die("the compositor lacks zwp_pointer_gestures_v1");
+			zwp_pointer_gesture_swipe_v1_add_listener(
+					zwp_pointer_gestures_v1_get_swipe_gesture(gestures, pointer),
+					&swipe_listener, NULL);
+			zwp_pointer_gesture_pinch_v1_add_listener(
+					zwp_pointer_gestures_v1_get_pinch_gesture(gestures, pointer),
+					&pinch_listener, NULL);
+			zwp_pointer_gesture_hold_v1_add_listener(
+					zwp_pointer_gestures_v1_get_hold_gesture(gestures, pointer),
+					&hold_listener, NULL);
+		}
 		/* The compositor answers in order, so it has the pointer by then */
 		wl_callback_add_listener(wl_display_sync(display), &synced_listener,
 				(void *)"pointing");
@@ -608,7 +715,11 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 				&wp_content_type_manager_v1_interface, 1);
 	else if (!strcmp(interface, hyprland_focus_grab_manager_v1_interface.name))
 		grabs = wl_registry_bind(registry, name, &hyprland_focus_grab_manager_v1_interface, 1);
-	else if (!strcmp(interface, wl_seat_interface.name) && (getenv("SCROLLS") || getenv("KEYS"))
+	else if (!strcmp(interface, zwp_pointer_gestures_v1_interface.name) && version >= 3)
+		/* Version 3, for holds */
+		gestures = wl_registry_bind(registry, name, &zwp_pointer_gestures_v1_interface, 3);
+	else if (!strcmp(interface, wl_seat_interface.name)
+			&& (getenv("SCROLLS") || getenv("KEYS") || getenv("GESTURES"))
 			&& !seat) {
 		seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 5 ? version : 5);
 		wl_seat_add_listener(seat, &seat_listener, NULL);

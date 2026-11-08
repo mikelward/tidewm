@@ -590,6 +590,7 @@ static struct wlr_xwayland *xwayland;
 #include "floating.h"
 #include "dim.h"
 #include "capture.h"
+#include "gesture.h"
 
 /* function implementations */
 void
@@ -1041,6 +1042,7 @@ cleanuplisteners(void)
 	wl_list_remove(&new_session_lock.link);
 	wl_list_remove(&new_foreign_toplevel_capture_request.link);
 	capture_finish();
+	gesture_finish();
 #ifdef XWAYLAND
 	/* Added only if XWayland started: it can't without an Xwayland binary */
 	if (xwayland) {
@@ -3564,6 +3566,7 @@ setup(void)
 	wl_signal_add(&cursor->events.button, &cursor_button);
 	wl_signal_add(&cursor->events.axis, &cursor_axis);
 	wl_signal_add(&cursor->events.frame, &cursor_frame);
+	gesture_init();
 
 	cursor_shape_mgr = wlr_cursor_shape_manager_v1_create(dpy, 1);
 	wl_signal_add(&cursor_shape_mgr->events.request_set_shape, &request_set_cursor_shape);
