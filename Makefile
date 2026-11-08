@@ -17,7 +17,7 @@ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEV
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 all: dwl
-dwl: dwl.c capture.h client.h config.h dim.h floating.h focus.h gesture.h grab.h ime.h ipc.h keepopen.h layout.h settings.h util.h workspace.h x11.h config.mk cursor-shape-v1-protocol.h \
+dwl: dwl.c capture.h client.h config.h dim.h direction.h floating.h focus.h gesture.h grab.h ime.h ipc.h keepopen.h layout.h settings.h util.h workspace.h x11.h config.mk cursor-shape-v1-protocol.h \
 	ext-image-copy-capture-v1-protocol.h hyprland-focus-grab-v1-protocol.h \
 	hyprland-focus-grab-v1-protocol.c \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
@@ -241,7 +241,7 @@ clean:
 dist: clean
 	mkdir -p dwl-$(VERSION)
 	cp -R LICENSE NOTICE Makefile README.md client.h config.def.h \
-		config.mk protocols dwl.1 dwl.c capture.h dim.h floating.h focus.h gesture.h grab.h ime.h ipc.h keepopen.h layout.h \
+		config.mk protocols dwl.1 dwl.c capture.h dim.h direction.h floating.h focus.h gesture.h grab.h ime.h ipc.h keepopen.h layout.h \
 		settings.h util.h workspace.h x11.h \
 		dwl.desktop tidewm-portals.conf docs tests \
 		dwl-$(VERSION)

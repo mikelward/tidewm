@@ -591,6 +591,7 @@ static struct wlr_xwayland *xwayland;
 #include "dim.h"
 #include "capture.h"
 #include "gesture.h"
+#include "direction.h"
 
 /* function implementations */
 void

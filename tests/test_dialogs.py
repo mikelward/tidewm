@@ -312,6 +312,35 @@ class TwoOutputFollowTest(DialogHelpers):
         self.assertCenteredOn(windows[dialog]["rect"], windows[parent]["rect"])
         self.assertCenteredOn(windows[inner]["rect"], windows[dialog]["rect"])
 
+    def move_toward(self, con_id, other):
+        """Moves con_id onto other, the output beside its own, by direction."""
+        here = self.window(con_id)["output"]
+        here_x, = [o["rect"]["x"] for o in self.connect().request(GET_OUTPUTS) if o["name"] == here]
+        way = "right" if other["rect"]["x"] > here_x else "left"
+        self.command(self.connect(), f"[con_id={con_id}] move {way}")
+
+    def test_a_dialog_follows_its_tile_moved_by_direction_to_its_final_place(self):
+        parent, client = self.open("test.app")
+        dialog = self.dialog(client, "test.app")
+        other, _ = self.other(parent)
+        # A tile there, whose place, the master's, the parent takes
+        self.command(self.connect(), f"focus output {other['name']}")
+        self.open("test.there")
+        self.move_toward(parent, other)
+        windows = self.windows()
+        self.assertEqual((windows[parent]["output"], windows[parent]["rect"]["x"]),
+                         (other["name"], other["rect"]["x"]))
+        self.assertCenteredOn(windows[dialog]["rect"], windows[parent]["rect"])
+
+    def test_a_dialog_follows_its_floating_parent_moved_by_direction(self):
+        parent, client = self.open("test.float", size="600x400")
+        dialog = self.dialog(client, "test.float")
+        other, _ = self.other(parent)
+        self.move_toward(parent, other)
+        windows = self.windows()
+        self.assertEqual(windows[parent]["output"], other["name"])
+        self.assertCenteredOn(windows[dialog]["rect"], windows[parent]["rect"])
+
     def test_a_dialog_follows_its_parent_dragged_to_another_output(self):
         self.need(shutil.which("wtype"), "holding a key needs wtype")
         parent, client = self.open("test.float", size="600x400")

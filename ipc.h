@@ -82,6 +82,9 @@ static void dim_update(void);
 static void dim_update_one(Client *c);
 /* gesture.h, likewise */
 static int gesture_run(const char *kind, uint32_t fingers);
+/* direction.h's */
+static void dir_focus(enum wlr_direction dir);
+static const char *dir_move(Client *c, enum wlr_direction dir, int px);
 
 /* config.h's layouts' names over the IPC: tide's modes, and dwl's floating */
 static const struct { const char *name; void (*arrange)(Monitor *); } ipc_layouts[] = {
@@ -500,6 +503,25 @@ ipc_find_window(unsigned long id)
 	return NULL;
 }
 
+/* If *p starts with left, right, up or down, in any case, then a space or
+ * the end, moves *p past them and gives its direction in *dir. */
+static int
+ipc_direction(char **p, enum wlr_direction *dir)
+{
+	static const struct { const char *name; enum wlr_direction dir; } dirs[] = {
+		{"left", WLR_DIRECTION_LEFT}, {"right", WLR_DIRECTION_RIGHT},
+		{"up", WLR_DIRECTION_UP}, {"down", WLR_DIRECTION_DOWN},
+	};
+	size_t i;
+	for (i = 0; i < LENGTH(dirs); i++) {
+		if (ipc_take(p, dirs[i].name)) {
+			*dir = dirs[i].dir;
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /* An output named, or left, right, up or down of the focused one. */
 static Monitor *
 ipc_find_output(const char *arg)
@@ -758,6 +780,7 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 	Monitor *m;
 	char *end, *to, *orig, buf[160];
 	int has_criteria = 0, persist;
+	enum wlr_direction dir;
 
 	while (isspace((unsigned char)*cmd))
 		cmd++;
@@ -817,7 +840,32 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			movemon(target, m, target->ws); /* which says it moved */
 			return ipc_json_success(1, NULL);
 		}
-		error = "Expected move [container] [to] workspace|output ...";
+		/* As sway's, with tide's rule for which way is which, and a
+		 * floating window going to the next monitor without a distance */
+		if (ipc_direction(&cmd, &dir)) {
+			long px = -1;
+			if (*cmd) {
+				px = strtol(cmd, &end, 10);
+				if (end == cmd || px < 0 || px > 100000) {
+					error = "Expected move left|right|up|down [N [px]]";
+					goto parse_error;
+				}
+				cmd = end;
+				while (isspace((unsigned char)*cmd))
+					cmd++;
+				ipc_take(&cmd, "px");
+				if (*cmd) {
+					error = "Expected move left|right|up|down [N [px]]";
+					goto parse_error;
+				}
+			}
+			if (!target)
+				return ipc_json_success(0, "No window to move");
+			if ((error = dir_move(target, dir, (int)px)))
+				return ipc_json_success(0, error);
+			return ipc_json_success(1, NULL);
+		}
+		error = "Expected move [container] [to] workspace|output|left|right|up|down ...";
 		goto parse_error;
 	}
 	if (ipc_take(&cmd, "focus")) {
@@ -845,8 +893,14 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 			focusstack(&(const Arg){.i = tolower((unsigned char)*cmd) == 'n' ? +1 : -1});
 			return ipc_json_success(1, NULL);
 		}
+		/* As sway's, with tide's rule for which way is which */
+		if (!has_criteria && ipc_direction(&cmd, &dir) && !*cmd) {
+			dir_focus(dir);
+			return ipc_json_success(1, NULL);
+		}
 		if (*cmd || !has_criteria) {
-			error = "Expected [con_id=N] focus, focus next|prev, focus recent APP, or focus output ...";
+			error = "Expected [con_id=N] focus, focus next|prev|left|right|up|down, "
+				"focus recent APP, or focus output ...";
 			goto parse_error;
 		}
 		ws_view_to(target->ws, target);
