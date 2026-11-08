@@ -8,8 +8,8 @@ import subprocess
 import unittest
 
 from harness import (EVENT_BINDING, EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MODES,
-                     GET_BINDING_STATE, GET_BINDINGS, GET_CONFIG, GET_VERSION, ROOT,
-                     RUN_COMMAND, TIMEOUT, TidewmTest)
+                     GET_BINDING_STATE, GET_BINDINGS, GET_CONFIG, GET_NAMED_BINDINGS,
+                     GET_VERSION, ROOT, RUN_COMMAND, TIMEOUT, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
 
@@ -174,11 +174,11 @@ bindswitch tablet:toggle workspace tablet
     def test_each_binding_with_its_keys_command_and_mode(self):
         def key(keys, command, mode="default", release=False, locked=False, kept_open=False):
             return {"type": "key", "keys": keys, "command": command, "mode": mode,
-                    "release": release, "locked": locked, "kept_open": kept_open}
+                    "release": release, "locked": locked, "kept_open": kept_open, "name": ""}
 
         def switch(keys, command, locked=False):
             return {"type": "switch", "keys": keys, "command": command, "mode": "default",
-                    "release": False, "locked": locked, "kept_open": False}
+                    "release": False, "locked": locked, "kept_open": False, "name": ""}
 
         self.assertEqual(self.connect().request(GET_BINDINGS), [
             key("Mod4+Return", "exec foot"),
@@ -194,6 +194,122 @@ bindswitch tablet:toggle workspace tablet
         self.wm.write_config("bindsym Mod1+x workspace x\n")
         self.command(self.connect(), "reload")
         self.assertEqual([b["keys"] for b in self.connect().request(GET_BINDINGS)], ["Mod1+x"])
+
+
+class NamedBindingsTest(KeysTest):
+    """bindsym --name and rebind, tidewm's own: a shell's keyboard
+    shortcuts give a named binding other keys in a file the config
+    includes."""
+    CONFIG = """bindsym --name go_a Mod1+a workspace a
+bindsym --name go_b Mod1+b workspace b
+bindsym --name go_b Mod1+c workspace b
+bindsym --name=pinned --locked Mod1+p workspace p
+bindsym Mod1+z workspace marker
+mode resize {
+    bindsym --name grow Mod1+g workspace grown
+}
+include tide-keys.conf
+"""
+
+    def rebind(self, text):
+        """Writes the shell's tide-keys.conf and reloads."""
+        with open(os.path.join(os.path.dirname(self.wm.config_path), "tide-keys.conf"), "w") as f:
+            f.write(text)
+        self.command(self.connect(), "reload")
+
+    def ran(self, key):
+        """The workspace Alt and key shows, or "marker" if it runs nothing:
+        Alt+z, pressed after it, shows that. Starts on another workspace,
+        so either is a change."""
+        self.command(self.connect(), "workspace start")
+        ipc = self.workspaces_ipc()
+        self.alt(key)
+        self.alt("z")
+        return self.shown(ipc)
+
+    def named(self):
+        return {b["name"]: (b["keys"], b["default_keys"])
+                for b in self.connect().request(GET_NAMED_BINDINGS)}
+
+    def test_get_named_bindings_lists_each_name_with_its_keys(self):
+        self.assertEqual(self.connect().request(GET_NAMED_BINDINGS), [
+            {"name": "go_a", "type": "key", "keys": ["Mod1+a"], "default_keys": ["Mod1+a"],
+             "command": "workspace a", "mode": "default", "release": False, "locked": False,
+             "kept_open": False},
+            {"name": "go_b", "type": "key", "keys": ["Mod1+b", "Mod1+c"],
+             "default_keys": ["Mod1+b", "Mod1+c"], "command": "workspace b", "mode": "default",
+             "release": False, "locked": False, "kept_open": False},
+            {"name": "pinned", "type": "key", "keys": ["Mod1+p"], "default_keys": ["Mod1+p"],
+             "command": "workspace p", "mode": "default", "release": False, "locked": True,
+             "kept_open": False},
+            {"name": "grow", "type": "key", "keys": ["Mod1+g"], "default_keys": ["Mod1+g"],
+             "command": "workspace grown", "mode": "resize", "release": False, "locked": False,
+             "kept_open": False},
+        ])
+        self.assertEqual({b["keys"]: b["name"] for b in self.connect().request(GET_BINDINGS)}, {
+            "Mod1+a": "go_a", "Mod1+b": "go_b", "Mod1+c": "go_b", "Mod1+p": "pinned",
+            "Mod1+z": "", "Mod1+g": "grow"})
+
+    def test_rebind_replaces_a_bindings_keys(self):
+        self.rebind("rebind go_b Mod1+x\n")
+        self.assertEqual(self.ran("x"), "b")
+        self.assertEqual(self.ran("b"), "marker", "go_b's own keys are gone")
+        self.assertEqual(self.ran("c"), "marker")
+        self.assertEqual(self.named()["go_b"], (["Mod1+x"], ["Mod1+b", "Mod1+c"]))
+
+    def test_rebind_keeps_the_bindings_flags(self):
+        self.rebind("rebind pinned Mod1+q\n")
+        self.assertEqual(next(b for b in self.connect().request(GET_BINDINGS)
+                              if b["name"] == "pinned")["locked"], True)
+
+    def test_rebind_none_turns_a_binding_off(self):
+        self.rebind("rebind go_a none\n")
+        self.assertEqual(self.ran("a"), "marker")
+        self.assertEqual(self.named()["go_a"], ([], ["Mod1+a"]))
+
+    def test_a_rebinds_keys_are_taken_from_the_binding_that_had_them(self):
+        self.rebind("rebind go_a Mod1+b\n")
+        self.assertEqual(self.ran("b"), "a")
+        self.assertEqual(self.ran("c"), "b", "go_b keeps its other keys")
+        self.assertEqual(self.named()["go_b"], (["Mod1+c"], ["Mod1+b", "Mod1+c"]))
+
+    def test_a_mode_binding_is_rebound_in_its_mode(self):
+        self.rebind("rebind grow Mod1+h\n")
+        self.command(self.connect(), "mode resize")
+        self.assertEqual(self.ran("h"), "grown")
+
+    def test_an_unknown_name_is_logged_and_skipped(self):
+        self.rebind("rebind gone Mod1+x\nrebind go_a Mod1+y\n")
+        self.assertIn("rebind gone: no binding is called gone, so it's skipped", self.wm.output())
+        self.assertEqual(self.ran("y"), "a", "the rest of the file loads")
+
+    def test_named_binding_errors(self):
+        for text, error in [
+            ("bindsym --name Go Mod1+x nop\n", ":1: bindsym --name Go: a name is a lower-case letter"),
+            ("bindsym --name Mod1+x nop\n", ":1: bindsym needs keys and a command"),
+            ("bindsym --name\n", ":1: bindsym --name needs a name"),
+            ("bindsym --name x Mod1+x nop\nbindsym --name x Mod1+y kill\n",
+             ":2: bindsym --name x: that name runs nop already"),
+            ("bindsym --name x Mod1+x nop\nbindsym --name x --locked Mod1+y nop\n",
+             ":2: bindsym --name x: that name's other keys have other flags"),
+            ("bindsym --name x Mod1+x nop\nmode m {\nbindsym --name x Mod1+y nop\n}\n",
+             ":3: bindsym --name x: that name is in mode default already"),
+            ("bindsym --name x Mod1+x nop\nrebind x Mod1+NoSuchKey\n",
+             ":2: rebind x Mod1+NoSuchKey: no modifier or key is called NoSuchKey"),
+            ("bindsym --name x Mod1+x nop\nrebind x none Mod1+y\n", ":2: rebind x: none is alone"),
+            ("rebind x\n", ":1: rebind needs a binding's name, then its keys, or none"),
+            ("bindsym --name x Mod1+x nop\nmode m {\nrebind x Mod1+y\n}\n",
+             ":3: rebind can't be in a mode"),
+        ]:
+            self.wm.write_config(text)
+            self.assertIn(error, self.fails("reload")["error"], text)
+
+    def test_a_bad_rebind_keeps_the_keys_there_were(self):
+        self.rebind("rebind go_a Mod1+x\n")
+        with open(os.path.join(os.path.dirname(self.wm.config_path), "tide-keys.conf"), "w") as f:
+            f.write("rebind go_a Mod1+NoSuchKey\n")
+        self.fails("reload")
+        self.assertEqual(self.ran("x"), "a")
 
 
 class NoConfigBindingsTest(TidewmTest):

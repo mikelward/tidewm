@@ -149,7 +149,7 @@ To get a list of status bars that work with dwl consult our [wiki].
 ### Config file
 
 tidewm also reads a config file in sway's syntax, from `-c FILE` or
-`~/.config/tidewm/config`, and again on `reload`: key bindings and modes,
+`~/.config/tidewm/config`, and again on `reload`: key bindings and modes, named bindings a shell can give other keys,
 the mouse's drags and button bindings, window rules, outputs, named by connector or by what they are and placed
 beside each other as Hyprland's monitor rules place them, input devices,
 and other files it includes, as a shell's own settings. Once it's loaded, its bindings replace

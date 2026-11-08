@@ -165,6 +165,17 @@ class ConfigHButtonsTest(MouseTest):
         self.assertEqual(self.moved_by(window, "alt", "alt", "left"), (100, 50))
 
 
+class ReboundButtonTest(MouseTest):
+    """A file whose only button binding a rebind takes away still said what
+    the mouse does, so config.h's buttons stay out."""
+    CONFIG = ("bindsym --name float --whole-window Mod1+button2 floating toggle\n"
+              "rebind float none\n" + HOLD)
+
+    def test_alt_doesnt_drag(self):
+        window = self.floating()
+        self.assertEqual(self.moved_by(window, "alt", "alt", "left"), (0, 0))
+
+
 class ButtonBindingTest(MouseTest):
     CONFIG = ("floating_modifier Mod4\n"
               "bindsym --whole-window Mod4+button2 maximize toggle\n"
