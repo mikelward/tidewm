@@ -228,6 +228,27 @@ twocol(Monitor *m)
 	free(boxes);
 }
 
+/* The layout step along m's in the cycle, the config file's layout_cycle,
+ * else tide's: tile, threecol, twocol, going round. From monocle, it goes
+ * from the layout before, as tide's does. From one the cycle hasn't, it
+ * goes to the cycle's first, or its last going back. */
+static void
+(*lt_cycle(Monitor *m, int step))(Monitor *)
+{
+	static void (*const tides[])(Monitor *) = {tile, threecol, twocol};
+	void (*const *cycle)(Monitor *) = settings && settings->ncycle ? settings->cycle : tides;
+	size_t n = settings && settings->ncycle ? settings->ncycle : LENGTH(tides), i, at = n;
+	const Layout *from = m->lt[m->sellt];
+	if (from && from->arrange == monocle)
+		from = m->lt[m->sellt ^ 1];
+	for (i = 0; i < n && at == n; i++)
+		if (from && from->arrange == cycle[i])
+			at = i;
+	if (at == n)
+		return cycle[step > 0 ? 0 : n - 1];
+	return cycle[(at + n + (size_t)(step % (int)n + (int)n)) % n];
+}
+
 /* lt's mfact and nmaster on the output called output, before they're
  * changed: the config file's layout_defaults, then tide's, for the layouts
  * that have them, then config.h's monitor rule's */

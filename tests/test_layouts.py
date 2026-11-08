@@ -490,5 +490,59 @@ class TwoMonitorLayoutTest(TidewmTest):
         self.assertEqual(self.parts("1"), {"HEADLESS-1": "tile", "HEADLESS-2": "twocol"})
 
 
+class CycleTest(TidewmTest):
+    """layout next and prev, tide's Super+. and Super+, : through tile,
+    threecol and twocol, or the config file's layout_cycle, going round."""
+    # An empty file, named with -c, so a test can write one and reload it
+    CONFIG = ""
+
+    def layout(self):
+        current, = [w["layout"] for w in self.connect().request(GET_WORKSPACES) if w["focused"]]
+        return current
+
+    def steps(self, command, n):
+        shown = []
+        for _ in range(n):
+            self.command(self.connect(), command)
+            shown.append(self.layout())
+        return shown
+
+    def fails_to_load(self, text):
+        self.wm.write_config(text)
+        result, = self.connect().request(RUN_COMMAND, "reload")
+        self.assertFalse(result["success"], result)
+        return result["error"]
+
+    def test_next_and_prev_go_round_tides_cycle(self):
+        self.assertEqual(self.layout(), "tile")  # 1280x720 isn't ultrawide
+        self.assertEqual(self.steps("layout next", 3), ["threecol", "twocol", "tile"])
+        self.assertEqual(self.steps("layout prev", 2), ["twocol", "threecol"])
+
+    def test_from_monocle_it_goes_from_the_layout_before(self):
+        self.command(self.connect(), "layout threecol")
+        self.command(self.connect(), "layout monocle")
+        self.assertEqual(self.steps("layout next", 1), ["twocol"])
+        # And toggle goes back to the one before
+        self.assertEqual(self.steps("layout toggle", 1), ["monocle"])
+
+    def test_the_config_files_cycle(self):
+        self.wm.write_config("layout_cycle twocol tile\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.steps("layout next", 3), ["twocol", "tile", "twocol"])
+        # threecol isn't in it: next goes to its first, prev its last
+        self.command(self.connect(), "layout threecol")
+        self.assertEqual(self.steps("layout next", 1), ["twocol"])
+
+    def test_bad_cycles_are_errors(self):
+        for text, error in [
+            ("layout_cycle tile monocle\n", ":1: layout_cycle takes tile, threecol and twocol, "
+             "not monocle"),
+            ("layout_cycle tile twocol tile\n", ":1: layout_cycle has tile twice"),
+            ("layout_cycle\n", ":1: layout_cycle needs a layout"),
+        ]:
+            with self.subTest(text=text):
+                self.assertIn(error, self.fails_to_load(text))
+
+
 if __name__ == "__main__":
     unittest.main()

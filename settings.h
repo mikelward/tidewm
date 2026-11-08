@@ -204,6 +204,8 @@ typedef struct {
 	void (*first_layout[2])(Monitor *); /* default_layout normal|ultrawide; NULL: not given */
 	LayoutDefaults layout_defaults[LENGTH(settings_lt_modes)];
 	int new_window; /* new_window end|top|next|master; -1: not given */
+	void (*cycle[LENGTH(settings_lt_modes)])(Monitor *); /* layout_cycle's */
+	size_t ncycle; /* 0: not given */
 	SwitchBinding *switches;
 	size_t nswitches;
 	double grant_seconds, prompt_seconds; /* 0: not given */
@@ -1253,6 +1255,37 @@ settings_layout_defaults(Settings *s, char *rest, unsigned int line, struct json
 	return 1;
 }
 
+/* A layout_cycle line: the layouts layout next and prev go through, in
+ * order, each of tile, threecol and twocol once, as tide's cycle */
+static int
+settings_layout_cycle(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *name;
+	size_t i, j, n = 0;
+	while (*(name = settings_word(&rest))) {
+		for (i = 0; i < LENGTH(settings_lt_modes) && strcmp(name, settings_lt_modes[i].name); i++)
+			;
+		if (i == LENGTH(settings_lt_modes)) {
+			settings_error(errors, line, "layout_cycle takes tile, threecol and twocol, "
+					"not %s", name);
+			return 0;
+		}
+		for (j = 0; j < n; j++) {
+			if (s->cycle[j] == settings_lt_modes[i].arrange) {
+				settings_error(errors, line, "layout_cycle has %s twice", name);
+				return 0;
+			}
+		}
+		s->cycle[n++] = settings_lt_modes[i].arrange;
+	}
+	if (!n) {
+		settings_error(errors, line, "layout_cycle needs a layout");
+		return 0;
+	}
+	s->ncycle = n;
+	return 1;
+}
+
 /* A new_window line: end, top, next or master */
 static int
 settings_new_window(Settings *s, char *rest, unsigned int line, struct json_object *errors)
@@ -1523,7 +1556,8 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 				ok &= settings_single(s, p, line, errors);
 			}
 		} else if (!strcasecmp(word, "ultrawide_aspect") || !strcasecmp(word, "default_layout")
-				|| !strcasecmp(word, "layout_defaults") || !strcasecmp(word, "new_window")) {
+				|| !strcasecmp(word, "layout_defaults") || !strcasecmp(word, "new_window")
+				|| !strcasecmp(word, "layout_cycle")) {
 			if (mode) {
 				settings_error(errors, line, "%s can't be in a mode", word);
 				ok = 0;
@@ -1533,6 +1567,8 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 				ok &= settings_first_layout(s, p, line, errors);
 			} else if (!strcasecmp(word, "layout_defaults")) {
 				ok &= settings_layout_defaults(s, p, line, errors);
+			} else if (!strcasecmp(word, "layout_cycle")) {
+				ok &= settings_layout_cycle(s, p, line, errors);
 			} else {
 				ok &= settings_new_window(s, p, line, errors);
 			}
