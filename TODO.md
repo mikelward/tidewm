@@ -22,6 +22,8 @@ lands with a test.
 
 ## Done
 
+- **Resize** (#?): sway's `resize grow|shrink`, a floating window in
+  pixels and a tile by its column's share, for tide's resize mode.
 - **Directions** (#?): sway's `focus` and `move` `left`, `right`, `up`
   and `down`, by tide's rule for its arrow keys, going on to the next
   monitor past an edge, for tide's Super+arrows.
@@ -147,6 +149,12 @@ lands with a test.
 
 ## Decisions needing review
 
+- **A tile's resize is mfact** (#?): sway's `resize grow width` on a
+  tile takes space from its neighbors in its tree; tidewm's master and
+  stack have one split, so it moves that, the master's column growing
+  for a master and the stack's for a stack window, and `left` and `right`
+  act as `width` rather than naming a neighbor. A tile's height fails, as
+  its stack's rows are equal. Reversible.
 - **Directions are tide's, by geometry** (#?): `focus` and `move` by
   direction pick the window whose center is that way, sharing the most
   height, then nearest, then first in the stack, as tide's SPEC §6.6 and
