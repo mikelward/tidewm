@@ -1,0 +1,100 @@
+# The sway experiment (experiments/sway/REPORT.md): tidewm's whole test
+# suite and a benchmark, run three ways in the same run so the numbers
+# compare: tidewm itself, stock sway alone, and stock sway with tide's
+# helper. Only on the experiment's branch. Test failures are the result,
+# so they never fail the job; the results are uploaded.
+name: sway-experiment
+
+on:
+  push:
+    branches: ["claude/sway-experiment"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sway-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    container:
+      image: debian:testing
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [tidewm, stock, helper]
+    env:
+      WLR_BACKENDS: headless
+      WLR_LIBINPUT_NO_DEVICES: "1"
+    steps:
+      - run: apt-get update
+      - run: >-
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+          build-essential pkgconf libwlroots-0.20-dev libwayland-dev
+          wayland-protocols libinput-dev libxkbcommon-dev libjson-c-dev libpcre2-dev python3
+          libxcb1-dev libxcb-icccm4-dev xwayland wtype wlr-randr
+          sway swaybg grim
+      - run: sway --version
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # tidewm and the test clients, as ci.yml's test job builds them
+      - run: >-
+          make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm" dwl tests/client tests/workspaces
+          tests/locker tests/power tests/ime tests/pointer tests/launcher tests/keyboard
+          tests/capture tests/x11client
+      - name: Smoke test
+        continue-on-error: true
+        run: |
+          if test "$MODE" != tidewm; then
+            export TIDEWM="$PWD/experiments/sway/tidewm-on-sway" TIDE_SWAY_MODE="$MODE"
+          fi
+          cd tests
+          timeout 120 python3 -m unittest -v test_layouts.LayoutTest.test_threecol_centers_the_master_with_a_quarter_either_side
+        env:
+          MODE: ${{ matrix.mode }}
+      - name: Benchmark
+        continue-on-error: true
+        timeout-minutes: 30
+        run: python3 experiments/sway/bench/bench.py "$MODE" results 50
+        env:
+          MODE: ${{ matrix.mode }}
+      - name: Suite
+        continue-on-error: true
+        timeout-minutes: 80
+        run: python3 experiments/sway/run-suite.py "$MODE" results
+        env:
+          MODE: ${{ matrix.mode }}
+          JOBS: "4"
+          FILE_TIMEOUT: "1500"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sway-experiment-${{ matrix.mode }}
+          path: results
+          if-no-files-found: warn
+
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: run
+    if: always()
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+          pattern: sway-experiment-*
+          merge-multiple: true
+      - run: python3 experiments/sway/summarize.py results > results/summary.md
+      - run: cat results/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sway-experiment-summary
+          path: results/summary.md
