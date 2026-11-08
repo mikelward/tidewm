@@ -409,6 +409,14 @@ first. So does one a `fullscreen` command or rule makes fullscreen.
   coming back to the window you were in, as when a launcher closes; focus
   a grant gave, even once a launcher that held the keyboard closes; and
   focus moving as an output goes.
+- **A canceled grant still places its window**, as Hyprland's
+  `initial_workspace_tracking` does (tide's SPEC §14.2): if you've left
+  the workspace it was made on, its window opens there, or on its
+  `--workspace`, unfocused and urgent, and that workspace turns urgent.
+  So an app you launch on `docs` that opens after you move to `review`
+  opens on `docs`. A workspace renamed since is still found; one gone
+  since is made again by name. A wildcard grant without `--pid`, or a
+  notification's, places nothing. A dialog goes with its parent.
 - **A grant lapses** after `grant_seconds`. A notification's grant,
   `grant --or-recent`, then brings up the app's most recent window,
   unless a window or an activation used it or you moved on; with no
@@ -417,7 +425,8 @@ first. So does one a `fullscreen` command or rule makes fullscreen.
 An activation, xdg-activation's or X11's `_NET_ACTIVE_WINDOW`, marks the
 window urgent rather than focusing it, unless a grant names its app, with
 the guard on or off. With it off, a new window still uses its grant, and
-goes to the grant's workspace, though every window takes focus.
+goes to the grant's workspace, though every window takes focus but one a
+canceled grant places on another workspace.
 
 ## Errors
 

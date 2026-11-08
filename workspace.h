@@ -300,6 +300,8 @@ ws_move(Client *c, Workspace *ws)
 		ws_update_urgency(old);
 }
 
+static void fg_renamed(Workspace *ws); /* focus.h */
+
 static void
 ws_rename(Workspace *ws, const char *name)
 {
@@ -308,6 +310,7 @@ ws_rename(Workspace *ws, const char *name)
 		die("out of memory renaming workspace");
 	free(ws->name);
 	ws->name = copy;
+	fg_renamed(ws);
 	if (ws->ext)
 		wlr_ext_workspace_handle_v1_set_name(ws->ext, ws->name);
 	printstatus();

@@ -21,6 +21,10 @@ lands with a test.
 
 ## Done
 
+- **The workspace it was launched from** (#70): a grant you move on from
+  gives no focus, but its window opens on the workspace the grant was
+  made on, or its `--workspace`, unfocused and urgent, as tide's SPEC
+  §14.2 and Hyprland's `initial_workspace_tracking` have it.
 - **Dragging the master/stack edge** (#68): a plain left press on the
   edge drags it, setting `mfact`, and a lone window's sides drag its
   width, as tide's SPEC §6.6 has it, with the config file's
@@ -188,6 +192,24 @@ lands with a test.
 
 ## Decisions needing review
 
+- **A key press or click keeps a grant's place** (#70): anything you do
+  cancels a grant's focus, as before, but the grant stays, canceled, to
+  place its window, until it's used or lapses after `grant_seconds`.
+  Switching by `Super+2` or the bar is a key press or a click, so
+  dropping the grant on those would leave the case SPEC §14.2 names
+  unhandled; Hyprland's tracking ignores them too. Reversible.
+- **Where you've gone is checked as the window opens** (#70), not
+  recorded as you switch: going away and back before it opens leaves it
+  where you are, unfocused, as today, and a `--workspace` grant then
+  opens where you are too, not on its workspace. A workspace renamed
+  since is found by its IPC id; one pruned since is made again by name.
+- **What a canceled grant places** (#70): a named one, by app or by
+  `--pid`; a wildcard one only by `--pid`, since `*` would catch any
+  app's window for `grant_seconds`; never a notification's, which isn't
+  a launch. A canceled grant is used up by an app's activation of a
+  window it had, giving nothing, and a live grant comes before it. A
+  window it places is held and urgent even with the guard off, since
+  it's on a workspace you've left. A dialog goes with its parent.
 - **The layout cycle is `layout next|prev`** (#65), named after
   `layout toggle`, with tide's own cycle, `tile`, `threecol`, `twocol`,
   and from `monocle` the layout before it, and the config file's
