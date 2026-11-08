@@ -79,10 +79,13 @@ built from. Upstream dwl's own `v0.x` tags stay as they are.
 
 ## Configuration
 
-All configuration is done by editing `config.h` and recompiling, in the same
-manner as [dwm]. There is no way to separately restart the window manager in
-Wayland without restarting the entire display server, so any changes will take
-effect the next time dwl is executed.
+tidewm reads a config file in sway's syntax, the one `-c FILE` names, or
+`$XDG_CONFIG_HOME/tidewm/config`, usually `~/.config/tidewm/config`, at startup and again on `reload`, with no
+restart: keys, the mouse, window rules, outputs, input devices, layouts
+and the rest ([Config file](#config-file), and
+[`docs/config.md`](docs/config.md) for what it takes). `config.h`, read
+when tidewm is built, as in [dwm], holds the defaults the file doesn't
+set, and the keys, buttons and rules in force without a file.
 
 As in the [dwm] community, we encourage users to share patches they have
 created. Check out the [dwl-patches] repository!
