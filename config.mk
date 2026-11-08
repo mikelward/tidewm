@@ -1,5 +1,8 @@
 _VERSION = 0.10-dev
 VERSION  = `git describe --tags --dirty 2>/dev/null || echo $(_VERSION)`
+# tidewm's releases are v0.$(RELEASE_MINOR).<commits on main>. Raise it in
+# the change that breaks a config file or an IPC client.
+RELEASE_MINOR = 0
 
 PKG_CONFIG = pkg-config
 

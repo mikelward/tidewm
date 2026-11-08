@@ -74,8 +74,10 @@ tidewm's releases are tags `v0.MINOR.PATCH` on `main`, the first `v0.0.1448`.
 PATCH is the number of commits on `main` at the tag, so it only grows and no
 two releases share one. MINOR goes up for a change that breaks a config file or
 a client of the IPC, as semver's 0.x minor does. A release's tag is never moved,
-so a pin on it always builds the same code. `tidewm -v` names the tag it was
-built from. Upstream dwl's own `v0.x` tags stay as they are.
+so a pin on it always builds the same code. The release workflow tags every
+push to main, as `make release-tag` prints; raise `RELEASE_MINOR` in
+`config.mk` in the change that breaks a config or a client. `tidewm -v` names
+the tag it was built from. Upstream dwl's own `v0.x` tags stay as they are.
 
 ## Configuration
 

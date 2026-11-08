@@ -232,6 +232,10 @@ test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime tests
 		$(XWAYLAND:-DXWAYLAND=tests/x11client)
 	python3 -m unittest discover -s tests -v
 
+# The tag the release workflow gives HEAD once it lands on main.
+release-tag:
+	@echo v0.$(RELEASE_MINOR).`git rev-list --count HEAD`
+
 clean:
 	rm -f dwl *.o *-protocol.h *-protocol.c tests/client tests/workspaces tests/locker tests/power \
 		tests/ime tests/pointer tests/launcher tests/keyboard tests/capture tests/x11client \
