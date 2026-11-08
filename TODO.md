@@ -21,6 +21,11 @@ lands with a test.
 
 ## Done
 
+- **Dragging the master/stack edge** (#68): a plain left press on the
+  edge drags it, setting `mfact`, and a lone window's sides drag its
+  width, as tide's SPEC §6.6 has it, with the config file's
+  `resize_grab` and the `single_width` command; a resize drag on a tile
+  drags its nearest edge.
 - **Named bindings** (#67): tidewm's own `bindsym --name` and `rebind`,
   and `GET_NAMED_BINDINGS`, so tide's Keyboard shortcuts give a binding
   other keys, as conf's named Hyprland bindings take them.
@@ -231,6 +236,35 @@ lands with a test.
 - **Dragging a tile floats it** (#65), as dwl's Alt drag does, where
   sway's `floating_modifier` moves a tile among the others and resizes it
   in place. tide's SPEC §6.6 drags only floating windows. Reversible.
+  Since #68 only a move does: a resize drags the tile's nearest
+  master/stack edge, as Hyprland's own resize does, and only a tile with
+  no edge, as in `monocle`, still floats.
+- **A resize drag is the edge's from anywhere on a tile** (#68): Super
+  and the right button on a tile drag the master/stack edge nearest the
+  pointer, keeping its distance from it, rather than floating the tile,
+  and don't depend on `resize_grab`, which is the plain press's. dwl's
+  resize floats; Hyprland 0.56's moves the split for its own layouts, and
+  its Lua layouts can't. tide's docs/compositor.md asks for it.
+  Reversible.
+- **The edge is the compositor's to hover** (#68): over the grab, the
+  pointer leaves the window and shows `ew-resize`, so a window under it
+  gets no motion, scroll or click there, as at Hyprland's
+  `resize_on_border`. tide's Lua layout can't set a cursor, so its edge
+  stays the window's until the press. Reversible.
+- **A lone window's full-width sides drag too** (#68): as tide's layout
+  has them, a lone window at the whole width has its edges at the
+  monitor's, so the 4 pixels at each side of the screen drag its width
+  rather than reaching, say, a scrollbar at the right edge. Reversible,
+  by `resize_grab 0` or by leaving a full-width lone window out.
+- **Popups and grabs pass every press** (#68): while a menu's xdg popup
+  grabs the pointer or a focus grab holds, every press goes on, so it
+  closes the menu, as tide's `set_popups_open` has it on Hyprland. tidewm
+  sees a press on a layer's popup itself, so tide's shell needn't tell
+  it. Reversible.
+- **`single_width` is the command's name** (#68), for tide's `layoutmsg
+  single`, after the config file's `single_window`. Reversible before
+  tide's config uses it.
+
 - **Gestures go to apps, and none are bound** (#64): tidewm passes a
   touchpad's pinches, swipes and holds to the window under the pointer,
   as sway does and as dwl-patches' pointer-gestures patch does, but has

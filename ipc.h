@@ -1332,6 +1332,25 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		arrange(selmon);
 		return ipc_json_success(1, NULL);
 	}
+	/* tidewm's own, tide's layoutmsg single: the lone window's width of
+	 * the current workspace's part on the focused monitor, which a drag of
+	 * its side also sets (split.h) */
+	if (!has_criteria && ipc_take(&cmd, "single_width")) {
+		float f = 0;
+		int relative;
+		int reset = !strcasecmp(cmd, "reset");
+		if (!reset && (!ipc_number(cmd, &f, &relative) || relative)) {
+			error = "Expected single_width F or reset";
+			goto parse_error;
+		}
+		if (!selmon)
+			return ipc_json_success(0, "No output");
+		if (!reset && (f < 0.1f || f > 1))
+			return ipc_json_success(0, "single_width must be between 0.1 and 1");
+		selmon->single = reset ? 0 : f;
+		arrange(selmon);
+		return ipc_json_success(1, NULL);
+	}
 	/* tidewm's own, after dwl-patches' movestack: down or up the stack */
 	if (ipc_take(&cmd, "movestack")) {
 		if (strcasecmp(cmd, "next") && strcasecmp(cmd, "prev")) {

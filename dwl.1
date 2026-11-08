@@ -114,7 +114,10 @@ Tiled windows will be toggled to the floating state.
 Toggle focused window between floating and tiled state.
 .It Mod-Button3
 Resize focused window while dragging.
-Tiled windows will be toggled to the floating state.
+A tiled window drags the master/stack edge nearest the pointer instead;
+one with no edge is toggled to the floating state.
+.It Button1 on the master/stack edge
+Drag the edge, resizing the master area, or a lone window's width.
 .El
 .Sh STATUS INFORMATION
 .Nm
