@@ -23,9 +23,31 @@ typedef struct {
 	int release; /* runs when the key comes up, if it was tapped */
 	int locked; /* runs while the screen is locked, too */
 	int kept_open; /* counts only while the keyboard's in a window kept open */
+	uint32_t button; /* a --whole-window binding's button, or scroll; 0 for a key */
 	char *keys; /* as written, for messages */
 	char *command;
 } Binding;
+
+/* Scrolls, as sway's button4 to button7 name them, beside the buttons'
+ * own codes */
+enum { SettingsScrollUp = KEY_MAX + 1, SettingsScrollDown, SettingsScrollLeft,
+	SettingsScrollRight };
+
+/* The buttons a --whole-window binding can name, as sway names them: X11's
+ * numbers, then evdev's names; a code's first name is the binding event's
+ * symbol */
+static const struct {
+	const char *name;
+	uint32_t code;
+} settings_buttons[] = {
+	{"button1", BTN_LEFT}, {"button2", BTN_MIDDLE}, {"button3", BTN_RIGHT},
+	{"button4", SettingsScrollUp}, {"button5", SettingsScrollDown},
+	{"button6", SettingsScrollLeft}, {"button7", SettingsScrollRight},
+	{"button8", BTN_SIDE}, {"button9", BTN_EXTRA},
+	{"BTN_LEFT", BTN_LEFT}, {"BTN_MIDDLE", BTN_MIDDLE}, {"BTN_RIGHT", BTN_RIGHT},
+	{"BTN_SIDE", BTN_SIDE}, {"BTN_EXTRA", BTN_EXTRA}, {"BTN_FORWARD", BTN_FORWARD},
+	{"BTN_BACK", BTN_BACK}, {"BTN_TASK", BTN_TASK},
+};
 
 /* A bindswitch line: a command run when a switch, such as the lid, turns
  * on, off, or either */
@@ -174,6 +196,8 @@ typedef struct {
 	int focus_guard; /* focus_guard enable|disable; -1: not given */
 	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
 	int xwayland_scaling; /* xwayland_scaling enable|disable; -1: not given */
+	int floating_mod; /* floating_modifier's modifiers, 0 for none; -1: not given */
+	int floating_inverse; /* floating_modifier's inverse: left resizes, right moves */
 	SingleRule *singles; /* single_window lines, which replace config.h's */
 	size_t nsingles;
 	double ultrawide_aspect; /* ultrawide_aspect N; 0: not given */
@@ -315,10 +339,10 @@ settings_substitute(const char *line, const SettingsVar *vars, size_t nvars)
 	return out;
 }
 
-/* Reads "Mod4+Shift+Return" into mods and a keysym. On failure, *bad is
- * the part that's wrong. */
-static int
-settings_parse_keys(char *combo, uint32_t *mods, xkb_keysym_t *sym, const char **bad)
+/* The modifiers in combo, before its last +, into *mods: returns its last
+ * part, the key or button, or NULL with *bad the part that's no modifier */
+static char *
+settings_parse_mods(char *combo, uint32_t *mods, const char **bad)
 {
 	static const struct { const char *name; uint32_t mod; } names[] = {
 		{"Shift", WLR_MODIFIER_SHIFT}, {"Lock", WLR_MODIFIER_CAPS},
@@ -338,13 +362,37 @@ settings_parse_keys(char *combo, uint32_t *mods, xkb_keysym_t *sym, const char *
 		*next = '+';
 		if (i == LENGTH(names)) {
 			*bad = part;
-			return 0;
+			return NULL;
 		}
 		*mods |= names[i].mod;
 	}
 	/* Caps Lock is ignored when matching, so here too, or a binding
 	 * naming Lock would never run, nor replace one that doesn't */
 	*mods = CLEANMASK(*mods);
+	return part;
+}
+
+/* A button's code, by its name, or 0 */
+static uint32_t
+settings_button(const char *name)
+{
+	size_t i;
+	for (i = 0; i < LENGTH(settings_buttons); i++)
+		if (strncmp(settings_buttons[i].name, "button", 6)
+				? !strcmp(name, settings_buttons[i].name)
+				: !strcasecmp(name, settings_buttons[i].name))
+			return settings_buttons[i].code;
+	return 0;
+}
+
+/* Reads "Mod4+Shift+Return" into mods and a keysym. On failure, *bad is
+ * the part that's wrong. */
+static int
+settings_parse_keys(char *combo, uint32_t *mods, xkb_keysym_t *sym, const char **bad)
+{
+	char *part = settings_parse_mods(combo, mods, bad);
+	if (!part)
+		return 0;
 	*sym = xkb_keysym_from_name(part, XKB_KEYSYM_NO_FLAGS);
 	if (*sym == XKB_KEY_NoSymbol)
 		*sym = xkb_keysym_from_name(part, XKB_KEYSYM_CASE_INSENSITIVE);
@@ -448,12 +496,12 @@ settings_add_switch(Settings *s, char *rest, unsigned int line, struct json_obje
 static int
 settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_object *errors)
 {
-	char *combo, *spec;
+	char *combo, *spec, *last;
 	const char *bad = NULL;
-	uint32_t mods;
-	xkb_keysym_t sym;
+	uint32_t mods, button = 0;
+	xkb_keysym_t sym = XKB_KEY_NoSymbol;
 	size_t i;
-	int release = 0, locked_too = 0, kept_open = 0;
+	int release = 0, locked_too = 0, kept_open = 0, whole_window = 0;
 	Binding *b;
 
 	while (rest[0] == '-' && rest[1] == '-') {
@@ -464,6 +512,8 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 			locked_too = 1;
 		} else if (!strcmp(flag, "--kept-open")) {
 			kept_open = 1;
+		} else if (!strcmp(flag, "--whole-window")) {
+			whole_window = 1;
 		} else {
 			settings_error(errors, line, "bindsym has no flag %s", flag);
 			return 0;
@@ -475,7 +525,32 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 		return 0;
 	}
 	spec = settings_strdup(combo, strlen(combo));
-	if (!settings_parse_keys(combo, &mods, &sym, &bad)) {
+	if (!(last = settings_parse_mods(combo, &mods, &bad))) {
+		settings_error(errors, line, "bindsym %s: no modifier or key is called %s", spec, bad);
+		free(spec);
+		return 0;
+	}
+	/* A button, as sway's: over a window, or none, with --whole-window,
+	 * as tidewm has no title bars, where sway's runs without it */
+	if ((button = settings_button(last)) && !whole_window) {
+		settings_error(errors, line, "bindsym %s: a button's binding needs --whole-window, "
+				"as there are no title bars", spec);
+		free(spec);
+		return 0;
+	}
+	if (whole_window && !button) {
+		settings_error(errors, line, "bindsym --whole-window %s: no button is called %s, "
+				"as button1 to button9 or BTN_LEFT", spec, last);
+		free(spec);
+		return 0;
+	}
+	if (button && (release || locked_too || kept_open)) {
+		settings_error(errors, line, "bindsym --whole-window %s: a button's binding "
+				"takes no --release, --locked or --kept-open", spec);
+		free(spec);
+		return 0;
+	}
+	if (!button && !settings_parse_keys(combo, &mods, &sym, &bad)) {
 		settings_error(errors, line, "bindsym %s: no modifier or key is called %s", spec, bad);
 		free(spec);
 		return 0;
@@ -485,7 +560,7 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 	 * for every window */
 	for (i = 0; i < mode->nbindings; i++) {
 		b = &mode->bindings[i];
-		if (b->mods == mods && b->sym == sym && b->release == release
+		if (b->mods == mods && b->sym == sym && b->button == button && b->release == release
 				&& b->kept_open == kept_open) {
 			free(b->keys);
 			free(b->command);
@@ -500,11 +575,49 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 	}
 	b->mods = mods;
 	b->sym = sym;
+	b->button = button;
 	b->release = release;
 	b->locked = locked_too;
 	b->kept_open = kept_open;
 	b->keys = spec;
 	b->command = settings_strdup(rest, strlen(rest));
+	return 1;
+}
+
+/* A floating_modifier line, as sway's: "MOD [normal|inverse]", or "none".
+ * MOD and the left button move a floating window, and MOD and the right
+ * one resize it; inverse swaps them. */
+static int
+settings_floating_modifier(Settings *s, char *rest, unsigned int line,
+		struct json_object *errors)
+{
+	char *mod = settings_word(&rest), *how = settings_word(&rest), *combo;
+	const char *bad = NULL;
+	uint32_t mods;
+	size_t n = strlen(mod);
+	if (!*mod || *rest || (*how && strcasecmp(how, "normal") && strcasecmp(how, "inverse"))) {
+		settings_error(errors, line, "floating_modifier takes a modifier, "
+				"then normal or inverse, or none");
+		return 0;
+	}
+	if (!strcasecmp(mod, "none")) {
+		s->floating_mod = 0;
+		s->floating_inverse = 0;
+		return 1;
+	}
+	/* Read as a binding's modifiers, before a key */
+	combo = malloc(n + 3);
+	if (!combo)
+		die("out of memory reading the config");
+	snprintf(combo, n + 3, "%s+x", mod);
+	if (!settings_parse_mods(combo, &mods, &bad) || !mods) {
+		settings_error(errors, line, "floating_modifier: no modifier is called %s", mod);
+		free(combo);
+		return 0;
+	}
+	free(combo);
+	s->floating_mod = (int)mods;
+	s->floating_inverse = !strcasecmp(how, "inverse");
 	return 1;
 }
 
@@ -1437,6 +1550,13 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			} else {
 				ok &= settings_xwayland_scaling(s, p, line, errors);
 			}
+		} else if (!strcasecmp(word, "floating_modifier")) {
+			if (mode) {
+				settings_error(errors, line, "floating_modifier can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_floating_modifier(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "focus_guard")) {
 			if (mode) {
 				settings_error(errors, line, "focus_guard can't be in a mode");
@@ -1607,6 +1727,7 @@ settings_parse(char *text, struct json_object *errors)
 	s->dim_inactive = -1;
 	s->new_window = -1;
 	s->xwayland_scaling = -1;
+	s->floating_mod = -1;
 	settings_add_mode(s, "default");
 	settings_file = NULL;
 	ok = settings_parse_text(s, text, &vars, &nvars, 0, errors);
@@ -1795,8 +1916,8 @@ settings_find(uint32_t mods, xkb_keysym_t sym, int release)
 	mode = &settings->modes[settings_mode];
 	for (i = 0; i < mode->nbindings; i++) {
 		const Binding *b = &mode->bindings[i];
-		if (b->mods != CLEANMASK(mods) || b->sym != sym || b->release != release
-				|| (locked && !b->locked))
+		if (b->button || b->mods != CLEANMASK(mods) || b->sym != sym
+				|| b->release != release || (locked && !b->locked))
 			continue;
 		if (!b->kept_open) {
 			found = found ? found : b;
@@ -1844,11 +1965,81 @@ settings_run_binding(uint32_t mods, xkb_keysym_t sym, int release)
 		return 0;
 	snprintf(what, sizeof(what), "binding %s", b->keys);
 	/* Said first, as the command may reload the file b is in */
-	ipc_event_binding(b->command, b->mods, b->sym, "keyboard");
+	ipc_event_binding(b->command, b->mods, b->sym, NULL, "keyboard");
 	focus_asked++;
 	settings_run(b->command, what, NULL);
 	focus_asked--;
 	return 1;
+}
+
+/* Whether the loaded file says what the mouse does, by a floating_modifier
+ * line or a --whole-window binding in any mode: then config.h's buttons
+ * and scrolls are left out, as its keys are, and the file's are all there
+ * are, as in sway. */
+static int
+settings_mouse(void)
+{
+	size_t i, j;
+	if (!settings)
+		return 0;
+	if (settings->floating_mod >= 0)
+		return 1;
+	for (i = 0; i < settings->nmodes; i++)
+		for (j = 0; j < settings->modes[i].nbindings; j++)
+			if (settings->modes[i].bindings[j].button)
+				return 1;
+	return 0;
+}
+
+/* Runs the current mode's --whole-window binding for a press of button, or
+ * a scroll, with mods held. Returns whether it has one. Never while
+ * locked, as no pointer event reaches a window then. */
+static int
+settings_run_button(uint32_t mods, uint32_t button)
+{
+	const Mode *mode;
+	const Binding *b = NULL;
+	char what[300], *command;
+	const char *symbol = NULL;
+	size_t i;
+	if (!settings || locked)
+		return 0;
+	mode = &settings->modes[settings_mode];
+	for (i = 0; i < mode->nbindings && !b; i++)
+		if (mode->bindings[i].button == button && mode->bindings[i].mods == CLEANMASK(mods))
+			b = &mode->bindings[i];
+	if (!b)
+		return 0;
+	for (i = 0; i < LENGTH(settings_buttons) && !symbol; i++)
+		if (settings_buttons[i].code == button)
+			symbol = settings_buttons[i].name;
+	snprintf(what, sizeof(what), "binding %s", b->keys);
+	/* Copied first, as the command may reload the file b is in */
+	command = settings_strdup(b->command, strlen(b->command));
+	ipc_event_binding(command, b->mods, XKB_KEY_NoSymbol, symbol, "mouse");
+	focus_asked++;
+	settings_run(command, what, NULL);
+	focus_asked--;
+	free(command);
+	return 1;
+}
+
+/* What a press of button with mods held does by the file's
+ * floating_modifier: CurMove or CurResize, as dwl's buttons have them,
+ * or CurNormal for nothing. Its modifiers count if they're all held, with
+ * others or not, as sway's one does. */
+static unsigned int
+settings_floating_drag(uint32_t mods, uint32_t button)
+{
+	if (!settings || settings->floating_mod <= 0
+			|| (CLEANMASK(mods) & (uint32_t)settings->floating_mod)
+				!= (uint32_t)settings->floating_mod)
+		return CurNormal;
+	if (button == BTN_LEFT)
+		return settings->floating_inverse ? CurResize : CurMove;
+	if (button == BTN_RIGHT)
+		return settings->floating_inverse ? CurMove : CurResize;
+	return CurNormal;
 }
 
 /* A switch, such as the lid, turned on or off: runs the file's bindswitch
@@ -1868,7 +2059,7 @@ settings_run_switch(int type, int on)
 		snprintf(what, sizeof(what), "bindswitch %s", type == WLR_SWITCH_TYPE_LID ? "lid" : "tablet");
 		/* Copied first, as the command may reload the file b is in */
 		command = settings_strdup(b->command, strlen(b->command));
-		ipc_event_binding(command, 0, XKB_KEY_NoSymbol, "switch");
+		ipc_event_binding(command, 0, XKB_KEY_NoSymbol, NULL, "switch");
 		settings_run(command, what, NULL);
 		free(command);
 	}
@@ -3102,7 +3293,7 @@ settings_json_bindings(void)
 		for (j = 0; j < settings->modes[i].nbindings; j++) {
 			k = &settings->modes[i].bindings[j];
 			b = json_object_new_object();
-			json_object_object_add(b, "type", json_object_new_string("key"));
+			json_object_object_add(b, "type", json_object_new_string(k->button ? "mouse" : "key"));
 			json_object_object_add(b, "keys", json_object_new_string(k->keys));
 			json_object_object_add(b, "command", json_object_new_string(k->command));
 			json_object_object_add(b, "mode", json_object_new_string(settings->modes[i].name));

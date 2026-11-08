@@ -12,6 +12,8 @@
  *   cross X Y WIDTH HEIGHT    move there as a mouse does, with a time, which
  *                             focus follows; a move, with none, jumps there
  *   scroll [up]               scroll down a step, or up
+ *   stop                      end a scroll, as a touchpad does when you
+ *                             lift your fingers
  */
 #include <linux/input-event-codes.h>
 #include <stdio.h>
@@ -35,7 +37,7 @@ static void
 usage(void)
 {
 	die("usage: pointer click | press BUTTON | release BUTTON | move X Y WIDTH HEIGHT "
-			"| cross X Y WIDTH HEIGHT | scroll [up] ...");
+			"| cross X Y WIDTH HEIGHT | scroll [up] | stop ...");
 }
 
 static void
@@ -125,6 +127,10 @@ main(int argc, char *argv[])
 			i += up;
 			zwlr_virtual_pointer_v1_axis(pointer, 0, WL_POINTER_AXIS_VERTICAL_SCROLL,
 					wl_fixed_from_int(up ? -15 : 15));
+			zwlr_virtual_pointer_v1_frame(pointer);
+		} else if (!strcmp(argv[i], "stop")) {
+			zwlr_virtual_pointer_v1_axis_source(pointer, WL_POINTER_AXIS_SOURCE_FINGER);
+			zwlr_virtual_pointer_v1_axis_stop(pointer, 0, WL_POINTER_AXIS_VERTICAL_SCROLL);
 			zwlr_virtual_pointer_v1_frame(pointer);
 		} else if ((!strcmp(argv[i], "move") || !strcmp(argv[i], "cross")) && i + 4 < argc) {
 			uint32_t x = number(argv[i + 1]), y = number(argv[i + 2]);

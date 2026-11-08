@@ -22,6 +22,11 @@ lands with a test.
 
 ## Done
 
+- **The mouse from the config** (#?): sway's `floating_modifier`, so
+  Super and a drag move or resize a floating window, and its
+  `bindsym --whole-window` button and scroll bindings, as Super and the
+  middle button maximizing, as tide's SPEC §6.6 has them. `config.h`'s
+  Alt drags stay until the file says what the mouse does.
 - **Gestures** (#64): pointer-gestures, so a touchpad's pinch, swipe and
   hold reach the window under the pointer, as Chrome's pinch to zoom.
 - **X11 at a fractional scale** (#45): with `xwayland_scaling disable`,
@@ -139,6 +144,21 @@ lands with a test.
 
 ## Decisions needing review
 
+- **config.h's buttons stay until the file speaks of the mouse** (#?):
+  a file with no `floating_modifier` line and no button binding keeps
+  `config.h`'s Alt drags and Alt+middle; with either, they're left out
+  and, without a `floating_modifier` line, nothing drags, as in sway,
+  whose default is none. The alternative was the file's mouse adding to
+  `config.h`'s, unlike its keys, which replace them. Reversible.
+- **A button's binding needs `--whole-window`** (#?): sway binds a title
+  bar's click without it, and tidewm has no title bars, so a bare
+  `bindsym Mod4+button2` is an error rather than a binding that never
+  runs. Button bindings take no `--release`, `--locked` or
+  `--kept-open`, which sway's take, as nothing needs them yet; one runs
+  on the window the click focused, never over a layer surface. Reversible.
+- **Dragging a tile floats it** (#?), as dwl's Alt drag does, where
+  sway's `floating_modifier` moves a tile among the others and resizes it
+  in place. tide's SPEC §6.6 drags only floating windows. Reversible.
 - **Gestures go to apps, and none are bound** (#64): tidewm passes a
   touchpad's pinches, swipes and holds to the window under the pointer,
   as sway does and as dwl-patches' pointer-gestures patch does, but has

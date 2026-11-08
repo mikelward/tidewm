@@ -12,10 +12,12 @@ The first of these that's given:
 2. `$XDG_CONFIG_HOME/tidewm/config`;
 3. `~/.config/tidewm/config`.
 
-Without the file, `config.h`'s keys and rules work, as in dwl. Once a file
-is loaded, its bindings are all the keys there are, and its `for_window`
-lines all the rules, and `config.h`'s are left out, so a file wanting dwl's
-defaults says them itself.
+Without the file, `config.h`'s keys, buttons and rules work, as in dwl.
+Once a file is loaded, its bindings are all the keys there are, and its
+`for_window` lines all the rules, and `config.h`'s are left out, so a file
+wanting dwl's defaults says them itself. `config.h`'s buttons, Alt and a
+drag, stay until the file says what the mouse does, by a
+`floating_modifier` line or a button's binding ([The mouse](#the-mouse)).
 
 ## Lines
 
@@ -41,6 +43,7 @@ supported yet. In an `input` or `output` line, a name or value may be in
 | `layout_defaults LAYOUT [mfact F] [nmaster N]` | tidewm's own: the `mfact`, from 0.1 to 0.9, and `nmaster`, up to 100, from 0 for `tile` and 1 for the others, that `tile`, `threecol` or `twocol` starts with. A later line for a layout adds to an earlier one. Without one, `threecol` starts at 0.5 with one master, `twocol` at 0.72 with two, and `tile` as `config.h`'s monitor rule has it. A `reload` that changes them starts every layout of every part from them again, each part keeping its layout, as a reload of tide's layouts does on Hyprland; one that doesn't leaves them as they are |
 | `new_window end\|top\|next\|master` | tidewm's own: where a new tiled window goes, at the `end` of the stack, its `top`, just after the masters, `next` after the focused window, or as the `master`. `end` without it, so the master stays put |
 | `dim_inactive STRENGTH` | tidewm's own, tide's SPEC §6.2: dims every window but the focused one, from 0, none, to 1, black; tide's is 0.07. Without the line, `config.h`'s `dim_inactive`, 0 as it comes. A monitor showing one window, or a fullscreen one, doesn't dim, and nor do picture-in-picture, video, by the app's content type, and a window `dim disable` exempts ([`ipc.md`](ipc.md)) |
+| `floating_modifier MOD [normal\|inverse]`, `floating_modifier none` | As sway's: holding `MOD`, the left button drags a floating window and the right one resizes it, or the other way round with `inverse` ([The mouse](#the-mouse)) |
 | `focus_guard enable\|disable` | tidewm's own: turns the focus guard on or off, as below |
 | `focus_guard grant_seconds S`, `focus_guard prompt_seconds S` | How long a grant holds, 10 by default, and how soon after a key press a polkit prompt may take focus, 2 by default, in seconds, more than 0 and at most a day |
 
@@ -78,6 +81,10 @@ press binding, as dwl's keys do. Flags, before the keys:
   kept open alone, which `kill` then leaves open, and every other window
   still gets it.
 
+- **`--whole-window`:** as sway's: binds a mouse button, or a scroll,
+  rather than a key, over a window or the desktop ([The
+  mouse](#the-mouse)).
+
 Any other flag is an error.
 
 ```
@@ -89,6 +96,45 @@ bindsym $mod+Shift+r reload
 bindsym Control+Mod1+F2 chvt 2
 bindsym --release Super_L exec launcher
 bindsym --locked XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
+```
+
+## The mouse
+
+As in sway, `floating_modifier Mod4` has Super and the left button drag a
+floating window, and Super and the right one resize it by its bottom
+right corner, which the pointer jumps to, as dwl's Alt does;
+`floating_modifier Mod4 inverse` swaps the buttons, and
+`floating_modifier none` turns both off. The modifier counts whenever
+it's held, with others or not, as in sway; one of several, as
+`Mod4+Shift`, counts when all of them are. A tiled window floats as it's dragged, as in dwl, where sway would
+move it among the tiles.
+
+`bindsym --whole-window` binds a button, with modifiers or not, as
+`bindsym --whole-window Mod4+button2 maximize toggle`. Its commands run
+when the button is pressed over a window, which takes focus first, as a
+click gives it, or over the desktop, but not over the bar or another
+layer surface; the window, or app, never sees that press. Buttons are
+sway's: `button1` to `button3` the left, middle and right, `button4` and
+`button5` a scroll up and down, `button6` and `button7` left and right,
+which run for each scroll event, so many times in a touchpad's scroll, and `button8` and `button9` the side
+buttons, or evdev's names, `BTN_LEFT`, `BTN_MIDDLE`, `BTN_RIGHT`,
+`BTN_SIDE`, `BTN_EXTRA`, `BTN_FORWARD`, `BTN_BACK` and `BTN_TASK`. A
+button needs `--whole-window`, as tidewm has no title bars, where sway's
+binds a title bar's click without it, and it takes no `--release`,
+`--locked` or `--kept-open`. A mode's own button bindings count while
+it's the mode, as its keys do. No button binding runs while the screen is
+locked.
+
+Without a `floating_modifier` line or a button's binding, the file leaves
+`config.h`'s buttons in force: Alt and the left button move a window,
+Alt and the right one resize it, and Alt and the middle one float or tile
+it. With either, `config.h`'s buttons are left out, as its keys are, so
+the file's are all there are, and without a `floating_modifier` line no
+modifier drags, as in sway.
+
+```
+floating_modifier Mod4 normal
+bindsym --whole-window Mod4+button2 maximize toggle
 ```
 
 ## Modes
