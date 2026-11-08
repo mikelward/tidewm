@@ -295,5 +295,56 @@ class SpanningTest(TidewmTest):
         self.assertEqual(self.workspace_names(), ["both"])
 
 
+class NextPrevTest(TidewmTest):
+    """sway's workspace next and prev, and next_on_output and
+    prev_on_output, the same where a workspace spans every monitor: in
+    sway's order, numbered ones by number, then the rest in the order
+    made, going round."""
+
+    def setUp(self):
+        super().setUp()
+        # 1, where tidewm starts, kept too, so it stays once it's left
+        for name in ("1", "mail", "3", "web", "2"):
+            self.command(self.connect(), f"persist workspace {name}")
+
+    def current(self):
+        current, = [w["name"] for w in self.connect().request(GET_WORKSPACES) if w["focused"]]
+        return current
+
+    def steps(self, command, n):
+        shown = []
+        for _ in range(n):
+            self.command(self.connect(), command)
+            shown.append(self.current())
+        return shown
+
+    def test_next_goes_by_number_then_by_age_and_round(self):
+        self.assertEqual(self.steps("workspace next", 5), ["2", "3", "mail", "web", "1"])
+
+    def test_prev_goes_back(self):
+        self.assertEqual(self.steps("workspace prev", 2), ["web", "mail"])
+
+    def test_on_output_is_the_same(self):
+        self.assertEqual(self.steps("workspace next_on_output", 1)
+                         + self.steps("workspace prev_on_output", 2), ["2", "1", "web"])
+
+    def test_a_window_moves_to_the_next_workspace(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        _, con = self.open_window(ipc, "test.app")
+        self.command(self.connect(), "move container to workspace prev")
+        self.assertEqual((self.windows()[con["id"]]["workspace"], self.current()), ("web", "1"))
+
+    def test_a_quoted_next_is_a_name(self):
+        self.command(self.connect(), 'workspace "next"')
+        self.assertEqual(self.current(), "next")
+
+
+class NextAloneTest(TidewmTest):
+    def test_next_with_one_workspace_stays(self):
+        self.command(self.connect(), "workspace next")
+        self.assertEqual(self.workspace_names(), ["1"])
+
+
 if __name__ == "__main__":
     unittest.main()

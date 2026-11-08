@@ -8,6 +8,7 @@
  * it's named, and goes once it's empty and not current, unless it's
  * persistent. dwl.c includes this file, like client.h.
  */
+#include <ctype.h>
 
 static unsigned long ipc_id(unsigned long *id);
 static void ipc_event_window(Client *c, const char *change);
@@ -215,6 +216,55 @@ ws_view_to(Workspace *ws, Client *c)
 	printstatus();
 	ipc_event_workspace("focus", ws, old);
 	ws_prune(old);
+}
+
+/* The number a workspace's name is, or -1 for a name that isn't one, as
+ * the IPC's num has it */
+static int
+ws_number(const Workspace *ws)
+{
+	const char *p = ws->name;
+	while (isdigit((unsigned char)*p))
+		p++;
+	return !*p && p - ws->name < 10 ? atoi(ws->name) : -1;
+}
+
+/* Whether a comes before b in sway's order: numbered workspaces by their
+ * numbers, then the rest in the order made */
+static int
+ws_before(const Workspace *a, const Workspace *b)
+{
+	int na = ws_number(a), nb = ws_number(b);
+	return na >= 0 && (nb < 0 || na < nb);
+}
+
+/* The workspace step along from from in sway's order, going round, as
+ * sway's workspace next and prev go on one output; one spans them all.
+ * from itself, with no other. */
+static Workspace *
+ws_step(Workspace *from, int step)
+{
+	Workspace *ws, **order;
+	size_t n = 0, i, j, at = 0;
+	wl_list_for_each(ws, &workspaces, link)
+		n++;
+	if (!n || !from)
+		return from;
+	order = ecalloc(n, sizeof(*order));
+	n = 0;
+	/* Sorted as they come, an equal one staying after, so it's stable */
+	wl_list_for_each(ws, &workspaces, link) {
+		for (i = n; i > 0 && ws_before(ws, order[i - 1]); i--)
+			order[i] = order[i - 1];
+		order[i] = ws;
+		n++;
+	}
+	for (j = 0; j < n; j++)
+		if (order[j] == from)
+			at = j;
+	ws = order[(at + n + (size_t)(step % (int)n + (int)n)) % n];
+	free(order);
+	return ws;
 }
 
 /* Moves c to the end of the client list, so it comes last in its part's

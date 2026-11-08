@@ -389,16 +389,11 @@ static struct json_object *
 ipc_json_workspace(Workspace *ws, Monitor *m)
 {
 	struct json_object *obj = json_object_new_object();
-	const char *p = ws->name, *name;
-	int num = -1;
-	while (isdigit((unsigned char)*p))
-		p++;
-	if (!*p && p - ws->name < 10)
-		num = atoi(ws->name);
+	const char *name;
 	json_object_object_add(obj, "id", json_object_new_uint64(ipc_id(&ws->ipc_id)));
 	json_object_object_add(obj, "type", json_object_new_string("workspace"));
 	json_object_object_add(obj, "name", json_object_new_string(ws->name));
-	json_object_object_add(obj, "num", json_object_new_int(num));
+	json_object_object_add(obj, "num", json_object_new_int(ws_number(ws)));
 	json_object_object_add(obj, "focused", json_object_new_boolean(ws == curws));
 	json_object_object_add(obj, "visible", json_object_new_boolean(ws == curws));
 	json_object_object_add(obj, "urgent", json_object_new_boolean(ws_urgent(ws)));
@@ -558,12 +553,17 @@ ipc_workspace_name(char *arg, const char **error)
 	return name;
 }
 
-/* The workspace a command names: "number N", "back_and_forth" or a name,
- * made if it's new. A name in quotes is a name, back_and_forth too. */
+/* The workspace a command names: "number N", "back_and_forth", "next",
+ * "prev", "next_on_output", "prev_on_output" or a name, made if it's new.
+ * A name in quotes is a name, back_and_forth and the rest too. */
 static Workspace *
 ipc_command_workspace(char *arg, const char **error)
 {
 	Workspace *ws;
+	if (!strcasecmp(arg, "next") || !strcasecmp(arg, "next_on_output"))
+		return ws_step(curws, +1);
+	if (!strcasecmp(arg, "prev") || !strcasecmp(arg, "prev_on_output"))
+		return ws_step(curws, -1);
 	if (ipc_take(&arg, "back_and_forth")) {
 		if (!prevws)
 			*error = "No previous workspace";
