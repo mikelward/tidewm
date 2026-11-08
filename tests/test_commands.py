@@ -1,5 +1,5 @@
 """tidewm's commands for windows and layouts: exec, focus next and prev,
-floating, fullscreen, layout, nmaster, mfact, zoom and chvt."""
+floating, fullscreen, layout, nmaster, mfact, zoom, movestack and chvt."""
 
 import os
 import select
@@ -197,6 +197,27 @@ class CommandTest(TidewmTest):
     def stack(self, *cons):
         """The windows in tile's order: the master, then the stack, top down."""
         return sorted(cons, key=lambda con: (self.rect(con)["x"], self.rect(con)["y"]))
+
+    def test_movestack_moves_the_window_down_and_up_the_stack_going_round(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        first, second = self.two_windows(ipc)
+        _, third = self.open_window(ipc, "test.third")
+        ids = lambda: [c["id"] for c in self.stack(first, second, third)]
+        self.command(self.connect(), f"[con_id={first['id']}] focus")
+        self.command(self.connect(), "movestack next")
+        self.assertEqual(ids(), [second["id"], first["id"], third["id"]])
+        self.command(self.connect(), "movestack next")
+        self.assertEqual(ids(), [second["id"], third["id"], first["id"]])
+        # Past the end, round to the top, the master's place
+        self.command(self.connect(), "movestack next")
+        self.assertEqual(ids(), [first["id"], second["id"], third["id"]])
+        self.command(self.connect(), "movestack prev")
+        self.assertEqual(ids(), [second["id"], third["id"], first["id"]])
+        self.assertTrue(self.windows()[first["id"]]["focused"])
+
+    def test_movestack_takes_next_or_prev(self):
+        self.assertTrue(self.fails("movestack down")["parse_error"])
 
     def test_a_new_window_joins_the_end_of_the_stack(self):
         ipc = self.connect()

@@ -22,6 +22,8 @@ lands with a test.
 
 ## Done
 
+- **Down and up the stack** (#?): tidewm's own `movestack next|prev`,
+  for tide's Super+Shift+J and K.
 - **The next layout** (#?): tidewm's own `layout next|prev`, through
   tide's cycle or the config file's `layout_cycle`, for tide's Super+.
   and Super+, .
@@ -338,8 +340,9 @@ lands with a test.
 - **Keeping a workspace** (#8): tidewm's own `persist workspace NAME` and
   `unpersist workspace NAME` commands, for tide's home workspace, since
   sway has none. It could move to the runtime config instead.
-- **Layout commands' names** (#11, #20): sway has no master layouts, so
-  `nmaster`, `mfact` and `zoom` take dwl's names, and `layout` takes
+- **Layout commands' names** (#11, #20, #?): sway has no master layouts, so
+  `nmaster`, `mfact`, `zoom` and `movestack` take dwl's names, the last
+  dwl-patches', with `next|prev` as `focus` has them, and `layout` takes
   tide's modes (`tile`, `threecol`, `twocol`, `monocle`) plus dwl's
   `floating`. Reversible before tide's shell uses them.
 - **Each layout's own mfact and nmaster** (#20, #21): `threecol` starts at
