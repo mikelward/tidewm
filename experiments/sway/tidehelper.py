@@ -24,6 +24,7 @@ import shlex
 import struct
 import sys
 import time
+import traceback
 
 MAGIC = b"i3-ipc"
 HEADER = struct.Struct("=6sII")
@@ -54,6 +55,8 @@ OWN_COMMANDS = {"grant", "persist", "unpersist", "minimize", "keep_open", "maxim
                 "move", "resize", "reload"}
 
 TIMES = None
+SETTLE_MS = float(os.environ.get("TIDE_SETTLE_MS", "200"))
+LOG = None
 
 
 def stamp(kind, con=None, **extra):
@@ -66,6 +69,8 @@ def stamp(kind, con=None, **extra):
 
 def log(*args):
     print("tidehelper:", *args, file=sys.stderr, flush=True)
+    if LOG:
+        print(time.strftime("%H:%M:%S"), *args, file=LOG, flush=True)
 
 
 # --- config translation ----------------------------------------------------
@@ -366,6 +371,7 @@ class Helper:
         self.dimmed = {}
         self.tree = None
         self.info = {}            # con -> (app, pid, title)
+        self.at = None
 
     # -- config
 
@@ -468,6 +474,7 @@ class Helper:
             lst = self.order.setdefault(ws["name"], [])
             if cid not in lst:
                 self.place_new(ws["name"], lst, cid)
+        wanted = {}
         for ws, out in self.workspaces_in(tree):
             if ws["name"].startswith("__i3"):
                 continue
@@ -484,6 +491,7 @@ class Helper:
                     box = area
                 if box is None:
                     continue
+                wanted[cid] = box
                 cur = where[cid][0]["rect"]
                 if cid in self.adopting or (cur["x"], cur["y"], cur["width"], cur["height"]) != box:
                     x, y, bw, bh = box
@@ -497,9 +505,28 @@ class Helper:
             bad = [r for r in replies if not r.get("success")]
             if bad:
                 log("layout:", bad, cmds)
-            tree = await self.get_tree()
+            tree = await self.settle(wanted)
         await self.announce_layouts(tree)
         return tree
+
+    async def settle(self, wanted):
+        """sway sizes a floating window by what its client commits, so a
+        tile has its box only once the client has drawn at that size. Waits
+        for that, up to SETTLE_MS, so IPC clients see the layout done."""
+        deadline = time.monotonic() + SETTLE_MS / 1000
+        while True:
+            tree = await self.get_tree()
+            rects = {w["id"]: w["rect"] for w, ws, o in self.walk(tree)}
+            off = [c for c, b in wanted.items() if c in rects and
+                   (rects[c]["x"], rects[c]["y"], rects[c]["width"], rects[c]["height"]) != b]
+            if not off:
+                stamp("layout_settled")
+                return tree
+            if time.monotonic() > deadline:
+                stamp("layout_unsettled", n=len(off))
+                log(f"windows {off} didn't take their boxes in {SETTLE_MS} ms")
+                return tree
+            await asyncio.sleep(0.001)
 
     def place_new(self, ws, lst, cid):
         where = self.settings.get("new_window", "end")
@@ -602,7 +629,7 @@ class Helper:
                 event["binding"]["command"] = original
                 self.cancel_grants("key")
                 self.emit("binding", event)
-                await self.run_commands(original, from_binding=True)
+                asyncio.ensure_future(self.run_commands(original, from_binding=True))
                 return
             self.cancel_grants("key")
             self.emit("binding", event)
@@ -614,7 +641,7 @@ class Helper:
                 if self.focused_ws and event["current"]["name"] != self.focused_ws:
                     self.cancel_grants("workspace")
                 self.focused_ws = event["current"]["name"]
-            if event["change"] == "empty":
+            if event["change"] == "empty" and event["current"]["name"] not in self.persistent:
                 self.parts.pop(event["current"]["name"], None)
                 self.order.pop(event["current"]["name"], None)
             tree = await self.relayout()
@@ -853,7 +880,8 @@ class Helper:
             except Exception as e:  # a prototype: say what broke, keep serving
                 log(f"{command!r}: {e!r}")
                 results.append(error(repr(e)))
-        await self.sync()
+        if not from_binding:
+            await self.sync()
         return results
 
     async def sync(self):
@@ -864,7 +892,11 @@ class Helper:
         fut = asyncio.get_running_loop().create_future()
         self.syncs[key] = fut
         await self.ctl.request(SEND_TICK, key)
-        await asyncio.wait_for(fut, 10)
+        try:
+            await asyncio.wait_for(fut, 5)
+        except asyncio.TimeoutError:
+            log(f"sync {key} timed out; the event loop is at {self.at!r}")
+            self.syncs.pop(key, None)
 
     async def target(self, cid):
         """The window a command acts on: its criteria's, or the focused one"""
@@ -1103,6 +1135,16 @@ class Helper:
             m[0] = f
             await self.relayout()
             return ok()
+        if verb == "urgent" and args in ("enable", "disable"):
+            t = await self.target(cid)
+            tree = await self.get_tree()
+            w = next((x for x, ws, o in self.walk(tree) if x["id"] == t), None)
+            if w is not None and args == "enable" and w.get("urgent"):
+                self.urgent_seq += 1
+                self.urgent_order[t] = self.urgent_seq
+                self.emit("window", {"change": "urgent", "container": self.enrich(w, tree)})
+                return ok()
+            return None
         if verb in ("dim",):
             return ok()
         if verb in ("send_shortcut", "switch", "gesture", "unlock"):
@@ -1151,7 +1193,8 @@ class Helper:
                     wss.append({"id": 0, "name": name, "num": int(name) if name.isdigit() else -1,
                                 "focused": False, "visible": False, "urgent": False,
                                 "persistent": True, "output": wss[0]["output"] if wss else "",
-                                "rect": wss[0]["rect"] if wss else {}, "layout": None})
+                                "rect": wss[0]["rect"] if wss else {},
+                                "layout": (self.parts.get(name) or {}).get("layout")})
             return wss
         if kind == GET_CONFIG:
             return {"config": self.config_text, "included_configs": [],
@@ -1201,7 +1244,12 @@ class Helper:
         try:
             while True:
                 kind, data = await read_msg(reader)
-                reply = await self.handle_request(client, kind, data)
+                try:
+                    reply = await self.handle_request(client, kind, data)
+                except Exception as e:
+                    log(f"request {kind} {data[:200]!r}: {traceback.format_exc()}")
+                    reply = [error(repr(e))] if kind == RUN_COMMAND else {"success": False,
+                                                                       "error": repr(e)}
                 if reply is not None:
                     client.send(kind, reply)
                 await writer.drain()
@@ -1219,18 +1267,23 @@ class Helper:
         while True:
             try:
                 kind, data = await read_msg(r)
-            except asyncio.IncompleteReadError:
-                log("sway went")
+            except (asyncio.IncompleteReadError, ConnectionError, ValueError) as e:
+                log(f"sway went: {e!r}")
                 os._exit(0)
             if kind == SUBSCRIBE:
                 continue
             try:
+                self.at = (kind, data[:300])
                 await self.on_event(kind, json.loads(data))
-            except Exception as e:
-                log(f"event {kind:#x}: {e!r}")
+                self.at = None
+            except Exception:
+                log(f"event {kind:#x}: {traceback.format_exc()}")
 
     async def main(self):
-        global TIMES
+        global TIMES, LOG
+        if os.environ.get("TIDE_HELPER_LOG"):
+            LOG = open(os.environ["TIDE_HELPER_LOG"], "a")
+            print(f"--- helper {os.getpid()} for {self.state['config']}", file=LOG, flush=True)
         TIMES = open(os.path.join(self.state_dir, "helper-times.jsonl"), "a")
         self.load_settings()
         await self.ctl.open()

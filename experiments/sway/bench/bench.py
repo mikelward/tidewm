@@ -394,6 +394,56 @@ def bench_frames(wm, outdir, out):
     ipc.close()
 
 
+def bench_flicker(wm, outdir, cycles, out):
+    """A third window opening and closing, cycles times, with grim taking
+    every frame it can: how many cycles showed a frame that is neither the
+    layout before nor the layout after, and for how long"""
+    framer = Framer(wm.env)
+    if not framer.ok:
+        out["flicker"] = "no grim"
+        return
+    ipc = wm.ipc()
+    ipc.subscribe("window")
+    for name in ("bench.f0", "bench.f1"):
+        wm.open_window(name, name)
+        drain_window_event(ipc, "new")
+    quiet(0.3)
+    rows = []
+    saved = {"open": False, "close": False}
+    os.makedirs(os.path.join(outdir, "frames", MODE), exist_ok=True)
+    for i in range(cycles):
+        for kind in ("open", "close"):
+            framer.start()
+            quiet(0.1)
+            t0 = time.monotonic()
+            if kind == "open":
+                client = wm.open_window("bench.f2", "bench.f2")
+                cid = drain_window_event(ipc, "new")["container"]["id"]
+            else:
+                client.kill()
+                client.wait()
+                wm.clients.remove(client)
+                drain_window_event(ipc, "close", cid)
+            quiet(0.3)
+            frames = framer.stop()
+            if len(frames) < 3:
+                continue
+            before, after = frames[0][1], frames[-1][1]
+            wrong = [(t, png) for t, png in frames if png != before and png != after]
+            rows.append({"kind": kind, "frames": len(frames), "wrong_frames": len(wrong),
+                         "wrong_ms": ms(wrong[0][0], wrong[-1][0]) + 16.7 if wrong else 0,
+                         "first_wrong_after_ms": ms(t0, wrong[0][0]) if wrong else None})
+            if wrong and not saved[kind]:
+                saved[kind] = True
+                strip = [frames[0]] + wrong + [frames[-1]]
+                for j, (t, png) in enumerate(strip):
+                    name = f"flicker-{kind}-{j:02d}-{ms(t0, t):+.0f}ms.png"
+                    with open(os.path.join(outdir, "frames", MODE, name), "wb") as f:
+                        f.write(png)
+    out["flicker"] = rows
+    ipc.close()
+
+
 def run(name, outdir, out, fn, config=None):
     wm = Tidewm(1, config)
     try:
@@ -416,6 +466,7 @@ def main():
     run("ipc", outdir, out, lambda wm: bench_ipc(wm, runs, out))
     run("layouts", outdir, out, lambda wm: bench_layouts(wm, out))
     run("frames", outdir, out, lambda wm: bench_frames(wm, outdir, out), "dim_inactive 0.12\n")
+    run("flicker", outdir, out, lambda wm: bench_flicker(wm, outdir, max(runs // 2, 10), out))
     out["summary"] = summarize(out)
     with open(os.path.join(outdir, f"{MODE}-bench.json"), "w") as f:
         json.dump(out, f, indent=1)
@@ -424,8 +475,10 @@ def main():
 
 def summarize(out):
     s = {}
-    for section in ("open_close", "commands", "guard"):
+    for section in ("open_close", "commands", "guard", "flicker"):
         for row in out.get(section, []):
+            if not isinstance(row, dict):
+                continue
             for k, v in row.items():
                 if isinstance(v, (int, float)) and not isinstance(v, bool) and k != "samples":
                     s.setdefault(f"{section}.{row['kind']}.{k}", []).append(v)

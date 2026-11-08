@@ -47,6 +47,9 @@ jobs:
           make XWAYLAND=-DXWAYLAND XLIBS="xcb xcb-icccm" dwl tests/client tests/workspaces
           tests/locker tests/power tests/ime tests/pointer tests/launcher tests/keyboard
           tests/capture tests/x11client
+      - run: |
+          mkdir -p results
+          echo "TIDE_HELPER_LOG=$PWD/results/helper-debug.log" >> "$GITHUB_ENV"
       - name: Smoke test
         continue-on-error: true
         run: |
