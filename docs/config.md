@@ -261,16 +261,21 @@ out and has no commas, as `"Dell Inc. DELL U2720Q 1234ABC"`. Quote a name
 with spaces. An output's own lines override `*`'s, and one naming what it
 is overrides one naming its connector, as in sway; a later line for a
 name adds to an earlier one. `config.h`'s monitor rules still apply
-first, for what the file doesn't say, such as the layout.
+first, for what the file doesn't say, such as the layout. As in sway, an
+`output NAME {` block, closed by `}`, gives each line inside it to
+`NAME`, so the file nwg-displays saves loads as it is.
 
 | Setting | Does |
 |---|---|
-| `mode WIDTHxHEIGHT[@HZ]` | The mode, `Hz` or not after the rate, as `2560x1440@144Hz`. It's one the output lists, the fastest at that size if no rate is given, or else a custom mode. `resolution` and `res` say the same |
+| `mode [--custom] WIDTHxHEIGHT[@HZ]` | The mode, `Hz` or not after the rate, as `2560x1440@144Hz`. It's one the output lists, the fastest at that size if no rate is given, or a rate of 0, or else a custom mode; with `--custom`, always a custom mode. `resolution` and `res` say the same |
 | `scale S` | The scale, above 0 and up to 10 |
 | `position X Y` | Where it is in the layout, in logical pixels; `pos` and `X,Y` work too |
 | `position auto-right`, `auto-left`, `auto-up`, `auto-down` | Beside the others, on that side, as Hyprland's monitor rules place it; `auto` is `auto-right`, where an output without a position goes |
 | `transform T` | `normal`, `90`, `180`, `270`, `flipped`, or `flipped-` one of those |
 | `enable`, `disable` | Turns it on or off; a disabled output's windows move to the focused one |
+| `adaptive_sync on\|off` | Variable refresh rate, off without the line. An output that can't have it stays off, as in sway |
+| `power on\|off` | In the `output` command, as sway's, turns an output that's on off, keeping its windows and place, as an idle daemon does, or on again. An output line takes it but leaves it, so every output starts on. `dpms` is its old name |
+| `scale_filter linear\|nearest\|smart` | Taken, as sway's, but left: tidewm always scales linearly, as `GET_OUTPUTS` says |
 
 The lines apply when an output appears, at startup or when it's plugged
 in, and again on `reload`, when each output starts over from `config.h`'s
@@ -283,9 +288,8 @@ it had and goes back to the position it was last given; a mode or
 position given while it's disabled, by the command or its line, is used
 once it's enabled. Enabling or disabling an output wakes it from the power
 saving an idle daemon may have put it in. The command's `output NAME power
-on|off|toggle` puts it in that power saving, or takes it out, as sway's
-does ([`ipc.md`](ipc.md)); it isn't a setting, and output lines don't take
-it.
+on|off|toggle`, alone, puts it in that power saving, or takes it out, as
+sway's does ([`ipc.md`](ipc.md)), and fails for an output that's disabled.
 
 An output without a position, or with an `auto` one, is placed as
 Hyprland places monitors: in the order they were connected, each beside
@@ -300,6 +304,11 @@ output eDP-1 scale 1.5
 output DP-1 mode 2560x1440@144Hz position 1707 0
 output "Dell Inc. DELL U2720Q 1234ABC" position auto-up
 output HDMI-A-1 disable
+output "HDMI-A-2" {
+    mode 1920x1080@60.0Hz
+    pos 2560 0
+    adaptive_sync on
+}
 ```
 
 ## Input

@@ -54,7 +54,7 @@ class InputErrorsTest(InputTest):
             ("input * {\ntap enabled\n", ":1: input * has no }"),
             ("input * {\nbrightness 5\n}\n", ":2: input *: no setting is called brightness"),
             ("mode m {\ninput * tap enabled\n}\n", ":2: input can't be in a mode"),
-            ("}\n", ":1: } closes no mode or input block"),
+            ("}\n", ":1: } closes no mode, input or output block"),
         ]:
             self.wm.write_config(text)
             result, = self.connect().request(RUN_COMMAND, "reload")
