@@ -21,20 +21,20 @@ lands with a test.
 
 ## Done
 
-- **Down and up the stack** (#?): tidewm's own `movestack next|prev`,
+- **Down and up the stack** (#65): tidewm's own `movestack next|prev`,
   for tide's Super+Shift+J and K.
-- **The next layout** (#?): tidewm's own `layout next|prev`, through
+- **The next layout** (#65): tidewm's own `layout next|prev`, through
   tide's cycle or the config file's `layout_cycle`, for tide's Super+.
   and Super+, .
-- **The next workspace** (#?): sway's `workspace next|prev` and
+- **The next workspace** (#65): sway's `workspace next|prev` and
   `next_on_output|prev_on_output`, and `move` to them, for tide's
   Super+PgUp and PgDn.
-- **Resize** (#?): sway's `resize grow|shrink`, a floating window in
+- **Resize** (#65): sway's `resize grow|shrink`, a floating window in
   pixels and a tile by its column's share, for tide's resize mode.
-- **Directions** (#?): sway's `focus` and `move` `left`, `right`, `up`
+- **Directions** (#65): sway's `focus` and `move` `left`, `right`, `up`
   and `down`, by tide's rule for its arrow keys, going on to the next
   monitor past an edge, for tide's Super+arrows.
-- **The mouse from the config** (#?): sway's `floating_modifier`, so
+- **The mouse from the config** (#65): sway's `floating_modifier`, so
   Super and a drag move or resize a floating window, and its
   `bindsym --whole-window` button and scroll bindings, as Super and the
   middle button maximizing, as tide's SPEC §6.6 has them. `config.h`'s
@@ -180,27 +180,27 @@ lands with a test.
 
 ## Decisions needing review
 
-- **The layout cycle is `layout next|prev`** (#?), named after
+- **The layout cycle is `layout next|prev`** (#65), named after
   `layout toggle`, with tide's own cycle, `tile`, `threecol`, `twocol`,
   and from `monocle` the layout before it, and the config file's
   `layout_cycle` for its Layouts page's. sway's `layout toggle` takes a
   list to cycle through instead, which tidewm's `layout toggle`, dwl's
   last layout, already has a meaning for. Reversible before tide's
   config uses them.
-- **next and prev go in sway's order** (#?): numbered workspaces by
+- **next and prev go in sway's order** (#65): numbered workspaces by
   number, then the rest in the order made, round, through every
   workspace, a persistent empty one too. tide's Super+PgDn goes in its
   bar's order and passes empty workspaces, which its shell knows and
   tidewm doesn't; its tidewm keys can ask the shell, as its Hyprland ones
   ask Lua. A workspace named `next` or `prev` now needs quotes in a
   command, as `back_and_forth` does. Reversible.
-- **A tile's resize is mfact** (#?): sway's `resize grow width` on a
+- **A tile's resize is mfact** (#65): sway's `resize grow width` on a
   tile takes space from its neighbors in its tree; tidewm's master and
   stack have one split, so it moves that, the master's column growing
   for a master and the stack's for a stack window, and `left` and `right`
   act as `width` rather than naming a neighbor. A tile's height fails, as
   its stack's rows are equal. Reversible.
-- **Directions are tide's, by geometry** (#?): `focus` and `move` by
+- **Directions are tide's, by geometry** (#65): `focus` and `move` by
   direction pick the window whose center is that way, sharing the most
   height, then nearest, then first in the stack, as tide's SPEC §6.6 and
   its Hyprland layout have it, rather than the stack order dwl's
@@ -208,24 +208,24 @@ lands with a test.
   reach the stack, and monocle's windows, all in one place, have none
   beside them. Past the last monitor nothing happens, where dwl's
   `focusmon` goes round. Reversible.
-- **A floating window's `move left` goes to the next monitor** (#?), as
+- **A floating window's `move left` goes to the next monitor** (#65), as
   tide's Super+Shift+Left does, at the same spot relative to the window
   area; sway's moves it 10 pixels. `move left N px` moves it `N` pixels,
   as sway's does. The alternative was sway's 10 pixels, with tide's key
   needing a command that tells floating from tiled. Reversible.
-- **config.h's buttons stay until the file speaks of the mouse** (#?):
+- **config.h's buttons stay until the file speaks of the mouse** (#65):
   a file with no `floating_modifier` line and no button binding keeps
   `config.h`'s Alt drags and Alt+middle; with either, they're left out
   and, without a `floating_modifier` line, nothing drags, as in sway,
   whose default is none. The alternative was the file's mouse adding to
   `config.h`'s, unlike its keys, which replace them. Reversible.
-- **A button's binding needs `--whole-window`** (#?): sway binds a title
+- **A button's binding needs `--whole-window`** (#65): sway binds a title
   bar's click without it, and tidewm has no title bars, so a bare
   `bindsym Mod4+button2` is an error rather than a binding that never
   runs. Button bindings take no `--release`, `--locked` or
   `--kept-open`, which sway's take, as nothing needs them yet; one runs
   on the window the click focused, never over a layer surface. Reversible.
-- **Dragging a tile floats it** (#?), as dwl's Alt drag does, where
+- **Dragging a tile floats it** (#65), as dwl's Alt drag does, where
   sway's `floating_modifier` moves a tile among the others and resizes it
   in place. tide's SPEC §6.6 drags only floating windows. Reversible.
 - **Gestures go to apps, and none are bound** (#64): tidewm passes a
