@@ -32,6 +32,7 @@ supported yet. In an `input` or `output` line, a name or value may be in
 | `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
 | `include PATH` | As sway's: reads each file `PATH` matches, a word or text in `"` that may be a pattern such as `tide-*.conf`, in order, as if its lines were here, so a shell can keep settings of its own in a file the config takes in. `~/` is your home, and a relative path is from the directory of the file the line is in. A file that isn't there, or a pattern nothing matches, includes nothing. Variables set before it hold in it, and those it sets hold after. Only at the top level: a mode or input block an included file opens closes in it. Includes nest 10 deep at most. `reload` reads them again, and an error in one names that file |
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
+| `rebind NAME KEYS...`, `rebind NAME none` | tidewm's own: gives the binding `bindsym --name NAME` named these keys in place of the ones it has, or none, so a shell's keyboard shortcuts can change one ([Named bindings](#named-bindings)). Only at the top level |
 | `bindswitch [--locked] SWITCH:STATE COMMANDS` | As sway's: a switch turning on, off or either (`lid:on`, `lid:off`, `lid:toggle`, and `tablet:` likewise) runs `COMMANDS`; on the lock screen, only a `--locked` one. Not in a mode. `bindswitch lid:on output eDP-1 disable` and `bindswitch --locked lid:off output eDP-1 enable` turn a laptop's panel off while its lid is closed, and its windows move over; like sway, it does so whether or not another output is on |
 | `for_window [CRITERIA] COMMANDS` | Runs `COMMANDS` on each new window `CRITERIA` match, as below |
 | `output NAME SETTINGS` | Sets up the output called `NAME`, or every output for `*`, as below |
@@ -86,6 +87,8 @@ press binding, as dwl's keys do. Flags, before the keys:
 - **`--whole-window`:** as sway's: binds a mouse button, or a scroll,
   rather than a key, over a window or the desktop ([The
   mouse](#the-mouse)).
+- **`--name NAME`:** tidewm's own: names the binding, so a `rebind`
+  line can give it other keys ([Named bindings](#named-bindings)).
 
 Any other flag is an error.
 
@@ -99,6 +102,40 @@ bindsym Control+Mod1+F2 chvt 2
 bindsym --release Super_L exec launcher
 bindsym --locked XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
 ```
+
+## Named bindings
+
+A shell's keyboard shortcuts, as tide's, can give a binding other keys
+if the config names it. `bindsym --name NAME` names one, `NAME` being a
+lower-case letter, then lower-case letters, digits and `_`, as
+`--name terminal` or `--name=terminal`. A name is one action: several
+lines can give it keys, in one mode, each running the same commands
+with the same flags, and those are its default keys.
+
+`rebind NAME KEYS...` gives it these keys in place of the ones it has,
+and `rebind NAME none` takes them all away. Like a `bindsym` line, a
+key a rebind gives takes it from the binding that had it. A name no line
+has given is written to stderr and skipped, as Hyprland's tide does, so
+a shell's file that outlives a name the config dropped doesn't stop it
+loading. The IPC's `GET_NAMED_BINDINGS` lists each name, with its
+default keys and its keys now ([`ipc.md`](ipc.md)).
+
+```
+set $mod Mod4
+bindsym --name terminal $mod+t exec foot
+bindsym --name float $mod+Shift+f floating toggle
+bindsym --name float $mod+Insert floating toggle
+include tide-*.conf
+```
+
+with a shell's `tide-keys.conf` holding
+
+```
+rebind terminal Mod4+Return
+rebind float none
+```
+
+has `Mod4+Return` open foot, and no key float a window.
 
 ## The mouse
 
@@ -130,7 +167,7 @@ locked.
 Without a `floating_modifier` line or a button's binding, the file leaves
 `config.h`'s buttons in force: Alt and the left button move a window,
 Alt and the right one resize it, and Alt and the middle one float or tile
-it. With either, `config.h`'s buttons are left out, as its keys are, so
+it. With either, even a button's binding a `rebind` takes away, `config.h`'s buttons are left out, as its keys are, so
 the file's are all there are, and without a `floating_modifier` line no
 modifier drags, as in sway.
 

@@ -21,6 +21,9 @@ lands with a test.
 
 ## Done
 
+- **Named bindings** (#67): tidewm's own `bindsym --name` and `rebind`,
+  and `GET_NAMED_BINDINGS`, so tide's Keyboard shortcuts give a binding
+  other keys, as conf's named Hyprland bindings take them.
 - **Down and up the stack** (#65): tidewm's own `movestack next|prev`,
   for tide's Super+Shift+J and K.
 - **The next layout** (#65): tidewm's own `layout next|prev`, through

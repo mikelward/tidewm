@@ -26,7 +26,28 @@ typedef struct {
 	uint32_t button; /* a --whole-window binding's button, or scroll; 0 for a key */
 	char *keys; /* as written, for messages */
 	char *command;
+	size_t named; /* 1 + its NamedBinding's index in Settings, or 0 */
 } Binding;
+
+/* A bindsym line's flags, which a named binding's every key shares */
+typedef struct {
+	int release; /* runs when the key comes up, if it was tapped */
+	int locked; /* runs while the screen is locked, too */
+	int kept_open; /* counts only while the keyboard's in a window kept open */
+	int whole_window; /* binds a button, or scroll, rather than a key */
+} BindingFlags;
+
+/* A named binding, bindsym --name's: one action, whose keys are its
+ * lines', and a rebind line can give it others, for a shell's keyboard
+ * shortcuts (GET_NAMED_BINDINGS) */
+typedef struct {
+	char *name;
+	size_t mode; /* in Settings' modes */
+	char *command;
+	BindingFlags flags;
+	char **defaults; /* its bindsym lines' keys, as written */
+	size_t ndefaults;
+} NamedBinding;
 
 /* Scrolls, as sway's button4 to button7 name them, beside the buttons'
  * own codes */
@@ -212,6 +233,8 @@ typedef struct {
 	char *text; /* the file, as read, for GET_CONFIG */
 	SettingsInclude *includes; /* the files its include lines read, in order */
 	size_t nincludes;
+	NamedBinding *named; /* bindsym --name's, in the order they're first named */
+	size_t nnamed;
 } Settings;
 
 typedef struct {
@@ -276,6 +299,14 @@ settings_free(Settings *s)
 		free(s->includes[i].text);
 	}
 	free(s->includes);
+	for (i = 0; i < s->nnamed; i++) {
+		for (j = 0; j < s->named[i].ndefaults; j++)
+			free(s->named[i].defaults[j]);
+		free(s->named[i].defaults);
+		free(s->named[i].name);
+		free(s->named[i].command);
+	}
+	free(s->named);
 	free(s->text);
 	free(s);
 }
@@ -495,65 +526,47 @@ settings_add_switch(Settings *s, char *rest, unsigned int line, struct json_obje
 	return 1;
 }
 
+/* Adds a binding of combo to the mode, running command, named if it's
+ * not 0, or reports why it can't, as "what combo: why". */
 static int
-settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_object *errors)
+settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
+		const char *command, size_t named, unsigned int line, struct json_object *errors)
 {
-	char *combo, *spec, *last;
+	char *spec, *last;
 	const char *bad = NULL;
 	uint32_t mods, button = 0;
 	xkb_keysym_t sym = XKB_KEY_NoSymbol;
 	size_t i;
-	int release = 0, locked_too = 0, kept_open = 0, whole_window = 0;
 	Binding *b;
 
-	while (rest[0] == '-' && rest[1] == '-') {
-		char *flag = settings_word(&rest);
-		if (!strcmp(flag, "--release")) {
-			release = 1;
-		} else if (!strcmp(flag, "--locked")) {
-			locked_too = 1;
-		} else if (!strcmp(flag, "--kept-open")) {
-			kept_open = 1;
-		} else if (!strcmp(flag, "--whole-window")) {
-			whole_window = 1;
-		} else {
-			settings_error(errors, line, "bindsym has no flag %s", flag);
-			return 0;
-		}
-	}
-	combo = settings_word(&rest);
-	if (!*combo || !*rest) {
-		settings_error(errors, line, "bindsym needs keys and a command");
-		return 0;
-	}
 	spec = settings_strdup(combo, strlen(combo));
 	if (!(last = settings_parse_mods(combo, &mods, &bad))) {
-		settings_error(errors, line, "bindsym %s: no modifier or key is called %s", spec, bad);
+		settings_error(errors, line, "%s %s: no modifier or key is called %s", what, spec, bad);
 		free(spec);
 		return 0;
 	}
 	/* A button, as sway's: over a window, or none, with --whole-window,
 	 * as tidewm has no title bars, where sway's runs without it */
-	if ((button = settings_button(last)) && !whole_window) {
-		settings_error(errors, line, "bindsym %s: a button's binding needs --whole-window, "
-				"as there are no title bars", spec);
+	if ((button = settings_button(last)) && !f.whole_window) {
+		settings_error(errors, line, "%s %s: a button's binding needs --whole-window, "
+				"as there are no title bars", what, spec);
 		free(spec);
 		return 0;
 	}
-	if (whole_window && !button) {
-		settings_error(errors, line, "bindsym --whole-window %s: no button is called %s, "
-				"as button1 to button9 or BTN_LEFT", spec, last);
+	if (f.whole_window && !button) {
+		settings_error(errors, line, "%s --whole-window %s: no button is called %s, "
+				"as button1 to button9 or BTN_LEFT", what, spec, last);
 		free(spec);
 		return 0;
 	}
-	if (button && (release || locked_too || kept_open)) {
-		settings_error(errors, line, "bindsym --whole-window %s: a button's binding "
-				"takes no --release, --locked or --kept-open", spec);
+	if (button && (f.release || f.locked || f.kept_open)) {
+		settings_error(errors, line, "%s --whole-window %s: a button's binding "
+				"takes no --release, --locked or --kept-open", what, spec);
 		free(spec);
 		return 0;
 	}
 	if (!button && !settings_parse_keys(combo, &mods, &sym, &bad)) {
-		settings_error(errors, line, "bindsym %s: no modifier or key is called %s", spec, bad);
+		settings_error(errors, line, "%s %s: no modifier or key is called %s", what, spec, bad);
 		free(spec);
 		return 0;
 	}
@@ -562,8 +575,8 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 	 * for every window */
 	for (i = 0; i < mode->nbindings; i++) {
 		b = &mode->bindings[i];
-		if (b->mods == mods && b->sym == sym && b->button == button && b->release == release
-				&& b->kept_open == kept_open) {
+		if (b->mods == mods && b->sym == sym && b->button == button && b->release == f.release
+				&& b->kept_open == f.kept_open) {
 			free(b->keys);
 			free(b->command);
 			break;
@@ -578,11 +591,206 @@ settings_add_binding(Mode *mode, char *rest, unsigned int line, struct json_obje
 	b->mods = mods;
 	b->sym = sym;
 	b->button = button;
-	b->release = release;
-	b->locked = locked_too;
-	b->kept_open = kept_open;
+	b->release = f.release;
+	b->locked = f.locked;
+	b->kept_open = f.kept_open;
 	b->keys = spec;
-	b->command = settings_strdup(rest, strlen(rest));
+	b->command = settings_strdup(command, strlen(command));
+	b->named = named;
+	return 1;
+}
+
+/* A binding's name, as tide's keyboard shortcuts take one: a lower-case
+ * letter, then lower-case letters, digits and _ */
+static int
+settings_name_ok(const char *name)
+{
+	const char *p;
+	if (!(*name >= 'a' && *name <= 'z'))
+		return 0;
+	for (p = name; *p; p++)
+		if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_'))
+			return 0;
+	return 1;
+}
+
+/* The index of the named binding called name, or s->nnamed. */
+static size_t
+settings_find_named(const Settings *s, const char *name)
+{
+	size_t i;
+	for (i = 0; i < s->nnamed; i++)
+		if (!strcmp(s->named[i].name, name))
+			break;
+	return i;
+}
+
+/* Registers combo as one of a named binding's keys: a new name, or one
+ * more line for a name already given, which must run the same commands,
+ * in the same mode, with the same flags. Returns its 1 + index, or 0 on an
+ * error. */
+static size_t
+settings_add_named(Settings *s, size_t mode, const char *name, const char *combo,
+		BindingFlags f, const char *command, unsigned int line, struct json_object *errors)
+{
+	NamedBinding *n;
+	char **d;
+	size_t i = settings_find_named(s, name);
+	if (!settings_name_ok(name)) {
+		settings_error(errors, line, "bindsym --name %s: a name is a lower-case letter, "
+				"then lower-case letters, digits and _", name);
+		return 0;
+	}
+	if (i == s->nnamed) {
+		if (!(n = realloc(s->named, (s->nnamed + 1) * sizeof(*n))))
+			die("out of memory reading the config");
+		s->named = n;
+		n = &s->named[s->nnamed++];
+		memset(n, 0, sizeof(*n));
+		n->name = settings_strdup(name, strlen(name));
+		n->mode = mode;
+		n->command = settings_strdup(command, strlen(command));
+		n->flags = f;
+	}
+	n = &s->named[i];
+	if (n->mode != mode) {
+		settings_error(errors, line, "bindsym --name %s: that name is in mode %s already",
+				name, s->modes[n->mode].name);
+		return 0;
+	}
+	if (strcmp(n->command, command)) {
+		settings_error(errors, line, "bindsym --name %s: that name runs %s already, "
+				"and each of its keys runs the same", name, n->command);
+		return 0;
+	}
+	if (memcmp(&n->flags, &f, sizeof(f))) {
+		settings_error(errors, line, "bindsym --name %s: that name's other keys "
+				"have other flags", name);
+		return 0;
+	}
+	for (i = 0; i < n->ndefaults; i++)
+		if (!strcmp(n->defaults[i], combo))
+			return (size_t)(n - s->named) + 1;
+	if (!(d = realloc(n->defaults, (n->ndefaults + 1) * sizeof(*d))))
+		die("out of memory reading the config");
+	n->defaults = d;
+	n->defaults[n->ndefaults++] = settings_strdup(combo, strlen(combo));
+	return (size_t)(n - s->named) + 1;
+}
+
+/* A bindsym line: "[FLAGS] KEYS COMMAND", in the mode. */
+static int
+settings_add_binding(Settings *s, size_t mode, char *rest, unsigned int line,
+		struct json_object *errors)
+{
+	BindingFlags f = {0};
+	char *combo, *name = NULL;
+	size_t named = 0;
+
+	while (rest[0] == '-' && rest[1] == '-') {
+		char *flag = settings_word(&rest);
+		if (!strcmp(flag, "--release")) {
+			f.release = 1;
+		} else if (!strcmp(flag, "--locked")) {
+			f.locked = 1;
+		} else if (!strcmp(flag, "--kept-open")) {
+			f.kept_open = 1;
+		} else if (!strcmp(flag, "--whole-window")) {
+			f.whole_window = 1;
+		} else if (!strncmp(flag, "--name=", 7) && flag[7]) {
+			name = flag + 7;
+		} else if (!strcmp(flag, "--name") && *rest && strncmp(rest, "--", 2)) {
+			name = settings_word(&rest);
+		} else if (!strcmp(flag, "--name") || !strcmp(flag, "--name=")) {
+			settings_error(errors, line, "bindsym --name needs a name");
+			return 0;
+		} else {
+			settings_error(errors, line, "bindsym has no flag %s", flag);
+			return 0;
+		}
+	}
+	combo = settings_word(&rest);
+	if (!*combo || !*rest) {
+		settings_error(errors, line, "bindsym needs keys and a command");
+		return 0;
+	}
+	if (name && !(named = settings_add_named(s, mode, name, combo, f, rest, line, errors)))
+		return 0;
+	return settings_put_binding(&s->modes[mode], "bindsym", combo, f, rest, named, line, errors);
+}
+
+/* Writes a problem with a line that doesn't stop the file loading to
+ * stderr, as "tidewm: FILE:LINE: ...". */
+static void
+settings_warn(unsigned int line, const char *fmt, ...)
+{
+	va_list ap;
+	fprintf(stderr, "tidewm: %s:%u: ", settings_file ? settings_file : settings_path, line);
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	fputc('\n', stderr);
+}
+
+/* A rebind line, tidewm's own: "NAME KEYS..." gives the named binding
+ * these keys in place of the ones it has, and "NAME none" takes them all
+ * away. A name no line has given is reported and skipped, as Hyprland's
+ * tide-keys.lua's is, so a shell's file outliving a name in the config
+ * doesn't stop it loading. */
+static int
+settings_rebind(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *name = settings_word(&rest), *combo, what[128];
+	NamedBinding *n;
+	Mode *mode;
+	size_t i, j, idx;
+	int ok = 1;
+	if (!*name || !*rest) {
+		settings_error(errors, line, "rebind needs a binding's name, then its keys, or none");
+		return 0;
+	}
+	if ((idx = settings_find_named(s, name)) == s->nnamed) {
+		settings_warn(line, "rebind %s: no binding is called %s, so it's skipped", name, name);
+		return 1;
+	}
+	n = &s->named[idx];
+	snprintf(what, sizeof(what), "rebind %s", name);
+	if (!strcmp(rest, "none")) {
+		rest += 4;
+	} else {
+		/* Each key is checked before any is taken away */
+		char *copy = settings_strdup(rest, strlen(rest)), *p = copy;
+		Mode scratch = {0};
+		while (*(combo = settings_word(&p))) {
+			if (!strcmp(combo, "none")) {
+				settings_error(errors, line, "rebind %s: none is alone, for no keys", name);
+				ok = 0;
+			} else {
+				ok &= settings_put_binding(&scratch, what, combo, n->flags, n->command, 0,
+						line, errors);
+			}
+		}
+		for (j = 0; j < scratch.nbindings; j++) {
+			free(scratch.bindings[j].keys);
+			free(scratch.bindings[j].command);
+		}
+		free(scratch.bindings);
+		free(copy);
+		if (!ok)
+			return 0;
+	}
+	mode = &s->modes[n->mode];
+	for (i = j = 0; i < mode->nbindings; i++) {
+		if (mode->bindings[i].named == idx + 1) {
+			free(mode->bindings[i].keys);
+			free(mode->bindings[i].command);
+		} else {
+			mode->bindings[j++] = mode->bindings[i];
+		}
+	}
+	mode->nbindings = j;
+	while (*(combo = settings_word(&rest)))
+		settings_put_binding(mode, what, combo, n->flags, n->command, idx + 1, line, errors);
 	return 1;
 }
 
@@ -1511,7 +1719,14 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			free(input);
 			input = NULL;
 		} else if (!strcasecmp(word, "bindsym")) {
-			ok &= settings_add_binding(&s->modes[mode], p, line, errors);
+			ok &= settings_add_binding(s, mode, p, line, errors);
+		} else if (!strcasecmp(word, "rebind")) {
+			if (mode) {
+				settings_error(errors, line, "rebind can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_rebind(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "bindswitch")) {
 			if (mode) {
 				settings_error(errors, line, "bindswitch can't be in a mode");
@@ -2024,6 +2239,10 @@ settings_mouse(void)
 		for (j = 0; j < settings->modes[i].nbindings; j++)
 			if (settings->modes[i].bindings[j].button)
 				return 1;
+	/* A button's binding a rebind took away still said what the mouse does */
+	for (i = 0; i < settings->nnamed; i++)
+		if (settings->named[i].flags.whole_window)
+			return 1;
 	return 0;
 }
 
@@ -3336,6 +3555,8 @@ settings_json_bindings(void)
 			json_object_object_add(b, "release", json_object_new_boolean(k->release));
 			json_object_object_add(b, "locked", json_object_new_boolean(k->locked));
 			json_object_object_add(b, "kept_open", json_object_new_boolean(k->kept_open));
+			json_object_object_add(b, "name", json_object_new_string(
+					k->named ? settings->named[k->named - 1].name : ""));
 			json_object_array_add(list, b);
 		}
 	}
@@ -3351,6 +3572,42 @@ settings_json_bindings(void)
 		json_object_object_add(b, "release", json_object_new_boolean(0));
 		json_object_object_add(b, "locked", json_object_new_boolean(sw->locked));
 		json_object_object_add(b, "kept_open", json_object_new_boolean(0));
+		json_object_object_add(b, "name", json_object_new_string(""));
+		json_object_array_add(list, b);
+	}
+	return list;
+}
+
+/* GET_NAMED_BINDINGS's reply: each named binding, in the order the file
+ * first names it, with the keys its bindsym lines gave it and the keys it
+ * has now, after any rebind line, for a shell to show and change. */
+static struct json_object *
+settings_json_named(void)
+{
+	struct json_object *list = json_object_new_array(), *b, *keys, *defaults;
+	const NamedBinding *n;
+	const Mode *mode;
+	size_t i, j;
+	for (i = 0; settings && i < settings->nnamed; i++) {
+		n = &settings->named[i];
+		mode = &settings->modes[n->mode];
+		keys = json_object_new_array();
+		for (j = 0; j < mode->nbindings; j++)
+			if (mode->bindings[j].named == i + 1)
+				json_object_array_add(keys, json_object_new_string(mode->bindings[j].keys));
+		defaults = json_object_new_array();
+		for (j = 0; j < n->ndefaults; j++)
+			json_object_array_add(defaults, json_object_new_string(n->defaults[j]));
+		b = json_object_new_object();
+		json_object_object_add(b, "name", json_object_new_string(n->name));
+		json_object_object_add(b, "type", json_object_new_string(n->flags.whole_window ? "mouse" : "key"));
+		json_object_object_add(b, "keys", keys);
+		json_object_object_add(b, "default_keys", defaults);
+		json_object_object_add(b, "command", json_object_new_string(n->command));
+		json_object_object_add(b, "mode", json_object_new_string(mode->name));
+		json_object_object_add(b, "release", json_object_new_boolean(n->flags.release));
+		json_object_object_add(b, "locked", json_object_new_boolean(n->flags.locked));
+		json_object_object_add(b, "kept_open", json_object_new_boolean(n->flags.kept_open));
 		json_object_array_add(list, b);
 	}
 	return list;
