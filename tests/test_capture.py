@@ -1,7 +1,8 @@
 """Capture (tide's SPEC §12): the IPC's capture event, tidewm's own, says
 when an ext-image-copy-capture session starts and stops, as a screen
 share's or a screenshot's, and whether it's of a window, by its con_id,
-or of an output."""
+or of an output; and that a window can be captured, as grim -T and tide's
+overview do, shown or on a workspace not shown."""
 
 import os
 import select
@@ -88,6 +89,22 @@ class CaptureTest(TidewmTest):
         client.kill()
         client.wait(TIMEOUT)
         self.assertEqual(self.event(), {"change": "stop", "source": "window", "con_id": window})
+
+    def shot(self, app_id):
+        """tests/capture's one frame of the window with app_id: its size
+        and its middle pixel's color, as "WxH RRGGBB"."""
+        return subprocess.run([CAPTURE, "shot", app_id], env=self.wm.env, check=True,
+                              capture_output=True, timeout=TIMEOUT).stdout.decode().strip()
+
+    def test_a_window_can_be_captured(self):
+        self.open("test.app")
+        # tests/client fills its window with 336699
+        self.assertRegex(self.shot("test.app"), r"^[1-9][0-9]*x[1-9][0-9]* 336699$")
+
+    def test_a_window_on_a_workspace_not_shown_can_be_captured(self):
+        self.open("test.app")
+        self.command(self.connect(), "workspace two")
+        self.assertRegex(self.shot("test.app"), r"^[1-9][0-9]*x[1-9][0-9]* 336699$")
 
 
 if __name__ == "__main__":
