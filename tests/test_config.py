@@ -288,12 +288,6 @@ include tide-keys.conf
             ("bindsym --name Go Mod1+x nop\n", ":1: bindsym --name Go: a name is a lower-case letter"),
             ("bindsym --name Mod1+x nop\n", ":1: bindsym needs keys and a command"),
             ("bindsym --name\n", ":1: bindsym --name needs a name"),
-            ("bindsym --name x Mod1+x nop\nbindsym --name x Mod1+y kill\n",
-             ":2: bindsym --name x: that name runs nop already"),
-            ("bindsym --name x Mod1+x nop\nbindsym --name x --locked Mod1+y nop\n",
-             ":2: bindsym --name x: that name's other keys have other flags"),
-            ("bindsym --name x Mod1+x nop\nmode m {\nbindsym --name x Mod1+y nop\n}\n",
-             ":3: bindsym --name x: that name is in mode default already"),
             ("bindsym --name x Mod1+x nop\nrebind x Mod1+NoSuchKey\n",
              ":2: rebind x Mod1+NoSuchKey: no modifier or key is called NoSuchKey"),
             ("bindsym --name x Mod1+x nop\nrebind x none Mod1+y\n", ":2: rebind x: none is alone"),
@@ -303,6 +297,27 @@ include tide-keys.conf
         ]:
             self.wm.write_config(text)
             self.assertIn(error, self.fails("reload")["error"], text)
+
+    def test_a_later_line_with_another_command_redefines_the_name(self):
+        """A config that includes tide's and binds tide's names to its own
+        commands, as conf's does: its lines win, and the name's earlier
+        keys go with what they ran."""
+        self.rebind("bindsym --name go_b Mod1+d workspace d\n"
+                    "bindsym --name go_b Mod1+e workspace d\n")
+        self.assertEqual(self.ran("d"), "d")
+        self.assertEqual(self.ran("e"), "d", "a second line for the new command adds a key")
+        self.assertEqual(self.ran("b"), "marker", "the old command's keys are gone")
+        self.assertEqual(self.ran("c"), "marker")
+        self.assertEqual(self.named()["go_b"], (["Mod1+d", "Mod1+e"], ["Mod1+d", "Mod1+e"]))
+
+    def test_a_later_line_with_other_flags_or_mode_redefines_the_name(self):
+        self.rebind("bindsym --name go_a --locked Mod1+a workspace a\n"
+                    "mode resize {\n    bindsym --name go_b Mod1+b workspace b\n}\n")
+        bindings = {b["name"]: b for b in self.connect().request(GET_NAMED_BINDINGS)}
+        self.assertEqual(bindings["go_a"]["locked"], True)
+        self.assertEqual(bindings["go_b"]["mode"], "resize")
+        self.assertEqual(bindings["go_b"]["keys"], ["Mod1+b"])
+        self.assertEqual(self.ran("c"), "marker", "go_b's default-mode keys are gone")
 
     def test_a_bad_rebind_keeps_the_keys_there_were(self):
         self.rebind("rebind go_a Mod1+x\n")

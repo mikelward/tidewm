@@ -111,7 +111,11 @@ if the config names it. `bindsym --name NAME` names one, `NAME` being a
 lower-case letter, then lower-case letters, digits and `_`, as
 `--name terminal` or `--name=terminal`. A name is one action: several
 lines can give it keys, in one mode, each running the same commands
-with the same flags, and those are its default keys.
+with the same flags, and those are its default keys. A later line that
+gives the name another command, flags or mode redefines it, as a later
+binding of the same keys replaces an earlier one: the name's earlier keys
+go, and its default keys start again from that line. So a config that
+includes tide's and binds tide's names to its own commands wins.
 
 `rebind NAME KEYS...` gives it these keys in place of the ones it has,
 and `rebind NAME none` takes them all away. Like a `bindsym` line, a
