@@ -729,8 +729,23 @@ settings_add_binding(Settings *s, size_t mode, char *rest, unsigned int line,
 		settings_error(errors, line, "bindsym needs keys and a command");
 		return 0;
 	}
-	if (name && !(named = settings_add_named(s, mode, name, combo, f, rest, line, errors)))
-		return 0;
+	/* A named line's keys are checked before the name takes it, which can
+	 * redefine the name: a line with bad keys is left out, and leaves the
+	 * name as it was */
+	if (name) {
+		Mode scratch = {0};
+		char *copy = settings_strdup(combo, strlen(combo));
+		int ok = settings_put_binding(&scratch, "bindsym", copy, f, rest, 0, line, errors);
+		size_t j;
+		for (j = 0; j < scratch.nbindings; j++) {
+			free(scratch.bindings[j].keys);
+			free(scratch.bindings[j].command);
+		}
+		free(scratch.bindings);
+		free(copy);
+		if (!ok || !(named = settings_add_named(s, mode, name, combo, f, rest, line, errors)))
+			return 0;
+	}
 	return settings_put_binding(&s->modes[mode], "bindsym", combo, f, rest, named, line, errors);
 }
 
