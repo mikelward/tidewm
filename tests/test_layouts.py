@@ -490,6 +490,20 @@ class TwoMonitorLayoutTest(TidewmTest):
         self.assertEqual(self.parts("1"), {"HEADLESS-1": "tile", "HEADLESS-2": "twocol"})
 
 
+class BadCycleAtStartTest(TidewmTest):
+    """A layout_cycle line with an error, left out at startup, leaves an
+    earlier line's cycle as it was."""
+    CONFIG = "layout_cycle twocol tile\nlayout_cycle threecol bogus\n"
+
+    def test_the_earlier_cycle_stands(self):
+        steps = []
+        for _ in range(3):
+            self.command(self.connect(), "layout next")
+            current, = [w["layout"] for w in self.connect().request(GET_WORKSPACES) if w["focused"]]
+            steps.append(current)
+        self.assertEqual(steps, ["twocol", "tile", "twocol"])
+
+
 class CycleTest(TidewmTest):
     """layout next and prev, tide's Super+. and Super+, : through tile,
     threecol and twocol, or the config file's layout_cycle, going round."""
