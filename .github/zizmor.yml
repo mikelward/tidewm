@@ -16,10 +16,27 @@ rules:
         "mikelward/codex-review": ref-pin
         "mikelward/codex-review/.github/workflows/check-consumer.yml": ref-pin
         "mikelward/lanes": ref-pin
+        # Same reasoning: the weekly dwl-update.yml tracks this reusable
+        # workflow deliberately, and a pin would be a thing to bump here on
+        # every merge there.
+        "mikelward/dwl-update/.github/workflows/dwl-update.yml": ref-pin
         # Official actions may pin to a tag, as every workflow here does.
         "actions/*": ref-pin
         # Everything else must pin to a hash.
         "*": hash-pin
+  secrets-inherit:
+    # The weekly dwl-update caller passes `secrets: inherit` on purpose: the
+    # publish job of the called workflow reads DWL_UPDATE_PAT from this
+    # repository's `dwl-update` environment, and an environment secret
+    # reaches a called workflow no other way. The alternative zizmor prefers
+    # -- naming the secret in a `secrets:` block -- delivers it to the runner
+    # of every job in the called workflow, the untrusted update job included,
+    # which is the exposure the environment exists to close. The price of
+    # `inherit` is that every repository-level secret here reaches that job
+    # too, so this repository keeps its secrets environment-scoped
+    # (mikelward/repo's `repo audit` reports any that are not).
+    ignore:
+      - dwl-update.yml
   dangerous-triggers:
     # Load-bearing pull_request_target usage in the codex-review pair,
     # reasoned through in mikelward/codex-review's own docs/CONSUMER.md:

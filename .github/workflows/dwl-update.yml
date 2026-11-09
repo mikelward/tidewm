@@ -1,0 +1,32 @@
+name: dwl update
+
+# Weekly merge of upstream dwl, from mikelward/dwl-update: a pull request
+# when it merges cleanly, an issue naming the files when it conflicts.
+on:
+  schedule:
+    # 05:43 UTC on Saturdays: an off-the-hour minute, since the top of the
+    # hour is the busiest slot on the shared scheduler.
+    - cron: '43 5 * * 6'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  dwl-update:
+    uses: mikelward/dwl-update/.github/workflows/dwl-update.yml@main
+    permissions:
+      contents: write
+      pull-requests: write
+      # The conflict issue.
+      issues: write
+    # `inherit`, not a `secrets:` block naming DWL_UPDATE_PAT: the publish
+    # job reads the credential from this repository's `dwl-update`
+    # environment, and an environment secret reaches a called workflow no
+    # other way. A secret passed by name reaches the runner of every job in
+    # the called workflow, the untrusted update job that builds the merge
+    # included -- see mikelward/dwl-update's README. The credential opens the
+    # merge PR as a real collaborator rather than as `GITHUB_TOKEN`, so the
+    # ordinary `pull_request` round runs for it, every required check
+    # included. The matching zizmor finding (secrets-inherit) is allowed for
+    # this file in .github/zizmor.yml, with the same reason.
+    secrets: inherit

@@ -79,6 +79,14 @@ push to main, as `make release-tag` prints; raise `RELEASE_MINOR` in
 `config.mk` in the change that breaks a config or a client. `tidewm -v` names
 the tag it was built from. Upstream dwl's own `v0.x` tags stay as they are.
 
+### Keeping up with dwl
+tidewm merges dwl's `main`, never rebases onto it. Each Saturday,
+`.github/workflows/dwl-update.yml` (from mikelward/dwl-update) merges it,
+builds with and without XWayland, and opens a pull request, "Merge upstream
+dwl", from the `dwl-update` branch. A merge that conflicts opens an issue
+naming the files instead. Merge the pull request with a merge commit, not a
+rebase or a squash, so dwl's commits keep their hashes.
+
 ## Configuration
 
 tidewm reads a config file in sway's syntax, the one `-c FILE` names, or
