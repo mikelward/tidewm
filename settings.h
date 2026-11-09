@@ -629,10 +629,9 @@ settings_find_named(const Settings *s, const char *name)
 	return i;
 }
 
-/* Registers combo as one of a named binding's keys: a new name, or one
- * more line for a name already given, which must run the same commands,
- * in the same mode, with the same flags. Returns its 1 + index, or 0 on an
- * error. */
+/* Registers combo as one of a named binding's keys: a new name, one more
+ * line for a name already given the same command, mode and flags, or a
+ * line that redefines the name. Returns its 1 + index, or 0 on an error. */
 static size_t
 settings_add_named(Settings *s, size_t mode, const char *name, const char *combo,
 		BindingFlags f, const char *command, unsigned int line, struct json_object *errors)
@@ -657,20 +656,32 @@ settings_add_named(Settings *s, size_t mode, const char *name, const char *combo
 		n->flags = f;
 	}
 	n = &s->named[i];
-	if (n->mode != mode) {
-		settings_error(errors, line, "bindsym --name %s: that name is in mode %s already",
-				name, s->modes[n->mode].name);
-		return 0;
-	}
-	if (strcmp(n->command, command)) {
-		settings_error(errors, line, "bindsym --name %s: that name runs %s already, "
-				"and each of its keys runs the same", name, n->command);
-		return 0;
-	}
-	if (memcmp(&n->flags, &f, sizeof(f))) {
-		settings_error(errors, line, "bindsym --name %s: that name's other keys "
-				"have other flags", name);
-		return 0;
+	/* A line that gives a name another command, flags or mode redefines
+	 * it, as a later binding of the same keys replaces an earlier one: a
+	 * config that includes tide's and binds the same names to its own
+	 * commands wins over tide's. The name's earlier keys go with what
+	 * they ran. */
+	if (n->mode != mode || strcmp(n->command, command) || memcmp(&n->flags, &f, sizeof(f))) {
+		Mode *m = &s->modes[n->mode];
+		size_t j, k;
+		for (j = k = 0; j < m->nbindings; j++) {
+			if (m->bindings[j].named == i + 1) {
+				free(m->bindings[j].keys);
+				free(m->bindings[j].command);
+			} else {
+				m->bindings[k++] = m->bindings[j];
+			}
+		}
+		m->nbindings = k;
+		for (j = 0; j < n->ndefaults; j++)
+			free(n->defaults[j]);
+		free(n->defaults);
+		n->defaults = NULL;
+		n->ndefaults = 0;
+		free(n->command);
+		n->command = settings_strdup(command, strlen(command));
+		n->mode = mode;
+		n->flags = f;
 	}
 	for (i = 0; i < n->ndefaults; i++)
 		if (!strcmp(n->defaults[i], combo))
