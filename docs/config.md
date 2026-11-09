@@ -285,7 +285,9 @@ The lines apply when an output appears, at startup or when it's plugged
 in, and again on `reload`, when each output starts over from `config.h`'s
 monitor rule and its preferred mode, so a setting taken out of the file
 goes. An output that refuses its settings at startup, as a mode it can't
-show, gets its preferred mode instead, and stderr says so. The `output`
+show, gets its preferred mode instead, and stderr says so. One that refuses
+that too, as a GPU that can't drive it, gets the first of its other modes
+it takes; stderr names the mode it's on, or says it stays dark. The `output`
 command takes the same settings, and sets them at once, until a reload; it
 fails for a name no output has. An output enabled again keeps the mode
 it had and goes back to the position it was last given; a mode or
@@ -461,7 +463,8 @@ Each error names the file, the line and what's wrong, as
 An output that refuses its settings, as a mode it can't show, is an error
 too, though not one in the file, so the rest of the file still loads. On
 `reload`, the output keeps what it had, and the command fails, naming it;
-at startup, or when it's plugged in, it gets its preferred mode. Either
+at startup, or when it's plugged in, it gets its preferred mode, or
+another it takes. Either
 way, `GET_CONFIG` lists it.
 
 A binding's commands are only checked when the key is pressed. One that
