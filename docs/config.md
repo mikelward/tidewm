@@ -446,13 +446,15 @@ canceled grant places on another workspace.
 
 ## Errors
 
-A file with any error is left out whole, and what was loaded before stays:
-the previous file, or `config.h`'s keys. Each error names the file, the
-line and what's wrong, as `/path/to/config:12: no setting is called
-bindcode`.
+Each error names the file, the line and what's wrong, as
+`/path/to/config:12: no setting is called bindcode`.
 
-- **At startup**, tidewm writes the errors to stderr, then starts with
-  `config.h`'s keys, so the file can be fixed and reloaded.
+- **At startup**, tidewm writes the errors to stderr and leaves those
+  lines out: the rest of the file loads, with its keys and the commands
+  it starts, so a session still comes up to fix it in. A keymap XKB can't
+  make is the exception, as it would leave the keyboard typing nothing:
+  then the whole file is left out, and tidewm starts with `config.h`'s
+  keys.
 - **On `reload`**, the command fails with the first three errors.
 - **Either way**, `GET_CONFIG` lists them all, until a load works.
 
