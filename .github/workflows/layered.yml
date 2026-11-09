@@ -3,7 +3,8 @@ name: layered
 # tide's tidewm config with conf's on top, loaded by this tidewm
 # (tests/test_layered.py). Each repo tests its own file, so a change to
 # tide's or conf's that the other, or tidewm, can't take only showed as a
-# session with none of its keys. This catches it: on each change here,
+# session with none of its keys. This catches it, for the configs as they
+# are and as they were a week and a month ago: on each change here,
 # and daily for changes in tide and conf, which don't run it.
 #
 # Not a required check: a break it finds may be another repo's to fix,
@@ -41,7 +42,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
           build-essential pkgconf libwlroots-0.20-dev libwayland-dev
           wayland-protocols libinput-dev libxkbcommon-dev libjson-c-dev libpcre2-dev python3
-          ca-certificates
+          ca-certificates git
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
@@ -50,11 +51,20 @@ jobs:
           repository: mikelward/tide
           path: layered/tide
           persist-credentials: false
+          # All of it, so the test can load the config as it was a
+          # week and a month ago.
+          fetch-depth: 0
       - uses: actions/checkout@v5
         with:
           repository: mikelward/conf
           path: layered/conf
           persist-credentials: false
+          # All of it, so the test can load the config as it was a
+          # week and a month ago.
+          fetch-depth: 0
+      # The checkouts belong to the runner's user, not the container's
+      # root, so git would refuse to read their history.
+      - run: git config --global --add safe.directory '*'
       - run: make
       - run: python3 -m unittest -v test_layered
         working-directory: tests
