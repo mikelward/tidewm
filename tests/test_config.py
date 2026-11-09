@@ -723,6 +723,18 @@ class BadConfigAtStartTest(KeysTest):
         self.assertEqual(self.shown(ipc), "keyed")
 
 
+class BadNamedLineAtStartTest(KeysTest):
+    CONFIG = ("bindsym --name go Mod1+x workspace keyed\n"
+              "bindsym --name go Mod1+NoSuchKey workspace other\n")
+
+    def test_a_named_line_with_bad_keys_leaves_the_name_as_it_was(self):
+        self.assertIn(":2: bindsym Mod1+NoSuchKey: no modifier or key is called NoSuchKey",
+                      self.connect().request(GET_CONFIG)["errors"][0])
+        ipc = self.workspaces_ipc()
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed")
+
+
 class BadKeymapAtStartTest(KeysTest):
     CONFIG = "bindsym Mod1+x workspace keyed\ninput type:keyboard xkb_layout nosuchlayout\n"
 
