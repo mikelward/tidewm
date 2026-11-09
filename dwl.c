@@ -1430,18 +1430,8 @@ createmon(struct wl_listener *listener, void *data)
 		settings_merge_output(&oc, &file);
 	settings_preferred_mode(wlr_output, &oc);
 	settings_output_state(m, &oc, &state);
-	if (!wlr_output_commit_state(wlr_output, &state) && configured) {
-		/* A mode it can't show, say: rather than a dark screen, its own */
-		fprintf(stderr, "tidewm: output %s refused its settings; using its preferred mode\n",
-				wlr_output->name);
-		settings_error(settings_errors, 0, "output %s refused its settings, "
-				"so it has its preferred mode", wlr_output->name);
-		wlr_output_state_finish(&state);
-		wlr_output_state_init(&state);
-		wlr_output_state_set_mode(&state, wlr_output_preferred_mode(wlr_output));
-		wlr_output_state_set_enabled(&state, 1);
-		wlr_output_commit_state(wlr_output, &state);
-	}
+	if (!wlr_output_commit_state(wlr_output, &state))
+		settings_output_fallback(wlr_output, configured);
 	wlr_output_state_finish(&state);
 	settings_output_set(m, &oc, 1);
 

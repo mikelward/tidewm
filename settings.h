@@ -3856,3 +3856,73 @@ settings_finish(void)
 	json_object_put(settings_errors);
 	settings_errors = NULL;
 }
+
+/* Turns the output on in the first mode it takes: its preferred mode,
+ * then the rest, largest first as the backend lists them, so a screen whose
+ * GPU can't drive its best mode shows a smaller one rather than staying
+ * dark. Says so either way, since a dark screen says nothing. Returns 1 for
+ * the preferred mode, 2 for another, 0 for none. */
+static int
+settings_enable_any_mode(struct wlr_output *wlr_output)
+{
+	struct wlr_output_mode *preferred = wlr_output_preferred_mode(wlr_output), *mode;
+	struct wlr_output_state state;
+	int ok;
+
+	wlr_output_state_init(&state);
+	wlr_output_state_set_enabled(&state, 1);
+	if (preferred)
+		wlr_output_state_set_mode(&state, preferred);
+	ok = wlr_output_commit_state(wlr_output, &state);
+	wlr_output_state_finish(&state);
+	if (ok)
+		goto done;
+	ok = 2;
+	wl_list_for_each(mode, &wlr_output->modes, link) {
+		if (mode == preferred)
+			continue;
+		wlr_output_state_init(&state);
+		wlr_output_state_set_enabled(&state, 1);
+		wlr_output_state_set_mode(&state, mode);
+		if (wlr_output_commit_state(wlr_output, &state)) {
+			wlr_output_state_finish(&state);
+			goto done;
+		}
+		wlr_output_state_finish(&state);
+	}
+	fprintf(stderr, "tidewm: output %s can't be turned on in any of its modes, so it stays "
+			"dark; wlroots' error above says why, and WLR_RENDERER=pixman may get round it\n",
+			wlr_output->name);
+	return 0;
+done:
+	if (wlr_output->current_mode)
+		fprintf(stderr, "tidewm: output %s is on at %dx%d@%.3fHz\n", wlr_output->name,
+				wlr_output->current_mode->width, wlr_output->current_mode->height,
+				wlr_output->current_mode->refresh / 1000.0);
+	else
+		fprintf(stderr, "tidewm: output %s is on\n", wlr_output->name);
+	return ok;
+}
+
+/* An output that refused its first commit at startup, or when it's
+ * plugged in: on in the first mode it takes, and its settings' error, if
+ * it has an output line, says which. */
+static void
+settings_output_fallback(struct wlr_output *wlr_output, int configured)
+{
+	int got;
+
+	fprintf(stderr, "tidewm: output %s refused %s; trying its own modes\n",
+			wlr_output->name, configured ? "its settings" : "its preferred mode");
+	got = settings_enable_any_mode(wlr_output);
+	if (configured && got == 1)
+		settings_error(settings_errors, 0, "output %s refused its settings, "
+				"so it has its preferred mode", wlr_output->name);
+	else if (configured && got == 2)
+		settings_error(settings_errors, 0, "output %s refused its settings, "
+				"so it has its mode %dx%d", wlr_output->name,
+				wlr_output->width, wlr_output->height);
+	else if (configured)
+		settings_error(settings_errors, 0, "output %s refused its settings, "
+				"and every mode of its own, so it stays dark", wlr_output->name);
+}
