@@ -1268,6 +1268,7 @@ settings_add_input(Settings *s, char *name, char *setting, unsigned int line,
 	InputConfig *ic = NULL, *grown;
 	char err[256];
 	size_t i;
+	int added = 0;
 	if (!settings_input_name_ok(name, err, sizeof(err))) {
 		settings_error(errors, line, "%s", err);
 		return 0;
@@ -1281,9 +1282,15 @@ settings_add_input(Settings *s, char *name, char *setting, unsigned int line,
 		s->inputs = grown;
 		ic = &s->inputs[s->ninputs++];
 		settings_input_init(ic, settings_strdup(name, strlen(name)));
+		added = 1;
 	}
 	if (!settings_parse_input_setting(ic, setting, err, sizeof(err))) {
 		settings_error(errors, line, "%s", err);
+		/* A line with an error adds no devices' entry */
+		if (added) {
+			settings_free_input(ic);
+			s->ninputs--;
+		}
 		return 0;
 	}
 	for (i = 0; i < InXkbLast; i++) {
@@ -1555,6 +1562,8 @@ settings_layout_defaults(Settings *s, char *rest, unsigned int line, struct json
 static int
 settings_layout_cycle(Settings *s, char *rest, unsigned int line, struct json_object *errors)
 {
+	/* Built apart, so a line with an error leaves an earlier one's cycle */
+	void (*cycle[LENGTH(settings_lt_modes)])(Monitor *);
 	char *name;
 	size_t i, j, n = 0;
 	while (*(name = settings_word(&rest))) {
@@ -1566,17 +1575,18 @@ settings_layout_cycle(Settings *s, char *rest, unsigned int line, struct json_ob
 			return 0;
 		}
 		for (j = 0; j < n; j++) {
-			if (s->cycle[j] == settings_lt_modes[i].arrange) {
+			if (cycle[j] == settings_lt_modes[i].arrange) {
 				settings_error(errors, line, "layout_cycle has %s twice", name);
 				return 0;
 			}
 		}
-		s->cycle[n++] = settings_lt_modes[i].arrange;
+		cycle[n++] = settings_lt_modes[i].arrange;
 	}
 	if (!n) {
 		settings_error(errors, line, "layout_cycle needs a layout");
 		return 0;
 	}
+	memcpy(s->cycle, cycle, n * sizeof(*cycle));
 	s->ncycle = n;
 	return 1;
 }
