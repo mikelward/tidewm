@@ -702,11 +702,32 @@ class NoConfigLockTest(KeysTest):
 
 
 class BadConfigAtStartTest(KeysTest):
-    CONFIG = "bindsym Mod1+x workspace keyed\nfrobnicate\n"
+    CONFIG = "bindsym Mod1+x workspace keyed\nfrobnicate\nbindsym Mod1+y workspace later\n"
 
-    def test_tidewm_starts_with_config_h_keys_and_says_why(self):
+    def test_tidewm_starts_without_the_bad_line_and_says_why(self):
         config = self.connect().request(GET_CONFIG)
         self.assertEqual(config["errors"], [f"{self.wm.config_path}:2: no setting is called frobnicate"])
+        self.assertEqual(config["config"], self.CONFIG)
+        self.assertIn("left out the lines above", self.wm.output())
+        ipc = self.workspaces_ipc()
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed", "a line before the bad one works")
+        self.alt("y")
+        self.assertEqual(self.shown(ipc), "later", "and one after it")
+
+    def test_a_reload_with_an_error_still_keeps_what_was_loaded(self):
+        self.wm.write_config("bindsym Mod1+x workspace other\nfrobnicate\n")
+        self.assertIn(":2: no setting is called frobnicate", self.fails("reload")["error"])
+        ipc = self.workspaces_ipc()
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed")
+
+
+class BadKeymapAtStartTest(KeysTest):
+    CONFIG = "bindsym Mod1+x workspace keyed\ninput type:keyboard xkb_layout nosuchlayout\n"
+
+    def test_a_keymap_xkb_cant_make_leaves_the_file_out(self):
+        config = self.connect().request(GET_CONFIG)
         self.assertEqual(config["config"], "")
         self.assertIn("config.h's keys work instead", self.wm.output())
         ipc = self.workspaces_ipc()

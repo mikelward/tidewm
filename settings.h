@@ -2078,10 +2078,13 @@ settings_include(Settings *s, char *pattern, unsigned int line, SettingsVar **va
 }
 
 /* Parses text, which it keeps, and the files its include lines name, into
- * new settings, or returns NULL and adds each error to errors. */
+ * new settings, or returns NULL and adds each error to errors. With
+ * partial, a line with an error is left out and the rest kept, unless a
+ * keymap is bad, which would leave the keyboard typing nothing. */
 static Settings *
-settings_parse(char *text, struct json_object *errors)
+settings_parse(char *text, struct json_object *errors, int partial)
 {
+	int keymaps_ok;
 	Settings *s = ecalloc(1, sizeof(*s));
 	SettingsVar *vars = NULL;
 	size_t nvars = 0, i;
@@ -2097,13 +2100,14 @@ settings_parse(char *text, struct json_object *errors)
 	settings_add_mode(s, "default");
 	settings_file = NULL;
 	ok = settings_parse_text(s, text, &vars, &nvars, 0, errors);
-	ok &= settings_check_keymaps(s, errors);
+	keymaps_ok = settings_check_keymaps(s, errors);
+	ok &= keymaps_ok;
 	for (i = 0; i < nvars; i++) {
 		free(vars[i].name);
 		free(vars[i].value);
 	}
 	free(vars);
-	if (!ok) {
+	if (!ok && !(partial && keymaps_ok)) {
 		settings_free(s);
 		return NULL;
 	}
@@ -2139,9 +2143,10 @@ settings_read(const char *path, char **text, struct json_object *errors)
 /* Loads the file at settings_path in place of the current settings, or
  * keeps those and returns 0 if it has errors. No file means config.h's
  * keys. It returns -1 if it loaded, but an output refused its settings.
- * settings_errors gets this load's errors. */
+ * With partial, a file with errors in some lines loads without them, and
+ * settings_errors says which. settings_errors gets this load's errors. */
 static int
-settings_load(void)
+settings_load(int partial)
 {
 	static const LayoutDefaults no_defaults[LENGTH(settings_lt_modes)];
 	struct json_object *errors = json_object_new_array();
@@ -2149,7 +2154,7 @@ settings_load(void)
 	char *text;
 	int refused, reset, r = settings_read(settings_path, &text, errors);
 	if (r > 0)
-		loaded = settings_parse(text, errors);
+		loaded = settings_parse(text, errors, partial);
 	json_object_put(settings_errors);
 	settings_errors = errors;
 	if (r < 0 || (r > 0 && !loaded))
@@ -2182,14 +2187,17 @@ settings_load(void)
 }
 
 /* Finds the file: the -c argument, or $XDG_CONFIG_HOME/tidewm/config, or
- * ~/.config/tidewm/config. A file with errors is reported and left out:
- * tidewm starts with config.h's keys, so it can still be fixed. */
+ * ~/.config/tidewm/config. A line with an error is reported and left out,
+ * and the rest of the file loads: a session that starts with config.h's
+ * keys in place of yours, and without the shell your file starts, is no
+ * way to find the line. A file that can't load at all, as one with a bad
+ * keymap, is left out, and tidewm starts with config.h's keys. */
 static void
 settings_init(const char *arg)
 {
 	const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
-	size_t i;
-	int n;
+	size_t i, nerrors;
+	int n, loaded;
 	if (arg)
 		n = snprintf(settings_path, sizeof(settings_path), "%s", arg);
 	else if (xdg && *xdg)
@@ -2200,12 +2208,16 @@ settings_init(const char *arg)
 	if (n < 0 || (size_t)n >= sizeof(settings_path))
 		die("the config file's path is too long");
 	settings_group_register(kb_group);
-	if (settings_load())
-		return;
-	for (i = 0; i < json_object_array_length(settings_errors); i++)
+	loaded = settings_load(1);
+	nerrors = json_object_array_length(settings_errors);
+	for (i = 0; i < nerrors; i++)
 		fprintf(stderr, "tidewm: %s\n",
 				json_object_get_string(json_object_array_get_idx(settings_errors, i)));
-	fprintf(stderr, "tidewm: not using %s: config.h's keys work instead\n", settings_path);
+	if (!loaded)
+		fprintf(stderr, "tidewm: not using %s: config.h's keys work instead\n", settings_path);
+	else if (nerrors)
+		fprintf(stderr, "tidewm: left out the lines above from %s; the rest is loaded\n",
+				settings_path);
 }
 
 /* The reload command: rereads the file. On errors, keeps what was loaded,
@@ -2216,7 +2228,7 @@ settings_reload(char *buf, size_t size)
 {
 	size_t i, n, len = 0;
 	int w, r;
-	if ((r = settings_load()) > 0)
+	if ((r = settings_load(0)) > 0)
 		return 1;
 	n = json_object_array_length(settings_errors);
 	buf[0] = '\0';
