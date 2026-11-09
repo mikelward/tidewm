@@ -1,0 +1,63 @@
+name: layered
+
+# tide's tidewm config with conf's on top, loaded by this tidewm
+# (tests/test_layered.py). Each repo tests its own file, so a change to
+# tide's or conf's that the other, or tidewm, can't take only showed as a
+# session with none of its keys. This catches it: on each change here,
+# and daily for changes in tide and conf, which don't run it.
+#
+# Not a required check: a break it finds may be another repo's to fix,
+# and shouldn't hold this one's pull requests. A scheduled run that fails
+# mails the repository's owner.
+#
+# Cost and reliability: a few minutes of a free hosted runner per run;
+# it fetches tide and conf from GitHub and Debian testing's packages, as
+# ci.yml's test job does.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: layered-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  layered:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: debian:testing
+    steps:
+      - run: apt-get update
+      - run: >-
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+          build-essential pkgconf libwlroots-0.20-dev libwayland-dev
+          wayland-protocols libinput-dev libxkbcommon-dev libjson-c-dev libpcre2-dev python3
+          ca-certificates
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: mikelward/tide
+          path: layered/tide
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: mikelward/conf
+          path: layered/conf
+          persist-credentials: false
+      - run: make
+      - run: python3 -m unittest -v test_layered
+        working-directory: tests
+        env:
+          TIDE_CHECKOUT: ${{ github.workspace }}/layered/tide
+          CONF_CHECKOUT: ${{ github.workspace }}/layered/conf
