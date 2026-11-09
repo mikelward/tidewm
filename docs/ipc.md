@@ -172,7 +172,8 @@ none), `visible`, `fullscreen_mode` (0 or 1), `sticky`, `maximized`, `minimized`
 `dim` and `dimmed` (tidewm's own: whether it dims when it isn't focused, and is dimmed now),
 `rect` (in layout coordinates, border included), `workspace` and `output` (tidewm's own: where it is) and
 `foreign_toplevel_identifier`, the ext-foreign-toplevel-list
-identifier `grim -T` takes. An X11 window has `app_id` null and its class,
+identifier `grim -T` takes; it captures the window whether or not its
+workspace is shown, as tide's overview needs. An X11 window has `app_id` null and its class,
 instance and title in `window_properties`, as in sway, and its X11 window id
 in `window`. Unmanaged X11 windows (menus, tooltips) aren't listed.
 
