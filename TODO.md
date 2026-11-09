@@ -603,13 +603,19 @@ lands with a test.
 
 ## Plan
 
-1. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
+1. **Track dwl**: a weekly job merges dwl's `main` on a branch, builds
+   with and without Xwayland, runs `make test` and opens a PR. tidewm is
+   15 commits behind (merge base `e203845`, 2026-09-29). The first merge
+   brings dwl's `f08d8b3`, its own fix for the Xwayland exit crash, which
+   matches tidewm's `30174dd`, so nothing needs sending upstream. Why
+   tidewm syncs more easily than tidesway: tide's `docs/dwl-vs-sway.md`.
+2. **Shortcut inhibit**: keyboard-shortcuts-inhibit, so a VM or remote
    desktop can take Super and Alt+Tab.
-2. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
+3. **xdg-foreign**: a portal's dialog, as a file chooser, tied to the
    window that opened it.
-3. **Security context**: security-context, so Flatpak apps don't get the
+4. **Security context**: security-context, so Flatpak apps don't get the
    privileged protocols, such as screencopy and the virtual keyboard.
-4. **The rest of sway's**: touchscreens, drawing tablets,
+5. **The rest of sway's**: touchscreens, drawing tablets,
    wlr-foreign-toplevel-management for taskbars and docks, adaptive sync
    and tearing control, and a scratchpad.
 
