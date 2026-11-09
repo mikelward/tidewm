@@ -71,6 +71,10 @@ class LayeredConfigTest(TidewmTest):
                 continue
             tide_conf = file_at(TIDE, tide_commit, TIDE_CONF)
             conf_config = file_at(CONF, conf_commit, CONF_CONFIG)
+            # Today's pair must be there: a session set up now loads it.
+            if age == "now":
+                self.assertIsNotNone(tide_conf, f"tide has no {TIDE_CONF}")
+                self.assertIsNotNone(conf_config, f"conf has no {CONF_CONFIG}")
             # Before the tidewm session, there was nothing to load.
             if tide_conf is None or conf_config is None:
                 continue
