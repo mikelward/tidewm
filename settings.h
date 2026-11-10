@@ -1791,7 +1791,7 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 	size_t len, mode = 0;
 	unsigned int line = 0, mode_line = 0, input_line = 0, output_line = 0;
 	char *start, *end, *raw, *expanded, *p, *word, *name, *input = NULL, *output = NULL;
-	int ok = 1;
+	int ok = 1, skipping = 0, opens;
 
 	for (start = text; *start; start = *end ? end + 1 : end) {
 		line++;
@@ -1822,6 +1822,18 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 		}
 		expanded = settings_substitute(p, *vars, *nvars);
 		p = expanded;
+		/* In a mode whose opening line failed, each line is left out with
+		 * it: read as the top level's, its plain keys' bindings would
+		 * take those keys from every window */
+		if (skipping) {
+			/* Its }, as the first word, as where a mode closes below */
+			if (*p == '}' && (!p[1] || isspace((unsigned char)p[1])))
+				skipping = 0;
+			free(expanded);
+			free(raw);
+			continue;
+		}
+		opens = *p && p[strlen(p) - 1] == '{';
 		/* In an input block, each line is a setting for its devices */
 		if (input && strcmp(p, "}")) {
 			ok &= settings_add_input(s, input, p, line, errors);
@@ -1972,16 +1984,20 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 				settings_error(errors, line, "mode %s is still open: modes don't nest",
 						s->modes[mode].name);
 				ok = 0;
+				skipping = opens;
 			} else if (!(name = settings_name(&p)) || strcmp(p, "{")) {
 				settings_error(errors, line, "mode needs a name, then {");
 				ok = 0;
+				skipping = opens;
 			} else if (!strcmp(name, "default")) {
 				settings_error(errors, line, "default is the top level, not a mode to open");
 				ok = 0;
+				skipping = opens;
 			} else if (strchr(name, ';')) {
 				/* The mode command couldn't name it: ; ends a command */
 				settings_error(errors, line, "mode %s: a mode's name can't hold ;", name);
 				ok = 0;
+				skipping = opens;
 			} else {
 				mode = settings_add_mode(s, name);
 				mode_line = line;
