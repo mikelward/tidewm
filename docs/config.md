@@ -104,6 +104,10 @@ bindsym --release Super_L exec launcher
 bindsym --locked XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
 ```
 
+Ctrl+Alt+F1…F12 switch to that VT whatever the file binds, locked or not,
+as in sway: a file that lost its keys still leaves a way out. A binding of
+your own on one of them comes first.
+
 ## Named bindings
 
 A shell's keyboard shortcuts, as tide's, can give a binding other keys

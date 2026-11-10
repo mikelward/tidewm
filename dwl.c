@@ -334,6 +334,7 @@ static void axisnotify(struct wl_listener *listener, void *data);
 static void buttonpress(struct wl_listener *listener, void *data);
 static void capturerequest(struct wl_listener *listener, void *data);
 static void chvt(const Arg *arg);
+static int vtkey(uint32_t mods, xkb_keysym_t sym);
 static void checkidleinhibitor(struct wlr_surface *exclude);
 static void cleanup(void);
 static void cleanupmon(struct wl_listener *listener, void *data);
@@ -961,6 +962,19 @@ void
 chvt(const Arg *arg)
 {
 	wlr_session_change_vt(session, arg->ui);
+}
+
+/* Whether these keys are Ctrl+Alt and F1…F12, switching to that VT if so:
+ * built in, as in sway, where a session has VTs */
+int
+vtkey(uint32_t mods, xkb_keysym_t sym)
+{
+	if (CLEANMASK(mods) != (WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT)
+			|| sym < XKB_KEY_F1 || sym > XKB_KEY_F12)
+		return 0;
+	if (session)
+		wlr_session_change_vt(session, sym - XKB_KEY_F1 + 1);
+	return 1;
 }
 
 void
@@ -2096,6 +2110,16 @@ keypress(struct wl_listener *listener, void *data)
 				handled = 1;
 				break;
 			}
+		}
+		/* Ctrl+Alt+F1…F12 switch VT even where the config file binds
+		 * nothing to them, locked or not: a file that lost its keys
+		 * (see settings_init) can't leave you with no way out. A
+		 * binding of the file's on these keys came first, above, and
+		 * a release binding one of them armed keeps it. */
+		if (!handled && !(settings_tap.armed && settings_tap.keycode == event->keycode)
+				&& vtkey(group->mods, group->keysyms[0])) {
+			consumed[event->keycode] = 1;
+			handled = 1;
 		}
 	} else {
 		settings_key_released(event->keycode);
