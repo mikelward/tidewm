@@ -723,6 +723,41 @@ class BadConfigAtStartTest(KeysTest):
         self.assertEqual(self.shown(ipc), "keyed")
 
 
+class NoKeysAtStartTest(KeysTest):
+    # Every binding failed, and the rest of the file loaded
+    CONFIG = "bindsym --frobnicate Mod1+x workspace keyed\ndim_inactive 0.5\n"
+
+    def test_a_file_that_binds_no_key_keeps_config_hs_keys(self):
+        config = self.connect().request(GET_CONFIG)
+        self.assertEqual(config["config"], self.CONFIG)
+        self.assertIn("binds no key, so config.h's keys work with it", self.wm.output())
+        ipc = self.workspaces_ipc()
+        self.alt("2")
+        self.assertEqual(self.shown(ipc), "2")
+
+    def test_a_reload_that_binds_a_key_takes_config_hs_away(self):
+        self.wm.write_config("bindsym Mod1+x workspace keyed\n")
+        result, = self.connect().request(RUN_COMMAND, "reload")
+        self.assertTrue(result["success"], result)
+        ipc = self.workspaces_ipc()
+        self.alt("2")
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed", "Alt+2 is no longer a key")
+
+
+class KeysOnlyInAModeTest(KeysTest):
+    CONFIG = 'mode "inner" {\n    bindsym Mod1+x workspace keyed\n}\n'
+
+    def test_a_mode_of_the_files_has_its_own_keys(self):
+        ipc = self.workspaces_ipc()
+        self.alt("2")
+        self.assertEqual(self.shown(ipc), "2", "config.h's keys at the top level")
+        result, = self.connect().request(RUN_COMMAND, "mode inner")
+        self.assertTrue(result["success"], result)
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed")
+
+
 class BadNamedLineAtStartTest(KeysTest):
     CONFIG = ("bindsym --name go Mod1+x workspace keyed\n"
               "bindsym --name go Mod1+NoSuchKey workspace other\n")

@@ -257,6 +257,7 @@ static int settings_apply_outputs(const OutputConfig *only);
 static int settings_apply_inputs(const InputConfig *only);
 static void fg_arm(void);
 static void dim_update(void);
+static int settings_keys(void);
 static void settings_group_register(KeyboardGroup *group);
 static void settings_free_input(InputConfig *ic);
 /* A release binding's key, while it's down and no other key has been */
@@ -2243,6 +2244,9 @@ settings_init(const char *arg)
 	else if (nerrors)
 		fprintf(stderr, "tidewm: left out the lines above from %s; the rest is loaded\n",
 				settings_path);
+	if (loaded && !settings_keys())
+		fprintf(stderr, "tidewm: %s binds no key, so config.h's keys work with it\n",
+				settings_path);
 }
 
 /* The reload command: rereads the file. On errors, keeps what was loaded,
@@ -2373,6 +2377,26 @@ settings_run_binding(uint32_t mods, xkb_keysym_t sym, int release)
 	settings_run(b->command, what, NULL);
 	focus_asked--;
 	return 1;
+}
+
+/* Whether the loaded file says what the keys do, by a key's binding at its
+ * top level: then config.h's keys are left out, and the file's are all
+ * there are, as in sway. A file with none, as when every bindsym line
+ * failed or sits in an include that's gone, keeps config.h's, so there are
+ * always keys to fix it with. In a mode of the file's, its keys are the
+ * mode's, as config.h has none. */
+static int
+settings_keys(void)
+{
+	size_t j;
+	if (!settings)
+		return 0;
+	if (settings_mode)
+		return 1;
+	for (j = 0; j < settings->modes[0].nbindings; j++)
+		if (!settings->modes[0].bindings[j].button)
+			return 1;
+	return 0;
 }
 
 /* Whether the loaded file says what the mouse does, by a floating_modifier

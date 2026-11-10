@@ -13,7 +13,11 @@ The first of these that's given:
 3. `~/.config/tidewm/config`.
 
 Without the file, `config.h`'s keys, buttons and rules work, as in dwl.
-Once a file is loaded, its bindings are all the keys there are, and its
+Once a file that binds a key at its top level is loaded, its bindings are
+all the keys there are. A file that binds none there, as when every `bindsym`
+line failed or they sit in an `include` that's gone, keeps `config.h`'s
+keys, and tidewm says so at startup, so there are always keys to fix it
+with. Its
 `for_window` lines all the rules, and `config.h`'s are left out, so a file
 wanting dwl's defaults says them itself. `config.h`'s buttons, Alt and a
 drag, stay until the file says what the mouse does, by a

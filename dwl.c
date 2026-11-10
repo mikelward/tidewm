@@ -3195,7 +3195,7 @@ int
 runbinding(uint32_t mods, xkb_keysym_t sym)
 {
 	const Key *key;
-	if (settings)
+	if (settings_keys())
 		return settings_run_binding(mods, sym, 0);
 	/* config.h's keys are all off on the lock screen */
 	if (locked || !(key = keybinding(mods, sym)))
