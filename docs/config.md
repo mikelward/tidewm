@@ -219,7 +219,9 @@ bindsym --whole-window Mod4+button2 maximize toggle
 As in sway, the `mode NAME` command makes a mode's bindings the ones in
 force, and `mode default` goes back to the top level, so a mode's own
 keys must include a way out. Modes don't nest, and `default` can't be
-opened. A load, `reload` included, starts at the top level.
+opened. A `mode` line that fails, as with a flag tidewm's doesn't take,
+takes the lines to its `}` with it, so they're never read as the top
+level's. A load, `reload` included, starts at the top level.
 
 ```
 bindsym $mod+r mode "resize"

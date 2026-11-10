@@ -758,6 +758,26 @@ class KeysOnlyInAModeTest(KeysTest):
         self.assertEqual(self.shown(ipc), "keyed")
 
 
+class BadModeAtStartTest(KeysTest):
+    # sway's flag, which tidewm's mode doesn't take
+    CONFIG = ('bindsym Mod1+x workspace keyed\n'
+              'mode --pango_markup "resize" {\n'
+              '    bindsym Mod1+x workspace leaked\n'
+              '    bindsym Mod1+y workspace leaked\n'
+              '} # resize\n'
+              'bindsym Mod1+z workspace after\n')
+
+    def test_a_mode_that_fails_to_open_takes_its_lines_with_it(self):
+        errors = self.connect().request(GET_CONFIG)["errors"]
+        self.assertEqual(errors, [f"{self.wm.config_path}:2: mode needs a name, then {{"])
+        ipc = self.workspaces_ipc()
+        self.alt("y")
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed", "the mode's bindings aren't the top level's")
+        self.alt("z")
+        self.assertEqual(self.shown(ipc), "after", "and the lines after its } are read")
+
+
 class BadNamedLineAtStartTest(KeysTest):
     CONFIG = ("bindsym --name go Mod1+x workspace keyed\n"
               "bindsym --name go Mod1+NoSuchKey workspace other\n")
