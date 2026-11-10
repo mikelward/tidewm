@@ -2128,6 +2128,20 @@ settings_parse(char *text, struct json_object *errors, int partial)
 	ok = settings_parse_text(s, text, &vars, &nvars, 0, errors);
 	keymaps_ok = settings_check_keymaps(s, errors);
 	ok &= keymaps_ok;
+	/* At startup, a keymap XKB can't make costs the file its xkb_ lines,
+	 * every keyboard's, not its keys and the rest: the keyboards type
+	 * in the environment's layout, or XKB's own */
+	if (!keymaps_ok && partial) {
+		size_t j;
+		for (i = 0; i < s->ninputs; i++) {
+			for (j = 0; j < InXkbLast; j++) {
+				free((char *)s->inputs[i].xkb[j]);
+				s->inputs[i].xkb[j] = NULL;
+			}
+			s->inputs[i].xkb_line = 0;
+		}
+		keymaps_ok = 1;
+	}
 	for (i = 0; i < nvars; i++) {
 		free(vars[i].name);
 		free(vars[i].value);
