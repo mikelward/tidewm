@@ -773,13 +773,15 @@ class BadNamedLineAtStartTest(KeysTest):
 class BadKeymapAtStartTest(KeysTest):
     CONFIG = "bindsym Mod1+x workspace keyed\ninput type:keyboard xkb_layout nosuchlayout\n"
 
-    def test_a_keymap_xkb_cant_make_leaves_the_file_out(self):
+    def test_a_keymap_xkb_cant_make_leaves_only_the_layout_out(self):
         config = self.connect().request(GET_CONFIG)
-        self.assertEqual(config["config"], "")
-        self.assertIn("config.h's keys work instead", self.wm.output())
+        self.assertEqual(config["config"], self.CONFIG)
+        self.assertIn(":2: input type:keyboard: XKB can't make a keymap", config["errors"][0])
+        self.assertIn("left out the lines above", self.wm.output())
         ipc = self.workspaces_ipc()
-        self.alt("2")
-        self.assertEqual(self.shown(ipc), "2")
+        # The keyboard still types, in the layout it had, and the file's keys work
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed")
 
 
 class DefaultPlaceTest(KeysTest):
