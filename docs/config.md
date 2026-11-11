@@ -475,6 +475,10 @@ Each error names the file, the line and what's wrong, as
   make would leave the keyboard typing nothing, so then every `xkb_`
   line is left out, and the keyboards type in the environment's layout
   (`XKB_DEFAULT_LAYOUT`), or XKB's own.
+  If it's the environment's names (`XKB_DEFAULT_RULES`, `_MODEL`,
+  `_LAYOUT`, `_VARIANT`, `_OPTIONS`) XKB can't make a keymap of, tidewm
+  says so on stderr, naming them, and starts without them: keyboards
+  have XKB's own layout, `us`, where `config.h` and the file name none.
 - **On `reload`**, the command fails with the first three errors.
 - **Either way**, `GET_CONFIG` lists them all, until a load works.
 
