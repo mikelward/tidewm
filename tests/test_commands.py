@@ -269,3 +269,21 @@ class TwoMonitorOrderTest(TidewmTest):
         self.command(self.connect(), f"[con_id={moved['id']}] move to output HEADLESS-2")
         self.assertEqual([c["id"] for c in self.stack(first, second, moved)],
                          [first["id"], second["id"], moved["id"]])
+
+
+class CursorSizeTest(TidewmTest):
+    """XCURSOR_SIZE, as tidewm passes it on to what it runs."""
+
+    ENV = {"XCURSOR_SIZE": "32"}
+    exec_output = CommandTest.exec_output
+
+    def test_apps_get_the_cursor_size_tidewm_was_given(self):
+        self.assertEqual(self.exec_output("exec printf %s \"$XCURSOR_SIZE\" > {out}"), b"32")
+
+
+class DefaultCursorSizeTest(TidewmTest):
+    ENV = {"XCURSOR_SIZE": "nonsense"}
+    exec_output = CommandTest.exec_output
+
+    def test_without_a_size_apps_get_24(self):
+        self.assertEqual(self.exec_output("exec printf %s \"$XCURSOR_SIZE\" > {out}"), b"24")

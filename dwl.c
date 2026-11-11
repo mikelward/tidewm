@@ -3183,11 +3183,26 @@ run(char *startup_cmd)
 	 * cursor position, and set default cursor image */
 	selmon = xytomon(cursor->x, cursor->y);
 
-	/* TODO hack to get cursor to display in its initial location (100, 100)
-	 * instead of (0, 0) and then jumping. Still may not be fully
-	 * initialized, as the image/coordinates are not transformed for the
-	 * monitor when displayed here */
-	wlr_cursor_warp_closest(cursor, NULL, cursor->x, cursor->y);
+	/* tidewm: the pointer starts in the middle of the leftmost enabled
+	 * output (the top one of those level with it), where focus starts, not
+	 * by its top left corner. mons is newest first, and keeps outputs a
+	 * config disables, so its order says nothing here. */
+	{
+		Monitor *m, *start = NULL;
+		wl_list_for_each(m, &mons, link) {
+			if (!m->wlr_output->enabled)
+				continue;
+			if (!start || m->m.x < start->m.x
+					|| (m->m.x == start->m.x && m->m.y < start->m.y))
+				start = m;
+		}
+		if (start)
+			wlr_cursor_warp_closest(cursor, NULL, start->m.x + start->m.width / 2.0,
+					start->m.y + start->m.height / 2.0);
+		else
+			wlr_cursor_warp_closest(cursor, NULL, cursor->x, cursor->y);
+	}
+	selmon = xytomon(cursor->x, cursor->y);
 	wlr_cursor_set_xcursor(cursor, cursor_mgr, "default");
 
 	/* Run the Wayland event loop. This does not return until you exit the
@@ -3640,8 +3655,21 @@ setup(void)
 	 * Xcursor themes to source cursor images from and makes sure that cursor
 	 * images are available at all scale factors on the screen (necessary for
 	 * HiDPI support). Scaled cursors will be loaded with each output. */
-	cursor_mgr = wlr_xcursor_manager_create(NULL, 24);
-	setenv("XCURSOR_SIZE", "24", 1);
+	/* tidewm: the theme and size XCURSOR_THEME and XCURSOR_SIZE name, as
+	 * clients read them, so the pointer looks the same over both; without
+	 * them, the default theme at 24 */
+	{
+		const char *size_env = getenv("XCURSOR_SIZE");
+		long size = size_env ? strtol(size_env, NULL, 10) : 0;
+		if (size <= 0 || size > 512)
+			size = 24;
+		cursor_mgr = wlr_xcursor_manager_create(getenv("XCURSOR_THEME"), (uint32_t)size);
+		if (!size_env || strtol(size_env, NULL, 10) != size) {
+			char buf[16];
+			snprintf(buf, sizeof(buf), "%ld", size);
+			setenv("XCURSOR_SIZE", buf, 1);
+		}
+	}
 
 	/*
 	 * wlr_cursor *only* displays an image on screen. It does not move around

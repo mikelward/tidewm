@@ -170,6 +170,14 @@ workspace it was launched from: one that opens after you've moved on is
 there, unfocused, and that workspace turns urgent.
 [`docs/config.md`](docs/config.md) says how.
 
+### The pointer
+
+It starts in the middle of the leftmost output, where focus starts, not by
+its top left corner.
+Its theme and size are `XCURSOR_THEME`'s and `XCURSOR_SIZE`'s, as apps
+read them, so it looks the same over windows and the desktop; without
+them, the default theme at 24 pixels, and apps get that size.
+
 ### Focus when a window closes
 
 Closing the window you're in focuses the window under the pointer, as

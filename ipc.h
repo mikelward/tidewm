@@ -1633,8 +1633,8 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 	case IpcGetInputs:
 		return ipc_send_json(cl, type, settings_json_inputs());
 	case IpcGetSeats: {
-		/* sway's one seat, with tidewm's own last_input and
-		 * prompt_may_focus */
+		/* sway's one seat, with tidewm's own last_input,
+		 * prompt_may_focus and pointer */
 		struct json_object *list = json_object_new_array(), *s = json_object_new_object();
 		json_object_object_add(s, "name", json_object_new_string(seat->name));
 		json_object_object_add(s, "capabilities", json_object_new_int((int)seat->capabilities));
@@ -1643,6 +1643,12 @@ ipc_handle_message(IpcClient *cl, uint32_t type, char *payload)
 		json_object_object_add(s, "devices", settings_json_inputs());
 		json_object_object_add(s, "last_input", fg_json_last_input());
 		json_object_object_add(s, "prompt_may_focus", json_object_new_boolean(fg_prompt_may_focus()));
+		{
+			struct json_object *p = json_object_new_object();
+			json_object_object_add(p, "x", json_object_new_int((int)cursor->x));
+			json_object_object_add(p, "y", json_object_new_int((int)cursor->y));
+			json_object_object_add(s, "pointer", p);
+		}
 		json_object_array_add(list, s);
 		return ipc_send_json(cl, type, list);
 	}

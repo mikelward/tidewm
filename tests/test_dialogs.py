@@ -412,5 +412,17 @@ class TwoOutputFollowTest(DialogHelpers):
         self.assertCenteredOn(windows[dialog]["rect"], windows[parent]["rect"])
 
 
+
+class PointerStartTest(TidewmTest):
+    OUTPUTS = 2
+
+    def test_the_pointer_starts_in_the_middle_of_the_left_output(self):
+        outputs = sorted(self.connect().request(GET_OUTPUTS), key=lambda o: o["rect"]["x"])
+        left = outputs[0]["rect"]
+        seat, = self.connect().request(GET_SEATS)
+        self.assertEqual(seat["pointer"], {"x": left["x"] + left["width"] // 2,
+                                           "y": left["y"] + left["height"] // 2})
+
+
 if __name__ == "__main__":
     unittest.main()
