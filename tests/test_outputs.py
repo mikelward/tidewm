@@ -337,6 +337,56 @@ class DisabledAtStartTest(OutputsTest):
                          (True, False))
 
 
+class OnlyOutputDisabledAtStartTest(OutputsTest):
+    """A file saved while another screen was plugged in disables the only
+    one there is now."""
+    CONFIG = "output HEADLESS-1 disable\n"
+
+    def test_the_only_output_starts_on_and_says_why(self):
+        self.assertTrue(self.outputs()["HEADLESS-1"]["active"])
+        why = "output HEADLESS-1 is on, though its line disables it: no other output is on"
+        self.assertEqual(self.connect().request(GET_CONFIG)["errors"],
+                         [f"{self.wm.config_path}: {why}"])
+        self.assertIn(f"tidewm: {why}", self.wm.output())
+
+    def test_a_command_still_turns_the_only_output_off_and_on(self):
+        # As a lid's bindswitch does: that's no line of the file's
+        self.command(self.connect(), "output HEADLESS-1 disable")
+        self.assertFalse(self.outputs()["HEADLESS-1"]["active"])
+        self.command(self.connect(), "output HEADLESS-1 enable")
+        self.assertTrue(self.outputs()["HEADLESS-1"]["active"])
+
+    def test_a_reload_keeps_it_on_and_fails(self):
+        self.assertIn("output HEADLESS-1 is on, though its line disables it",
+                      self.fails("reload")["error"])
+        self.assertTrue(self.outputs()["HEADLESS-1"]["active"])
+
+
+class EveryOutputDisabledAtStartTest(OutputsTest):
+    OUTPUTS = 2
+    CONFIG = "output * disable\n"
+
+    def test_one_output_starts_on_and_says_why(self):
+        on = [name for name, o in self.outputs().items() if o["active"]]
+        self.assertEqual(len(on), 1, on)
+        errors = self.connect().request(GET_CONFIG)["errors"]
+        self.assertEqual(errors, [f"{self.wm.config_path}: output {on[0]} is on, though its "
+                                  "line disables it: no other output is on"])
+
+
+class EveryOutputDisabledOnReloadTest(OutputsTest):
+    OUTPUTS = 2
+    CONFIG = "output * scale 1\n"
+
+    def test_a_reload_that_disables_every_output_keeps_one_on(self):
+        self.command(self.connect(), "output HEADLESS-2 disable")
+        self.wm.write_config("output * disable\n")
+        self.assertIn("output HEADLESS-1 is on, though its line disables it",
+                      self.fails("reload")["error"])
+        self.assertEqual({name: o["active"] for name, o in self.outputs().items()},
+                         {"HEADLESS-1": True, "HEADLESS-2": False})
+
+
 class RefusedAtStartTest(OutputsTest):
     CONFIG = "output HEADLESS-1 mode 600000000x1\n"
 

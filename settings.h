@@ -254,6 +254,7 @@ static Settings *settings; /* NULL: config.h's keys */
 static struct json_object *settings_errors; /* the last load's, as strings */
 static size_t settings_mode; /* the current mode, in settings->modes */
 static int settings_apply_outputs(const OutputConfig *only);
+static int settings_enable_any_mode(struct wlr_output *wlr_output);
 static int settings_apply_inputs(const InputConfig *only);
 static void fg_arm(void);
 static void dim_update(void);
@@ -2876,6 +2877,81 @@ settings_monitor_power(Monitor *m, int on)
 	return ok;
 }
 
+/* Whether m's output is on: enabled, or asleep, as an idle daemon's power
+ * management leaves it, which it wakes from. */
+static int
+settings_output_on(const Monitor *m)
+{
+	return m->wlr_output->enabled || m->asleep;
+}
+
+/* Says, on stderr and in settings_errors, that m's output is on though
+ * its line disables it. */
+static void
+settings_output_kept(const Monitor *m)
+{
+	fprintf(stderr, "tidewm: output %s is on, though its line disables it: "
+			"no other output is on\n", m->wlr_output->name);
+	settings_error(settings_errors, 0, "output %s is on, though its line disables it: "
+			"no other output is on", m->wlr_output->name);
+}
+
+/* Set once the backend has listed the outputs there are at startup:
+ * until then, an output its line disables may be the first of several. */
+static int settings_outputs_started;
+
+/* Turns an output on if none is, once the file's lines are applied, as
+ * when the only screen there is has a line that disables it, from a file
+ * saved while another was plugged in: only, one just plugged in, or else
+ * the first connected that takes it, in the mode it would have enabled,
+ * or else the first of its own it takes. A session that starts dark
+ * can't be fixed from inside it. A command may still turn every output
+ * off, as a lid's bindswitch does: that's you, now, and it's undone the
+ * same way. */
+static void
+settings_keep_output_on(Monitor *only)
+{
+	struct wlr_output_state state;
+	OutputConfig oc;
+	Monitor *m;
+	int ok = 0;
+	if (!settings_outputs_started)
+		return;
+	wl_list_for_each(m, &mons, link)
+		if (settings_output_on(m))
+			return;
+	memset(&oc, 0, sizeof(oc));
+	oc.enabled = 1;
+	oc.power = -1;
+	wl_list_for_each_reverse(m, &mons, link) {
+		if (only && m != only)
+			continue;
+		wlr_output_state_init(&state);
+		settings_output_state(m, &oc, &state);
+		ok = wlr_output_commit_state(m->wlr_output, &state);
+		wlr_output_state_finish(&state);
+		if (ok || settings_enable_any_mode(m->wlr_output)) {
+			ok = 1;
+			break;
+		}
+	}
+	if (!ok)
+		return;
+	settings_output_set(m, &oc, 0);
+	settings_output_place(m);
+	settings_output_kept(m);
+	updatemons(NULL, NULL);
+	ipc_event_output();
+}
+
+/* Once the backend has started, and listed its outputs. */
+static void
+settings_outputs_ready(void)
+{
+	settings_outputs_started = 1;
+	settings_keep_output_on(NULL);
+}
+
 /* Sets only on the outputs it names, as the output command does. Without
  * it, as on reload, each output starts again from its defaults and its
  * preferred mode, then takes the file's lines, so nothing the command set
@@ -2883,14 +2959,30 @@ settings_monitor_power(Monitor *m, int on)
  * it was. The command's power or dpms then turns an output that's on, or
  * asleep, off or on; the file's are taken but left, as an output starts
  * on. Returns how many outputs took their settings, or -1 if any refused
- * them, which it says on stderr, and, on reload, in settings_errors. */
+ * them, which it says on stderr, and, on reload, in settings_errors.
+ * The file's lines never leave every output off: on reload, when they
+ * would, one output stays on, one that's on now if any is, which counts
+ * as refusing them. A command may. */
 static int
 settings_apply_outputs(const OutputConfig *only)
 {
 	struct wlr_output_state state;
 	OutputConfig oc, file;
-	Monitor *m;
-	int set = 0, refused = 0;
+	Monitor *m, *keep = NULL;
+	int set = 0, refused = 0, enables = 0;
+	wl_list_for_each(m, &mons, link) {
+		if (only)
+			break;
+		settings_output_defaults(m, &oc);
+		if (settings_output_config(m->wlr_output, &file))
+			settings_merge_output(&oc, &file);
+		if (oc.enabled)
+			enables = 1;
+		else if (!keep || settings_output_on(m) >= settings_output_on(keep))
+			keep = m;
+	}
+	if (enables)
+		keep = NULL;
 	wl_list_for_each(m, &mons, link) {
 		if (only) {
 			if (!settings_output_named(only->name, m->wlr_output))
@@ -2901,6 +2993,11 @@ settings_apply_outputs(const OutputConfig *only)
 			if (settings_output_config(m->wlr_output, &file))
 				settings_merge_output(&oc, &file);
 			settings_preferred_mode(m->wlr_output, &oc);
+			if (m == keep) {
+				oc.enabled = 1;
+				settings_output_kept(m);
+				refused = 1;
+			}
 		}
 		wlr_output_state_init(&state);
 		/* Powered on again, as power on wakes it, it takes the rest too */
@@ -2925,6 +3022,9 @@ settings_apply_outputs(const OutputConfig *only)
 		}
 		wlr_output_state_finish(&state);
 	}
+	/* One the file enables may have refused, leaving none on */
+	if (!only)
+		settings_keep_output_on(NULL);
 	if (set) {
 		updatemons(NULL, NULL);
 		ipc_event_output();

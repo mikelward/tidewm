@@ -1479,6 +1479,7 @@ createmon(struct wl_listener *listener, void *data)
 	else
 		settings_output_place(m);
 	ipc_event_output();
+	settings_keep_output_on(m);
 }
 
 void
@@ -3141,6 +3142,7 @@ run(char *startup_cmd)
 	 * master, etc */
 	if (!wlr_backend_start(backend))
 		die("startup: backend_start");
+	settings_outputs_ready();
 
 	/* Now that the socket exists and the backend is started, run the startup command */
 	if (startup_cmd) {
