@@ -286,7 +286,7 @@ first, for what the file doesn't say, such as the layout. As in sway, an
 | `position X Y` | Where it is in the layout, in logical pixels; `pos` and `X,Y` work too |
 | `position auto-right`, `auto-left`, `auto-up`, `auto-down` | Beside the others, on that side, as Hyprland's monitor rules place it; `auto` is `auto-right`, where an output without a position goes |
 | `transform T` | `normal`, `90`, `180`, `270`, `flipped`, or `flipped-` one of those |
-| `enable`, `disable` | Turns it on or off; a disabled output's windows move to the focused one |
+| `enable`, `disable` | Turns it on or off; a disabled output's windows move to the focused one. The file's lines never leave every output off, as below |
 | `adaptive_sync on\|off` | Variable refresh rate, off without the line. An output that can't have it stays off, as in sway |
 | `power on\|off` | In the `output` command, as sway's, turns an output that's on off, keeping its windows and place, as an idle daemon does, or on again. An output line takes it but leaves it, so every output starts on. `dpms` is its old name |
 | `scale_filter linear\|nearest\|smart` | Taken, as sway's, but left: tidewm always scales linearly, as `GET_OUTPUTS` says |
@@ -302,7 +302,15 @@ command takes the same settings, and sets them at once, until a reload; it
 fails for a name no output has. An output enabled again keeps the mode
 it had and goes back to the position it was last given; a mode or
 position given while it's disabled, by the command or its line, is used
-once it's enabled. Enabling or disabling an output wakes it from the power
+once it's enabled. The file's lines never leave every output off, at
+startup or on `reload`, since a session that starts dark can't be fixed
+from inside it. If they disable every output there is, as a file saved
+while docked does for a laptop started on its own, one stays on: the
+first connected at startup, or one that's on at a reload, which fails.
+stderr and `GET_CONFIG`'s `errors` name it. A command can turn every
+output off: the `output` command's `disable`, from a key, a `bindswitch`
+or the socket, and an output management client's request, as
+`wlr-randr`'s, do as they're asked, whatever else is on. Enabling or disabling an output wakes it from the power
 saving an idle daemon may have put it in. The command's `output NAME power
 on|off|toggle`, alone, puts it in that power saving, or takes it out, as
 sway's does ([`ipc.md`](ipc.md)), and fails for an output that's disabled.
