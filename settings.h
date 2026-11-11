@@ -1689,6 +1689,9 @@ settings_add_mode(Settings *s, const char *name)
 }
 
 static struct xkb_context *settings_xkb;
+/* Every XKB context's flags: without the environment's names, once XKB
+ * couldn't make a keymap of them */
+static enum xkb_context_flags settings_xkb_flags = XKB_CONTEXT_NO_FLAGS;
 
 /* config.h's XKB names, which an input line's go over */
 static void
@@ -1712,11 +1715,46 @@ settings_keymap(const char *const names[InXkbLast], int quiet)
 		.options = names[InXkbOptions],
 	};
 	struct xkb_keymap *keymap;
-	if (!settings_xkb && !(settings_xkb = xkb_context_new(XKB_CONTEXT_NO_FLAGS)))
+	if (!settings_xkb && !(settings_xkb = xkb_context_new(settings_xkb_flags)))
 		return NULL;
 	xkb_context_set_log_level(settings_xkb, quiet ? XKB_LOG_LEVEL_CRITICAL : XKB_LOG_LEVEL_ERROR);
 	keymap = xkb_keymap_new_from_names(settings_xkb, &rn, XKB_KEYMAP_COMPILE_NO_FLAGS);
 	xkb_context_set_log_level(settings_xkb, XKB_LOG_LEVEL_ERROR);
+	return keymap;
+}
+
+/* config.h's keymap without the environment's XKB_DEFAULT_ names, for
+ * when XKB can't make one with them, as a layout that isn't there: dying
+ * then, before the config file is read, would leave no session to fix
+ * it from. Says which they were, and from then on every keyboard's
+ * keymap leaves them out, so what config.h and the file don't name is
+ * XKB's own, the us layout. NULL if that's how it was made already, or
+ * XKB can't make that either. */
+static struct xkb_keymap *
+settings_keymap_without_environment(void)
+{
+	static const char *const vars[] = {"XKB_DEFAULT_RULES", "XKB_DEFAULT_MODEL",
+		"XKB_DEFAULT_LAYOUT", "XKB_DEFAULT_VARIANT", "XKB_DEFAULT_OPTIONS"};
+	struct xkb_context *context;
+	struct xkb_keymap *keymap;
+	const char *value;
+	size_t i;
+	if (settings_xkb_flags & XKB_CONTEXT_NO_ENVIRONMENT_NAMES)
+		return NULL;
+	fprintf(stderr, "tidewm: XKB can't make a keymap of the environment's");
+	for (i = 0; i < LENGTH(vars); i++)
+		if ((value = getenv(vars[i])))
+			fprintf(stderr, " %s=%s", vars[i], value);
+	fprintf(stderr, "; keyboards have XKB's own layout, us, where config.h "
+			"and the config file name none\n");
+	settings_xkb_flags |= XKB_CONTEXT_NO_ENVIRONMENT_NAMES;
+	if (settings_xkb)
+		xkb_context_unref(settings_xkb);
+	settings_xkb = NULL;
+	if (!(context = xkb_context_new(settings_xkb_flags)))
+		return NULL;
+	keymap = xkb_keymap_new_from_names(context, &xkb_rules, XKB_KEYMAP_COMPILE_NO_FLAGS);
+	xkb_context_unref(context);
 	return keymap;
 }
 

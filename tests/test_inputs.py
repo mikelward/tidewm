@@ -165,7 +165,8 @@ class NestedTest(InputTest):
         self.parent = parent = Tidewm()
         self.addCleanup(parent.stop)
         parent.press("-k", "Shift_L")
-        self.wm = Tidewm(self.OUTPUTS, self.CONFIG, self.CONFIG_ARG, parent=parent)
+        self.wm = Tidewm(self.OUTPUTS, self.CONFIG, self.CONFIG_ARG, parent=parent,
+                         env=self.ENV)
         self.addCleanup(self.wm.stop)
 
     def keyboard(self):
@@ -178,6 +179,16 @@ class NestedTest(InputTest):
                 return device
         return ipc.next_event(EVENT_INPUT, lambda e: e["change"] == "added"
                               and e["input"]["type"] == "keyboard")["input"]
+
+
+class BadEnvironmentLayoutTest(NestedTest):
+    """The environment names a layout XKB hasn't got."""
+    ENV = {"XKB_DEFAULT_LAYOUT": "nosuchlayout"}
+
+    def test_a_keyboard_has_xkbs_own_layout(self):
+        self.assertEqual(self.keyboard()["xkb_layout_names"], ["English (US)"])
+        self.assertIn("tidewm: XKB can't make a keymap of the environment's "
+                      "XKB_DEFAULT_LAYOUT=nosuchlayout;", self.wm.output())
 
 
 class KeyboardTest(NestedTest):

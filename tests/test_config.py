@@ -804,6 +804,17 @@ class BadKeymapAtStartTest(KeysTest):
         self.assertEqual(self.shown(ipc), "keyed")
 
 
+class BadEnvironmentKeymapTest(KeysTest):
+    ENV = {"XKB_DEFAULT_LAYOUT": "nosuchlayout"}
+
+    def test_tidewm_starts_with_xkbs_own_keymap_and_says_why(self):
+        self.assertIn("tidewm: XKB can't make a keymap of the environment's "
+                      "XKB_DEFAULT_LAYOUT=nosuchlayout;", self.wm.output())
+        ipc = self.workspaces_ipc()
+        self.alt("2")
+        self.assertEqual(self.shown(ipc), "2")
+
+
 class DefaultPlaceTest(KeysTest):
     CONFIG = "bindsym Mod1+x workspace found\n"
     CONFIG_ARG = False
