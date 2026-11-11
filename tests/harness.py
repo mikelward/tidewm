@@ -114,10 +114,12 @@ class Tidewm:
     would be, rather than a client's virtual one. With on_x11 too, it runs
     on wlroots' X11 backend, as a client of the parent's Xwayland, whose
     outputs have a make and a model, as a headless one hasn't. env is
-    more of its environment, over the rest."""
+    more of its environment, over the rest. prepare is
+    called with the runtime directory before tidewm starts, to put there
+    what tidewm should find."""
 
     def __init__(self, outputs=1, config=None, config_arg=True, parent=None, on_x11=False,
-                 env=None):
+                 env=None, prepare=None):
         more_env = env or {}
         self.dir = tempfile.TemporaryDirectory(prefix="tidewm-test-")
         os.chmod(self.dir.name, 0o700)
@@ -151,6 +153,8 @@ class Tidewm:
         # in its environment; writing them to the FIFO says it's ready.
         startup = (f'printf "%s %s %s %s\\n" "$SWAYSOCK" "$WAYLAND_DISPLAY" "${{DISPLAY:--}}"'
                    f' "${{I3SOCK:--}}" > {shlex.quote(ready)}')
+        if prepare:
+            prepare(self.dir.name)
         self.log = open(os.path.join(self.dir.name, "tidewm.log"), "w+")
         fifo = os.open(ready, os.O_RDONLY | os.O_NONBLOCK)
         self.proc = subprocess.Popen([TIDEWM, *args, "-s", startup], env=env,
