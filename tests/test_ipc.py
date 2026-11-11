@@ -1,12 +1,14 @@
 """tidewm's IPC: the socket, its requests and its window events."""
 
 import os
+import socket
 import struct
+import subprocess
 import unittest
 
 from harness import (EVENT_SHUTDOWN, EVENT_TICK, EVENT_WINDOW, GET_OUTPUTS,
                      GET_TREE, GET_VERSION, RUN_COMMAND, SEND_TICK, SUBSCRIBE,
-                     TIMEOUT, TidewmTest)
+                     TIMEOUT, Tidewm, TidewmTest)
 
 
 class IpcTest(TidewmTest):
@@ -173,6 +175,38 @@ class StaleSocketNamesTest(TidewmTest):
         self.assertEqual(os.path.dirname(self.wm.socket), self.wm.dir.name)
         self.assertEqual(self.wm.i3_socket, self.wm.socket)
         self.assertEqual(self.connect().request(GET_VERSION)["variant"], "tidewm")
+
+
+class LeftoverSocketsTest(unittest.TestCase):
+    """Sockets in the runtime directory from before tidewm started: one a
+    tidewm that died left is removed, and nothing else is."""
+
+    def leave(self, directory):
+        # A process that has exited and been waited for: its pid is no one's
+        gone = subprocess.Popen(["true"])
+        gone.wait(TIMEOUT)
+        uid = os.getuid()
+        self.stale = f"tidewm-ipc.{uid}.{gone.pid}.sock"
+        self.kept = [
+            f"tidewm-ipc.{uid}.{os.getpid()}.sock",  # its process is running
+            f"tidewm-ipc.{uid + 1}.{gone.pid}.sock",  # another user's
+            f"tidewm-ipc.{uid}.{gone.pid}.sock.old",
+            f"tidewm-ipc.{uid}.0{gone.pid}.sock",
+            f"sway-ipc.{uid}.{gone.pid}.sock",
+        ]
+        for name in [self.stale] + self.kept:
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(os.path.join(directory, name))
+            listener.close()
+
+    def test_a_dead_tidewms_socket_is_removed_and_the_rest_stay(self):
+        wm = Tidewm(prepare=self.leave)
+        self.addCleanup(wm.stop)
+        left = set(os.listdir(wm.dir.name))
+        self.assertNotIn(self.stale, left)
+        self.assertLessEqual(set(self.kept), left)
+        self.assertIn(os.path.basename(wm.socket), left)
+        self.assertIn(f"removed {os.path.join(wm.dir.name, self.stale)}", wm.output())
 
 
 if __name__ == "__main__":

@@ -6,11 +6,14 @@
  * file, like client.h, so it reads dwl's state directly.
  */
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <json.h>
+#include <signal.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 
 #define IPC_MAGIC "i3-ipc"
@@ -1787,6 +1790,51 @@ ipc_accept(int fd, uint32_t mask, void *data)
 	return 0;
 }
 
+/* Removes the sockets in dir that tidewm instances of this user's left
+ * when they died, as one that crashes does, which never gets to
+ * ipc_finish(): each named exactly as ipc_init() names one, for a process
+ * that's gone. A running tidewm's stays, as two may share a user, and so
+ * does anything else. So a client that looks for tidewm-ipc.*.sock finds
+ * only live ones. */
+static void
+ipc_remove_stale(const char *dir)
+{
+	char name[64], path[sizeof(ipc_path)];
+	struct dirent *entry;
+	struct stat st;
+	unsigned int uid;
+	int pid, n;
+	DIR *d = opendir(dir);
+
+	if (!d) {
+		fprintf(stderr, "ipc: can't look in %s for old sockets: %s\n", dir, strerror(errno));
+		return;
+	}
+	while ((entry = readdir(d))) {
+		if (sscanf(entry->d_name, "tidewm-ipc.%u.%d.sock", &uid, &pid) != 2
+				|| uid != (unsigned)getuid() || pid <= 0 || pid == (int)getpid())
+			continue;
+		/* The whole name, and no other way of writing the numbers */
+		snprintf(name, sizeof(name), "tidewm-ipc.%u.%d.sock", uid, pid);
+		if (strcmp(name, entry->d_name))
+			continue;
+		/* Gone only if there's no such process: one that's another
+		 * user's now, say, is left alone */
+		if (kill(pid, 0) == 0 || errno != ESRCH)
+			continue;
+		n = snprintf(path, sizeof(path), "%s/%s", dir, name);
+		if (n < 0 || (size_t)n >= sizeof(path) || lstat(path, &st) < 0
+				|| !S_ISSOCK(st.st_mode))
+			continue;
+		if (unlink(path) < 0)
+			fprintf(stderr, "ipc: can't remove the old socket %s: %s\n",
+					path, strerror(errno));
+		else
+			fprintf(stderr, "ipc: removed %s, left by a tidewm that's gone\n", path);
+	}
+	closedir(d);
+}
+
 /* Opens the socket and names it in SWAYSOCK and I3SOCK, as sway does, for
  * the startup command and everything it starts: some clients, as
  * Quickshell, look at I3SOCK first. Values inherited from an earlier
@@ -1813,6 +1861,7 @@ ipc_init(void)
 		ipc_path[0] = '\0';
 		return;
 	}
+	ipc_remove_stale(dir);
 	if ((ipc_socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0
 			|| ipc_set_fd_flags(ipc_socket) < 0) {
 		fprintf(stderr, "ipc: socket: %s\n", strerror(errno));

@@ -14,7 +14,10 @@ it looks at first. Values inherited from an earlier sway, i3 or tidewm
 session are replaced, or unset if there's no socket. Without
 `XDG_RUNTIME_DIR` there is no socket: tidewm says so on stderr and runs
 without one. The socket is
-removed when tidewm exits.
+removed when tidewm exits. One that a tidewm left by dying, as in a
+crash, is removed by the next tidewm the same user starts with that
+`XDG_RUNTIME_DIR`, so `tidewm-ipc.*.sock` matches only running ones; a
+running tidewm's is left alone.
 
 ## Workspaces
 
