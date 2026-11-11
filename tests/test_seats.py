@@ -78,8 +78,8 @@ class SeatTest(SeatHelpers):
         self.assertEqual(self.last_input(), {"type": "key", "window": window})
 
     def test_a_click_went_to_the_window_under_the_pointer(self):
-        window = self.open("test.app")  # the only window, under the pointer
-        self.pointer("click")
+        window = self.open("test.app")
+        self.pointer(*self.over(window), "click")
         self.assertEqual(self.last_input(), {"type": "button", "window": window})
 
     def test_a_second_button_went_where_the_held_one_did(self):
