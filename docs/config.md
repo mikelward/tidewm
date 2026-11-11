@@ -13,6 +13,8 @@ The first of these that's given:
 3. `~/.config/tidewm/config`.
 
 Without the file, `config.h`'s keys, buttons and rules work, as in dwl.
+A file `-c` names that isn't there at startup is an error, on stderr and
+in `GET_CONFIG`'s `errors`, and tidewm starts the same way.
 Once a file that binds a key at its top level is loaded, its bindings are
 all the keys there are. A file that binds none there, as when every `bindsym`
 line failed or they sit in an `include` that's gone, keeps `config.h`'s

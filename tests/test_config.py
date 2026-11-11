@@ -827,10 +827,30 @@ class DefaultPlaceTest(KeysTest):
         self.assertEqual(self.shown(ipc), "found")
 
 
+class MissingConfigTest(KeysTest):
+    """-c names a file that isn't there."""
+    CONFIG_PATH = "/nonexistent/tidewm/config"
+
+    def test_tidewm_says_the_file_is_missing_and_starts_with_config_hs_keys(self):
+        config = self.connect().request(GET_CONFIG)
+        why = f"{self.CONFIG_PATH}: there's no such file"
+        self.assertEqual((config["config"], config["path"], config["errors"]),
+                         ("", self.CONFIG_PATH, [why]))
+        output = self.wm.output()
+        self.assertIn(f"tidewm: {why}\n", output)
+        self.assertIn(f"tidewm: not using {self.CONFIG_PATH}: config.h's keys work instead",
+                      output)
+        self.assertNotIn("binds no key", output)
+        ipc = self.workspaces_ipc()
+        self.alt("2")
+        self.assertEqual(self.shown(ipc), "2")
+
+
 class NoConfigTest(KeysTest):
     def test_without_a_file_config_h_keys_work(self):
         config = self.connect().request(GET_CONFIG)
         self.assertEqual((config["config"], config["errors"]), ("", []))
+        self.assertNotIn("binds no key", self.wm.output())
         self.assertEqual(self.connect().request(GET_VERSION)["loaded_config_file_name"], "")
         ipc = self.workspaces_ipc()
         self.alt("2")
