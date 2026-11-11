@@ -2794,8 +2794,10 @@ settings_output_state(Monitor *m, const OutputConfig *oc, struct wlr_output_stat
 static void
 settings_output_set(Monitor *m, const OutputConfig *oc, int reset)
 {
-	if (oc->enabled >= 0)
+	if (oc->enabled >= 0) {
 		m->asleep = 0;
+		m->file_off = reset && !oc->enabled;
+	}
 	if (m->wlr_output->enabled) {
 		m->want_mode = 0;
 	} else if (oc->has_mode || reset) {
@@ -2950,7 +2952,8 @@ static int settings_outputs_started;
  * or else the first of its own it takes. A session that starts dark
  * can't be fixed from inside it. A command may still turn every output
  * off, as a lid's bindswitch does: that's you, now, and it's undone the
- * same way. */
+ * same way. settings_output_gone() does the same when the last output
+ * that's on is unplugged. */
 static void
 settings_keep_output_on(Monitor *only)
 {
@@ -2993,6 +2996,34 @@ settings_outputs_ready(void)
 {
 	settings_outputs_started = 1;
 	settings_keep_output_on(NULL);
+}
+
+static struct wl_event_source *settings_gone_source;
+
+/* Turns an output on if none is and the file's line is why one is off,
+ * the first connected such: one a command turned off since, as a lid's
+ * bindswitch does, stays off, and so does one that's asleep. */
+static void
+settings_keep_output_on_unplug(void *data)
+{
+	Monitor *m;
+	settings_gone_source = NULL;
+	wl_list_for_each_reverse(m, &mons, link)
+		if (m->file_off && !settings_output_on(m))
+			settings_keep_output_on(m);
+}
+
+/* An output has gone, as one unplugged. If that leaves none on, one the
+ * file's line disabled comes on, as at startup, from a file saved while
+ * the other was plugged in: once the backend is done with the one that
+ * went, and never while tidewm exits, as settings_finish() sees to. */
+static void
+settings_output_gone(void)
+{
+	if (!settings_outputs_started || settings_gone_source)
+		return;
+	settings_gone_source = wl_event_loop_add_idle(event_loop,
+			settings_keep_output_on_unplug, NULL);
 }
 
 /* Sets only on the outputs it names, as the output command does. Without
@@ -4029,6 +4060,11 @@ settings_finish(void)
 	if (settings_release_source)
 		wl_event_source_remove(settings_release_source);
 	settings_release_source = NULL;
+	/* The outputs go next, each in turn: none is to come on for that */
+	if (settings_gone_source)
+		wl_event_source_remove(settings_gone_source);
+	settings_gone_source = NULL;
+	settings_outputs_started = 0;
 	wl_list_for_each_safe(in, itmp, &settings_inputs, link) {
 		wl_list_remove(&in->destroy.link);
 		wl_list_remove(&in->link);
