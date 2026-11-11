@@ -5,8 +5,8 @@ import os
 import subprocess
 import unittest
 
-from harness import (EVENT_OUTPUT, EVENT_TICK, GET_CONFIG, GET_OUTPUTS, GET_TREE, ROOT,
-                     RUN_COMMAND, SEND_TICK, TIMEOUT, Tidewm, TidewmTest, power, randr)
+from harness import (EVENT_OUTPUT, EVENT_TICK, EVENT_WINDOW, GET_CONFIG, GET_OUTPUTS, GET_TREE,
+                     ROOT, RUN_COMMAND, SEND_TICK, TIMEOUT, Tidewm, TidewmTest, power, randr)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
 
@@ -385,6 +385,69 @@ class EveryOutputDisabledOnReloadTest(OutputsTest):
                       self.fails("reload")["error"])
         self.assertEqual({name: o["active"] for name, o in self.outputs().items()},
                          {"HEADLESS-1": True, "HEADLESS-2": False})
+
+
+class UnpluggedTest(OutputsTest):
+    """tidewm nested in another, where each of its outputs is a window of
+    the parent's, called after it: closing WL-2's unplugs it, as the
+    headless backend's outputs can't be. WL-1 is the laptop's own screen,
+    WL-2 the one it was docked to."""
+    CONFIG = "output * scale 1\n"
+
+    def setUp(self):
+        self.parent = parent = Tidewm()
+        self.addCleanup(parent.stop)
+        windows = parent.ipc()
+        self.addCleanup(windows.close)
+        windows.subscribe("window")
+        self.wm = Tidewm(2, self.CONFIG, parent=parent)
+        self.addCleanup(self.wm.stop)
+        self.docked = windows.next_event(
+            EVENT_WINDOW, lambda e: "WL-2" in (e.get("container", {}).get("name") or ""))["container"]
+
+    def unplug(self):
+        """Closes WL-2's window, returning once it's gone."""
+        ipc = self.connect()
+        ipc.subscribe("output")
+        parent = self.parent.ipc()
+        self.addCleanup(parent.close)
+        self.assertEqual(parent.request(RUN_COMMAND, f"[con_id={self.docked['id']}] kill"),
+                         [{"success": True}])
+        ipc.next_event(EVENT_OUTPUT)
+
+    def active(self):
+        return {name: o["active"] for name, o in self.outputs().items()}
+
+
+class DisabledByItsLineThenUnpluggedTest(UnpluggedTest):
+    """A file saved while docked disables the laptop's own screen; then
+    the other is unplugged."""
+    CONFIG = "output WL-1 disable\n"
+
+    def test_the_output_its_line_disabled_comes_on_and_says_why(self):
+        self.assertEqual(self.active(), {"WL-1": False, "WL-2": True})
+        self.assertEqual(self.connect().request(GET_CONFIG)["errors"], [])
+        self.unplug()
+        self.assertEqual(self.active(), {"WL-1": True})
+        why = "output WL-1 is on, though its line disables it: no other output is on"
+        self.assertEqual(self.connect().request(GET_CONFIG)["errors"],
+                         [f"{self.wm.config_path}: {why}"])
+        self.assertIn(f"tidewm: {why}", self.wm.output())
+
+    def test_a_command_disabling_it_again_keeps_it_off(self):
+        # As a lid's bindswitch does once it's closed, while its line
+        # already had it off: it's no longer its line that has it off
+        self.command(self.connect(), "output WL-1 disable")
+        self.unplug()
+        self.assertEqual(self.active(), {"WL-1": False})
+
+
+class DisabledByACommandThenUnpluggedTest(UnpluggedTest):
+    def test_an_output_a_command_disabled_stays_off(self):
+        self.command(self.connect(), "output WL-1 disable")
+        self.unplug()
+        self.assertEqual(self.active(), {"WL-1": False})
+        self.assertEqual(self.connect().request(GET_CONFIG)["errors"], [])
 
 
 class RefusedAtStartTest(OutputsTest):

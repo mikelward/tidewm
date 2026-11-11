@@ -305,11 +305,15 @@ fails for a name no output has. An output enabled again keeps the mode
 it had and goes back to the position it was last given; a mode or
 position given while it's disabled, by the command or its line, is used
 once it's enabled. The file's lines never leave every output off, at
-startup or on `reload`, since a session that starts dark can't be fixed
-from inside it. If they disable every output there is, as a file saved
-while docked does for a laptop started on its own, one stays on: the
-first connected at startup, or one that's on at a reload, which fails.
-stderr and `GET_CONFIG`'s `errors` name it. A command can turn every
+startup, on `reload` or when an output is unplugged, since a session
+that's dark can't be fixed from inside it. If they disable every output
+there is, as a file saved while docked does for a laptop started on its
+own, one stays on: the first connected at startup, or one that's on at a
+reload, which fails. If the last output that's on is unplugged, the first
+connected of those the file's line disabled comes on; one a command
+disabled since, as a lid's `bindswitch` does, stays off, and so does one
+in power saving. It stays on when the other is plugged in again, until a
+`reload`. stderr and `GET_CONFIG`'s `errors` name it. A command can turn every
 output off: the `output` command's `disable`, from a key, a `bindswitch`
 or the socket, and an output management client's request, as
 `wlr-randr`'s, do as they're asked, whatever else is on. Enabling or disabling an output wakes it from the power

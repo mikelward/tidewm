@@ -276,6 +276,7 @@ struct Monitor {
 	unsigned long ipc_id; /* the IPC's output id, set on first use */
 	int want_place, want_x, want_y; /* where it goes in the layout: settings.h's Place */
 	int head_moved; /* an output management request moves it */
+	int file_off; /* off by its line in the config file, not a command since */
 	int want_mode, want_width, want_height, want_refresh, want_custom; /* its mode once enabled, if given while off */
 	int want_has_adaptive_sync, want_adaptive_sync; /* its adaptive sync once on, if given while off */
 	LayoutMode modes[16]; /* each layout's, but the current one's */
@@ -1068,6 +1069,7 @@ cleanupmon(struct wl_listener *listener, void *data)
 	closemon(m);
 	wlr_scene_node_destroy(&m->fullscreen_bg->node);
 	free(m);
+	settings_output_gone();
 	ipc_event_output();
 }
 
@@ -2905,6 +2907,9 @@ outputmgrapplyortest(struct wlr_output_configuration_v1 *config, int test)
 		/* Ensure displays previously disabled by wlr-output-power-management-v1
 		 * are properly handled*/
 		m->asleep = 0;
+		/* On, it's the client's; left off, it's still its line's */
+		if (wlr_output->enabled)
+			m->file_off = 0;
 
 		/* Don't move monitors if position wouldn't change. This avoids
 		 * wlroots marking the output as manually configured, and keeps
