@@ -113,9 +113,12 @@ class Tidewm:
     a keyboard of its own if the parent's seat has one, as a real keyboard
     would be, rather than a client's virtual one. With on_x11 too, it runs
     on wlroots' X11 backend, as a client of the parent's Xwayland, whose
-    outputs have a make and a model, as a headless one hasn't."""
+    outputs have a make and a model, as a headless one hasn't. env is
+    more of its environment, over the rest."""
 
-    def __init__(self, outputs=1, config=None, config_arg=True, parent=None, on_x11=False):
+    def __init__(self, outputs=1, config=None, config_arg=True, parent=None, on_x11=False,
+                 env=None):
+        more_env = env or {}
         self.dir = tempfile.TemporaryDirectory(prefix="tidewm-test-")
         os.chmod(self.dir.name, 0o700)
         self.clients = []
@@ -134,6 +137,7 @@ class Tidewm:
             env.update(WLR_BACKENDS="wayland", WLR_WL_OUTPUTS=str(outputs),
                        WAYLAND_DISPLAY=os.path.join(parent.dir.name,
                                                     parent.env["WAYLAND_DISPLAY"]))
+        env.update(more_env)
         args = []
         if config_arg:
             self.config_path = os.path.join(self.dir.name, "config")
@@ -145,8 +149,8 @@ class Tidewm:
             self.write_config(config)
         # The startup command runs once tidewm is up, with its sockets named
         # in its environment; writing them to the FIFO says it's ready.
-        startup = (f'printf "%s %s %s\\n" "$SWAYSOCK" "$WAYLAND_DISPLAY" "${{DISPLAY:--}}"'
-                   f' > {shlex.quote(ready)}')
+        startup = (f'printf "%s %s %s %s\\n" "$SWAYSOCK" "$WAYLAND_DISPLAY" "${{DISPLAY:--}}"'
+                   f' "${{I3SOCK:--}}" > {shlex.quote(ready)}')
         self.log = open(os.path.join(self.dir.name, "tidewm.log"), "w+")
         fifo = os.open(ready, os.O_RDONLY | os.O_NONBLOCK)
         self.proc = subprocess.Popen([TIDEWM, *args, "-s", startup], env=env,
@@ -162,7 +166,8 @@ class Tidewm:
                 line += chunk
         finally:
             os.close(fifo)
-        self.socket, display, x11 = line.decode().split()
+        # i3_socket is what I3SOCK names, where i3's clients look first
+        self.socket, display, x11, self.i3_socket = line.decode().split()
         self.env = dict(env, WAYLAND_DISPLAY=display)
         # DISPLAY is set only when tidewm was built with XWayland and
         # found Xwayland.
@@ -258,14 +263,16 @@ class Tidewm:
 
 class TidewmTest(unittest.TestCase):
     """A test with its own tidewm. OUTPUTS says how many outputs it has;
-    CONFIG and CONFIG_ARG, its config file, as Tidewm takes them."""
+    CONFIG and CONFIG_ARG, its config file, and ENV, more of its
+    environment, as Tidewm takes them."""
 
     OUTPUTS = 1
     CONFIG = None
     CONFIG_ARG = True
+    ENV = None
 
     def setUp(self):
-        self.wm = Tidewm(self.OUTPUTS, self.CONFIG, self.CONFIG_ARG)
+        self.wm = Tidewm(self.OUTPUTS, self.CONFIG, self.CONFIG_ARG, env=self.ENV)
         self.addCleanup(self.wm.stop)
 
     def need(self, ok, why):

@@ -2,7 +2,7 @@
  * See LICENSE and NOTICE for copyright and license details.
  *
  * tidewm's IPC: sway's i3-ipc protocol, the subset tide needs, on a socket
- * named by SWAYSOCK. docs/ipc.md says what it answers. dwl.c includes this
+ * named by SWAYSOCK and I3SOCK. docs/ipc.md says what it answers. dwl.c includes this
  * file, like client.h, so it reads dwl's state directly.
  */
 #include <ctype.h>
@@ -1787,9 +1787,12 @@ ipc_accept(int fd, uint32_t mask, void *data)
 	return 0;
 }
 
-/* Opens the socket and names it in SWAYSOCK, for the startup command and
- * everything it starts. Without it tidewm still runs, so a failure is
- * reported, not fatal. */
+/* Opens the socket and names it in SWAYSOCK and I3SOCK, as sway does, for
+ * the startup command and everything it starts: some clients, as
+ * Quickshell, look at I3SOCK first. Values inherited from an earlier
+ * session, which name a socket that's gone, are dropped either way.
+ * Without the socket tidewm still runs, so a failure is reported, not
+ * fatal. */
 static void
 ipc_init(void)
 {
@@ -1798,6 +1801,7 @@ ipc_init(void)
 	int n;
 
 	unsetenv("SWAYSOCK");
+	unsetenv("I3SOCK");
 	if (!dir) {
 		fprintf(stderr, "ipc: XDG_RUNTIME_DIR is unset, so there's no IPC socket\n");
 		return;
@@ -1827,6 +1831,7 @@ ipc_init(void)
 		goto fail;
 	}
 	setenv("SWAYSOCK", ipc_path, 1);
+	setenv("I3SOCK", ipc_path, 1);
 	return;
 fail:
 	if (ipc_socket >= 0) {

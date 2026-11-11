@@ -8,9 +8,12 @@ other clients of sway's socket work against it.
 ## The socket
 
 tidewm listens on `$XDG_RUNTIME_DIR/tidewm-ipc.<uid>.<pid>.sock` and names
-it in `SWAYSOCK` before running the startup command (`-s`), so everything
-started from it finds the socket. Without `XDG_RUNTIME_DIR` there is no
-socket: tidewm says so on stderr and runs without one. The socket is
+it in `SWAYSOCK` and `I3SOCK`, as sway does, before running the startup
+command (`-s`), so everything started from it finds the socket, whichever
+it looks at first. Values inherited from an earlier sway, i3 or tidewm
+session are replaced, or unset if there's no socket. Without
+`XDG_RUNTIME_DIR` there is no socket: tidewm says so on stderr and runs
+without one. The socket is
 removed when tidewm exits.
 
 ## Workspaces
