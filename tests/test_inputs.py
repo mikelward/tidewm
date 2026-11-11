@@ -298,9 +298,10 @@ input type:pointer repeat_delay 100
 
 
 class KeyBindingTest(NestedTest):
-    """wtype's keymap puts the first key it types at keycode 1, which the
-    nested tidewm's keymaps make Escape, so typing x in the parent presses
-    Escape in it."""
+    """wtype's keymap puts the first key it's told to press, with -k, at
+    keycode 1, which the nested tidewm's keymaps make Escape, so pressing x
+    in the parent presses Escape in it. Text it types has other keycodes,
+    from wtype 0.5 on."""
 
     CONFIG = """input type:keyboard xkb_layout de
 bindsym Escape input type:keyboard xkb_layout fr
@@ -311,11 +312,11 @@ bindsym Escape input type:keyboard xkb_layout fr
         self.assertEqual(self.keyboard()["xkb_layout_names"], ["German"])
         ipc = self.connect()
         ipc.subscribe("input")
-        self.parent.press("x")
+        self.parent.press("-k", "x")
         event = ipc.next_event(EVENT_INPUT, lambda e: e["change"] == "xkb_keymap")
         self.assertEqual(event["input"]["xkb_layout_names"], ["French"])
         # tidewm lived through it, and the group's next key works
-        self.parent.press("x")
+        self.parent.press("-k", "x")
         self.assertEqual(self.keyboard()["xkb_layout_names"], ["French"])
 
 
@@ -337,7 +338,7 @@ class InputMethodTest(NestedTest):
         self.wm.clients.append(ime)
         self.addCleanup(ime.stdout.close)
         self.assertEqual(self.line(ime), b"grabbed\n")
-        self.parent.press("x")  # Escape, keycode 1, in the nested tidewm
+        self.parent.press("-k", "x")  # Escape, keycode 1, in the nested tidewm
         self.assertEqual(self.line(ime), b"key 1 1\n")
 
 
