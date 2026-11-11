@@ -114,12 +114,13 @@ class Tidewm:
     would be, rather than a client's virtual one. With on_x11 too, it runs
     on wlroots' X11 backend, as a client of the parent's Xwayland, whose
     outputs have a make and a model, as a headless one hasn't. env is
-    more of its environment, over the rest. prepare is
+    more of its environment, over the rest. config_path
+    is a file to name with -c as it is, there or not. prepare is
     called with the runtime directory before tidewm starts, to put there
     what tidewm should find."""
 
     def __init__(self, outputs=1, config=None, config_arg=True, parent=None, on_x11=False,
-                 env=None, prepare=None):
+                 env=None, prepare=None, config_path=None):
         more_env = env or {}
         self.dir = tempfile.TemporaryDirectory(prefix="tidewm-test-")
         os.chmod(self.dir.name, 0o700)
@@ -147,6 +148,9 @@ class Tidewm:
                 args = ["-c", self.config_path]
         else:
             self.config_path = os.path.join(self.dir.name, "xdg", "tidewm", "config")
+        if config_path:
+            self.config_path = config_path
+            args = ["-c", config_path]
         if config is not None:
             self.write_config(config)
         # The startup command runs once tidewm is up, with its sockets named
@@ -267,16 +271,18 @@ class Tidewm:
 
 class TidewmTest(unittest.TestCase):
     """A test with its own tidewm. OUTPUTS says how many outputs it has;
-    CONFIG and CONFIG_ARG, its config file, and ENV, more of its
-    environment, as Tidewm takes them."""
+    CONFIG, CONFIG_ARG and CONFIG_PATH, its config file, and ENV, more of
+    its environment, as Tidewm takes them."""
 
     OUTPUTS = 1
     CONFIG = None
     CONFIG_ARG = True
     ENV = None
+    CONFIG_PATH = None
 
     def setUp(self):
-        self.wm = Tidewm(self.OUTPUTS, self.CONFIG, self.CONFIG_ARG, env=self.ENV)
+        self.wm = Tidewm(self.OUTPUTS, self.CONFIG, self.CONFIG_ARG, env=self.ENV,
+                         config_path=self.CONFIG_PATH)
         self.addCleanup(self.wm.stop)
 
     def need(self, ok, why):

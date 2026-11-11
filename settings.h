@@ -2286,13 +2286,15 @@ settings_load(int partial)
  * and the rest of the file loads: a session that starts with config.h's
  * keys in place of yours, and without the shell your file starts, is no
  * way to find the line. A file that can't load at all, as one with a bad
- * keymap, is left out, and tidewm starts with config.h's keys. */
+ * keymap, is left out, and tidewm starts with config.h's keys. So does
+ * one named with -c that isn't there, which is an error, as a file at
+ * its default place not being there isn't: that one was asked for. */
 static void
 settings_init(const char *arg)
 {
 	const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
 	size_t i, nerrors;
-	int n, loaded;
+	int n, loaded, missing;
 	if (arg)
 		n = snprintf(settings_path, sizeof(settings_path), "%s", arg);
 	else if (xdg && *xdg)
@@ -2304,16 +2306,19 @@ settings_init(const char *arg)
 		die("the config file's path is too long");
 	settings_group_register(kb_group);
 	loaded = settings_load(1);
+	/* Loaded, with no settings: there was no file */
+	if ((missing = arg && loaded && !settings))
+		settings_error(settings_errors, 0, "there's no such file");
 	nerrors = json_object_array_length(settings_errors);
 	for (i = 0; i < nerrors; i++)
 		fprintf(stderr, "tidewm: %s\n",
 				json_object_get_string(json_object_array_get_idx(settings_errors, i)));
-	if (!loaded)
+	if (!loaded || missing)
 		fprintf(stderr, "tidewm: not using %s: config.h's keys work instead\n", settings_path);
 	else if (nerrors)
 		fprintf(stderr, "tidewm: left out the lines above from %s; the rest is loaded\n",
 				settings_path);
-	if (loaded && !settings_keys())
+	if (loaded && settings && !settings_keys())
 		fprintf(stderr, "tidewm: %s binds no key, so config.h's keys work with it\n",
 				settings_path);
 }
