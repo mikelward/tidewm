@@ -10,9 +10,10 @@ from harness import (EVENT_SHUTDOWN, EVENT_TICK, EVENT_WINDOW, GET_OUTPUTS,
 
 
 class IpcTest(TidewmTest):
-    def test_socket_is_named_in_swaysock(self):
+    def test_socket_is_named_in_swaysock_and_i3sock(self):
         self.assertTrue(os.path.basename(self.wm.socket).startswith("tidewm-ipc."))
         self.assertEqual(os.path.dirname(self.wm.socket), self.wm.dir.name)
+        self.assertEqual(self.wm.i3_socket, self.wm.socket)
 
     def test_version_names_tidewm(self):
         version = self.connect().request(GET_VERSION)
@@ -161,6 +162,17 @@ class IpcTest(TidewmTest):
         self.assertEqual(listener.next_event(EVENT_SHUTDOWN), {"change": "exit"})
         self.assertEqual(self.wm.proc.wait(TIMEOUT), 0)
         self.assertFalse(os.path.exists(self.wm.socket))
+
+
+class StaleSocketNamesTest(TidewmTest):
+    """Started from an earlier session's environment, whose sockets are
+    gone."""
+    ENV = {"SWAYSOCK": "/nonexistent/sway-ipc.sock", "I3SOCK": "/nonexistent/i3-ipc.sock"}
+
+    def test_inherited_socket_names_are_replaced(self):
+        self.assertEqual(os.path.dirname(self.wm.socket), self.wm.dir.name)
+        self.assertEqual(self.wm.i3_socket, self.wm.socket)
+        self.assertEqual(self.connect().request(GET_VERSION)["variant"], "tidewm")
 
 
 if __name__ == "__main__":

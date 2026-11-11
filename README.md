@@ -311,7 +311,8 @@ tidewm binds none itself: sway's `bindgesture` isn't there.
 
 ### IPC
 
-tidewm also answers sway's IPC on a socket it names in `SWAYSOCK`, so
+tidewm also answers sway's IPC on a socket it names in `SWAYSOCK` and
+`I3SOCK`, so
 `swaymsg`, Quickshell's I3 module, nwg-displays and other clients of
 sway's socket work with it. [`docs/ipc.md`](docs/ipc.md) lists what it answers. Its
 workspaces are on ext-workspace too, for Wayland clients that read that.
