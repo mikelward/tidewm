@@ -223,7 +223,9 @@ force, and `mode default` goes back to the top level, so a mode's own
 keys must include a way out. Modes don't nest, and `default` can't be
 opened. A `mode` line that fails, as with a flag tidewm's doesn't take,
 takes the lines to its `}` with it, so they're never read as the top
-level's. A load, `reload` included, starts at the top level.
+level's. An `input` or `output` block in a mode, which can't hold one,
+goes the same way, to its own `}`, and the mode stays open after it. A
+load, `reload` included, starts at the top level.
 
 ```
 bindsym $mod+r mode "resize"

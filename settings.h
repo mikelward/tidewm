@@ -1863,7 +1863,9 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 		p = expanded;
 		/* In a mode whose opening line failed, each line is left out with
 		 * it: read as the top level's, its plain keys' bindings would
-		 * take those keys from every window */
+		 * take those keys from every window. So is each line of an input
+		 * or output block a mode can't hold, whose } would close the mode
+		 * and leave the mode's later lines the top level's */
 		if (skipping) {
 			/* Its }, as the first word, as where a mode closes below */
 			if (*p == '}' && (!p[1] || isspace((unsigned char)p[1])))
@@ -1914,6 +1916,8 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			if (mode) {
 				settings_error(errors, line, "output can't be in a mode");
 				ok = 0;
+				/* A block's lines go with it, to its own } */
+				skipping = (name = settings_arg(&p)) && *name && !strcmp(p, "{");
 			} else if ((name = settings_arg(&p)) && *name && !strcmp(p, "{")) {
 				output = settings_strdup(name, strlen(name));
 				output_line = line;
@@ -1926,6 +1930,8 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			if (mode) {
 				settings_error(errors, line, "input can't be in a mode");
 				ok = 0;
+				/* A block's lines go with it, to its own } */
+				skipping = !strcmp(p, "{");
 			} else if (!strcmp(p, "{")) {
 				char err[256];
 				if (settings_input_name_ok(name, err, sizeof(err))) {
