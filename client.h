@@ -329,7 +329,7 @@ client_notify_enter(struct wlr_surface *s, struct wlr_keyboard *kb)
 	}
 	for (size_t i = 0; i < kb->num_keycodes; i++) {
 		uint32_t key = kb->keycodes[i];
-		if (!consumed[key])
+		if (!CONSUMED(key))
 			filtered[size++] = key;
 	}
 	wlr_seat_keyboard_notify_enter(seat, s, filtered, size, &kb->modifiers);

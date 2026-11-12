@@ -12,8 +12,8 @@ import shutil
 import subprocess
 import unittest
 
-from harness import (EVENT_INPUT, EVENT_WINDOW, GET_CONFIG, GET_INPUTS, GET_OUTPUTS, ROOT,
-                     RUN_COMMAND, TIMEOUT, Tidewm, TidewmTest)
+from harness import (EVENT_INPUT, EVENT_WINDOW, GET_CONFIG, GET_INPUTS, GET_OUTPUTS,
+                     GET_VERSION, ROOT, RUN_COMMAND, TIMEOUT, Tidewm, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
 KEYBOARD = os.path.join(ROOT, "tests", "keyboard")
@@ -104,6 +104,19 @@ class VirtualKeyboardTest(InputTest):
         device = ipc.next_event(EVENT_INPUT, lambda e: e["change"] == "xkb_layout")["input"]
         self.assertEqual((device["type"], device["xkb_active_layout_index"],
                           device["xkb_active_layout_name"]), ("keyboard", 1, "German"))
+
+    def test_a_key_past_evdevs_codes_is_taken_as_any_other(self):
+        # A client's key has any code it likes: this one is far past
+        # KEY_MAX, 767, evdev's last
+        keyboard = subprocess.Popen([KEYBOARD, "0"],
+                                    env=dict(self.wm.env, XKB_LAYOUT="us", KEY=str(1 << 29)),
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.wm.clients.append(keyboard)
+        self.assertTrue(select.select([keyboard.stdout], [], [], TIMEOUT)[0],
+                        "the keyboard said nothing")
+        self.assertEqual(keyboard.stdout.readline(), b"switched\n",
+                         f"tidewm went as the key came:\n{self.wm.output()}")
+        self.assertEqual(self.connect().request(GET_VERSION)["variant"], "tidewm")
 
 
 class ScrollTest(InputTest):

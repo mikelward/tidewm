@@ -92,6 +92,9 @@
 
 /* macros */
 #define CLEANMASK(mask)         (mask & ~WLR_MODIFIER_CAPS)
+/* Whether a binding took key K's press: never a code past evdev's keys, as
+ * a client's virtual keyboard can send, which consumed[] has no place for */
+#define CONSUMED(K)             ((K) <= KEY_MAX && consumed[(K)])
 #define VISIBLEON(C, M)         ((M) && (C)->mon == (M) && (C)->ws == curws && !(C)->isminimized)
 #define LISTEN(E, L, H)         wl_signal_add((E), ((L)->notify = (H), (L)))
 #define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = ecalloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
@@ -2110,7 +2113,8 @@ keypress(struct wl_listener *listener, void *data)
 		settings_key_pressed(event->keycode, group->mods, group->keysyms);
 		for (int i = 0; i < 2; i++) {
 			if (runbinding(group->mods, group->keysyms[i])) {
-				consumed[event->keycode] = 1;
+				if (event->keycode <= KEY_MAX)
+					consumed[event->keycode] = 1;
 				handled = 1;
 				break;
 			}
@@ -2122,7 +2126,8 @@ keypress(struct wl_listener *listener, void *data)
 		 * a release binding one of them armed keeps it. */
 		if (!handled && !(settings_tap.armed && settings_tap.keycode == event->keycode)
 				&& vtkey(group->mods, group->keysyms[0])) {
-			consumed[event->keycode] = 1;
+			if (event->keycode <= KEY_MAX)
+				consumed[event->keycode] = 1;
 			handled = 1;
 		}
 	} else {
@@ -2142,12 +2147,12 @@ keypress(struct wl_listener *listener, void *data)
 		return;
 	/* The window a key press goes to, straight or through an input
 	 * method, which types into it, for the shell's polkit agent */
-	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED && !consumed[event->keycode])
+	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED && !CONSUMED(event->keycode))
 		fg_delivered(seat->keyboard_state.focused_surface);
 	if (input_method_keyboard_grab_forward_key(group, event))
 		return;
 
-	if (consumed[event->keycode]) {
+	if (CONSUMED(event->keycode)) {
 		if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED)
 			consumed[event->keycode] = 0;
 		return; /* Don't pass to the client the release event of a handled key-press */
