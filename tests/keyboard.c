@@ -5,9 +5,11 @@
  * virtual-keyboard-v1: its keymap has the layouts XKB_LAYOUT names, as
  * "us,de", and it switches to layout LAYOUT, then waits until stdin ends,
  * so the keyboard stays until the test is done with it. It prints
- * "switched" once the compositor has had the switch.
+ * "switched" once the compositor has had the switch. With KEY, a key's
+ * code, it presses and releases that key after the switch: any code, as a
+ * client may send one evdev has no key for.
  *
- * Usage: XKB_LAYOUT=LAYOUTS keyboard LAYOUT
+ * Usage: XKB_LAYOUT=LAYOUTS [KEY=CODE] keyboard LAYOUT
  */
 #define _GNU_SOURCE /* memfd_create */
 #include <stdio.h>
@@ -81,7 +83,7 @@ main(int argc, char *argv[])
 	struct wl_display *display;
 	struct wl_registry *registry;
 	struct zwp_virtual_keyboard_v1 *keyboard;
-	const char *layouts = getenv("XKB_LAYOUT");
+	const char *layouts = getenv("XKB_LAYOUT"), *key = getenv("KEY");
 	char buf[64];
 	uint32_t size;
 	int fd;
@@ -102,6 +104,11 @@ main(int argc, char *argv[])
 	close(fd);
 	/* No modifier down, and the layout as the group */
 	zwp_virtual_keyboard_v1_modifiers(keyboard, 0, 0, 0, (uint32_t)atoi(argv[1]));
+	if (key) {
+		uint32_t code = (uint32_t)strtoul(key, NULL, 10);
+		zwp_virtual_keyboard_v1_key(keyboard, 0, code, WL_KEYBOARD_KEY_STATE_PRESSED);
+		zwp_virtual_keyboard_v1_key(keyboard, 0, code, WL_KEYBOARD_KEY_STATE_RELEASED);
+	}
 	/* The compositor handles requests in order, so it has had them all
 	 * by the time it answers */
 	if (wl_display_roundtrip(display) < 0)

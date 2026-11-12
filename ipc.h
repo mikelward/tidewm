@@ -905,7 +905,7 @@ ipc_send_shortcut(Client *c, const char *shortcut)
 		/* Without the keys a binding took, as client_notify_enter has it,
 		 * whose releases the window won't get */
 		for (i = 0; i < kb->num_keycodes; i++)
-			if (!consumed[kb->keycodes[i]])
+			if (!CONSUMED(kb->keycodes[i]))
 				pressed[npressed++] = kb->keycodes[i];
 		wlr_seat_keyboard_enter(seat, had, pressed, npressed, &kb->modifiers);
 	}
