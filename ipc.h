@@ -409,6 +409,9 @@ ipc_json_window(Client *c)
 	json_object_object_add(obj, "minimized", json_object_new_boolean(c->isminimized));
 	/* tidewm's own, for tide's pinned windows: kill leaves it open */
 	json_object_object_add(obj, "keep_open", json_object_new_boolean(keptopen(c)));
+	/* As sway's: none or pixel, and how wide; tidewm has no title bars */
+	json_object_object_add(obj, "border", json_object_new_string(c->bw ? "pixel" : "none"));
+	json_object_object_add(obj, "current_border_width", json_object_new_int((int)c->bw));
 	json_object_object_add(obj, "rect", ipc_json_box(c->geom));
 	json_object_object_add(obj, "workspace", c->ws ? json_object_new_string(c->ws->name) : NULL);
 	json_object_object_add(obj, "output", c->mon ? json_object_new_string(c->mon->wlr_output->name) : NULL);

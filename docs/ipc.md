@@ -176,6 +176,7 @@ tidewm's life), `type` (`con`, or `floating_con`), `name` (the title),
 `urgent_order` (tidewm's own: higher for a more recent mark, 0 if it has
 none), `visible`, `fullscreen_mode` (0 or 1), `sticky`, `maximized`, `minimized` and `keep_open` (tidewm's own),
 `dim` and `dimmed` (tidewm's own: whether it dims when it isn't focused, and is dimmed now),
+`border` (`none` or `pixel`) and `current_border_width`, as sway's,
 `rect` (in layout coordinates, border included), `workspace` and `output` (tidewm's own: where it is) and
 `foreign_toplevel_identifier`, the ext-foreign-toplevel-list
 identifier `grim -T` takes; it captures the window whether or not its
