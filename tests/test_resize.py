@@ -59,10 +59,18 @@ class FloatingResizeTest(ResizeTest):
                          (-20, 0, 40, 0))
         self.assertIn("in px", self.fails("resize grow width 10 ppt")["error"])
 
+    def test_a_unit_may_be_joined_to_its_amount(self):
+        # As sway's own config's resize mode has them
+        window = self.open("test.float")
+        self.assertEqual(self.changed(window, "resize grow width 40px"), (-20, 0, 40, 0))
+        self.assertEqual(self.changed(window, "resize shrink width 10ppt or 20px"),
+                         (10, 0, -20, 0))
+
     def test_a_bad_resize_is_a_parse_error(self):
         self.open("test.float")
         for command in ("resize grow sideways", "resize grow width ten",
-                        "resize grow width 10 px 20", "resize width 10"):
+                        "resize grow width 10 px 20", "resize width 10",
+                        "resize grow width 10pt", "resize grow width 10px20"):
             with self.subTest(command=command):
                 self.assertTrue(self.fails(command)["parse_error"])
 
@@ -76,6 +84,12 @@ class TiledResizeTest(ResizeTest):
         # The stack's grows the stack, so the master's column shrinks
         self.assertEqual(self.changed(stack, "resize grow width 10")[2], 128)
         self.assertEqual(self.rect(master)["width"], self.rect(stack)["x"])
+
+    def test_a_tile_takes_a_unit_joined_to_its_amount(self):
+        master = self.open("test.master")
+        self.open("test.stack")
+        self.assertEqual(self.changed(master, "resize grow width 10ppt")[2], 128)
+        self.assertEqual(self.changed(master, "resize shrink width 128px")[2], -128)
 
     def test_a_layouts_own_master_count_says_which_is_the_master(self):
         # twocol has a master even at nmaster 0

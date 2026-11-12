@@ -675,24 +675,28 @@ typedef struct {
 } IpcAmount;
 
 /* Reads an amount, "N [px|ppt]", from *p, moving past it: 0 if there's
- * none, -1 if it isn't one. */
+ * none, -1 if it isn't one. The unit may be joined to the number, as the
+ * 10px of sway's own config's resize mode. */
 static int
 ipc_amount(char **p, IpcAmount *a)
 {
 	char *end;
 	long n;
+	int joined;
 	if (!**p)
 		return 0;
 	errno = 0;
 	n = strtol(*p, &end, 10);
-	if (end == *p || errno || n < 0 || n > 100000 || (*end && !isspace((unsigned char)*end)))
+	if (end == *p || errno || n < 0 || n > 100000)
 		return -1;
+	/* What's joined to the number must be its unit */
+	joined = *end && !isspace((unsigned char)*end);
 	*p = end;
 	while (isspace((unsigned char)**p))
 		(*p)++;
 	a->amount = (int)n;
 	a->unit = ipc_take(p, "px") ? IpcUnitPx : ipc_take(p, "ppt") ? IpcUnitPpt : IpcUnitNone;
-	return 1;
+	return joined && a->unit == IpcUnitNone ? -1 : 1;
 }
 
 /* sway's resize grow|shrink, for c, by sign times the first amount of
