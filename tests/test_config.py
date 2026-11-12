@@ -778,6 +778,40 @@ class BadModeAtStartTest(KeysTest):
         self.assertEqual(self.shown(ipc), "after", "and the lines after its } are read")
 
 
+class BlockInAModeAtStartTest(KeysTest):
+    # Blocks a mode can't hold, each with a } of its own before the mode's
+    CONFIG = ('bindsym Mod1+x workspace keyed\n'
+              'mode "resize" {\n'
+              '    input type:keyboard {\n'
+              '        repeat_rate 30\n'
+              '    }\n'
+              '    bindsym Mod1+x workspace leaked\n'
+              '    output * {\n'
+              '        scale 1\n'
+              '    }\n'
+              '    bindsym Mod1+y workspace inside\n'
+              '}\n'
+              'bindsym Mod1+z workspace after\n')
+
+    def test_a_block_in_a_mode_goes_alone_and_the_mode_stays_open(self):
+        errors = self.connect().request(GET_CONFIG)["errors"]
+        self.assertEqual(errors, [f"{self.wm.config_path}:3: input can't be in a mode",
+                                  f"{self.wm.config_path}:7: output can't be in a mode"])
+        bindings = [(b["keys"], b["mode"]) for b in self.connect().request(GET_BINDINGS)]
+        self.assertEqual(bindings, [("Mod1+x", "default"), ("Mod1+z", "default"),
+                                    ("Mod1+x", "resize"), ("Mod1+y", "resize")],
+                         "the block's } didn't close the mode")
+        ipc = self.workspaces_ipc()
+        self.alt("y")
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed", "the mode's bindings aren't the top level's")
+        self.alt("z")
+        self.assertEqual(self.shown(ipc), "after", "and the lines after the mode's } are read")
+        self.command(self.connect(), "mode resize")
+        self.alt("y")
+        self.assertEqual(self.shown(ipc), "inside", "and the mode has the bindings after its blocks")
+
+
 class BadNamedLineAtStartTest(KeysTest):
     CONFIG = ("bindsym --name go Mod1+x workspace keyed\n"
               "bindsym --name go Mod1+NoSuchKey workspace other\n")
