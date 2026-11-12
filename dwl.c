@@ -1498,7 +1498,7 @@ createnotify(struct wl_listener *listener, void *data)
 	/* Allocate a Client for this surface */
 	c = toplevel->base->data = ecalloc(1, sizeof(*c));
 	c->surface.xdg = toplevel->base;
-	c->bw = borderpx;
+	c->bw = settings_border_width();
 
 	LISTEN(&toplevel->base->surface->events.commit, &c->commit, commitnotify);
 	LISTEN(&toplevel->base->surface->events.map, &c->map, mapnotify);
@@ -3375,7 +3375,7 @@ setfullscreen(Client *c, int fullscreen)
 	c->isfullscreen = fullscreen;
 	if (!c->mon || !client_surface(c)->mapped)
 		return;
-	c->bw = fullscreen ? 0 : borderpx;
+	c->bw = fullscreen ? 0 : settings_border_width();
 	client_set_fullscreen(c, fullscreen);
 	wlr_scene_node_reparent(&c->scene->node, layers[c->isfullscreen
 			? LyrFS : c->isfloating ? LyrFloat : LyrTile]);
@@ -4269,7 +4269,7 @@ createnotifyx11(struct wl_listener *listener, void *data)
 	c->surface.xwayland = xsurface;
 	c->type = X11;
 	c->xscale = 1;
-	c->bw = client_is_unmanaged(c) ? 0 : borderpx;
+	c->bw = client_is_unmanaged(c) ? 0 : settings_border_width();
 
 	/* Listen to the various events it can emit */
 	LISTEN(&xsurface->events.associate, &c->associate, associatex11);

@@ -220,6 +220,7 @@ typedef struct {
 	int focus_guard; /* focus_guard enable|disable; -1: not given */
 	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
 	int resize_grab; /* resize_grab PIXELS; -1: not given */
+	int border; /* default_border none|pixel [N]: its width; -1: not given */
 	int xwayland_scaling; /* xwayland_scaling enable|disable; -1: not given */
 	int floating_mod; /* floating_modifier's modifiers, 0 for none; -1: not given */
 	int floating_inverse; /* floating_modifier's inverse: left resizes, right moves */
@@ -1644,6 +1645,35 @@ settings_dim(Settings *s, char *rest, unsigned int line, struct json_object *err
 	return 1;
 }
 
+/* A default_border line, as sway's: none, or pixel and how wide, 0 to
+ * 100, config.h's borderpx without one. tidewm has no title bars, so
+ * there's no normal, and one width serves tiled and floating windows. */
+static int
+settings_border(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *word = settings_arg(&rest), *end;
+	long v;
+	if (word && !strcmp(word, "none") && !*rest) {
+		s->border = 0;
+		return 1;
+	}
+	if (word && !strcmp(word, "pixel")) {
+		if (!*rest) {
+			s->border = (int)borderpx;
+			return 1;
+		}
+		errno = 0;
+		v = strtol(rest, &end, 10);
+		if (!*end && !errno && v >= 0 && v <= 100) {
+			s->border = (int)v;
+			return 1;
+		}
+	}
+	settings_error(errors, line, "default_border takes none, or pixel and a whole "
+			"number of pixels from 0 to 100");
+	return 0;
+}
+
 /* A resize_grab line: how many pixels either side of the master/stack
  * edge a press drags it from, from 0, none, to 32 */
 static int
@@ -1979,6 +2009,13 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			} else {
 				ok &= settings_dim(s, p, line, errors);
 			}
+		} else if (!strcasecmp(word, "default_border")) {
+			if (mode) {
+				settings_error(errors, line, "default_border can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_border(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "resize_grab")) {
 			if (mode) {
 				settings_error(errors, line, "resize_grab can't be in a mode");
@@ -2181,6 +2218,7 @@ settings_parse(char *text, struct json_object *errors, int partial)
 	s->focus_guard = -1;
 	s->dim_inactive = -1;
 	s->resize_grab = -1;
+	s->border = -1;
 	s->new_window = -1;
 	s->xwayland_scaling = -1;
 	s->floating_mod = -1;
@@ -2213,6 +2251,38 @@ settings_parse(char *text, struct json_object *errors, int partial)
 		return NULL;
 	}
 	return s;
+}
+
+/* The border a window has, default_border's width, or config.h's borderpx
+ * without the line. A fullscreen window, or an unmanaged one, has none. */
+static unsigned int
+settings_border_width(void)
+{
+	return settings && settings->border >= 0 ? (unsigned int)settings->border : borderpx;
+}
+
+/* Gives every window the border settings_border_width() says, at once:
+ * a floating one keeps its place and size, border and all, and the
+ * layouts tile again round the new widths. */
+static void
+border_update(void)
+{
+	unsigned int bw = settings_border_width();
+	Monitor *m;
+	Client *c;
+	int changed = 0;
+	wl_list_for_each(c, &clients, link) {
+		if (c->isfullscreen || c->bw == bw)
+			continue;
+		c->bw = bw;
+		changed = 1;
+		if (c->mon)
+			resize(c, c->geom, 0);
+	}
+	if (!changed)
+		return;
+	wl_list_for_each(m, &mons, link)
+		arrange(m);
 }
 
 /* Reads path into *text. Returns 1, 0 if there's no such file, or -1 on
@@ -2273,6 +2343,8 @@ settings_load(int partial)
 	fg_arm();
 	/* Windows dim at the new strength */
 	dim_update();
+	/* Borders take the new width at once */
+	border_update();
 	/* X11 windows scale, or not, at once; with no file, they scale */
 	x11_set_scaling(!settings || settings->xwayland_scaling != 0);
 	/* Outputs and inputs take the new lines at once; at startup, there are
