@@ -40,7 +40,7 @@ supported yet. In an `input` or `output` line, a name or value may be in
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
 | `bindcode KEYS COMMANDS` | As sway's: `bindsym`, with the key as its keycode, as below |
 | `rebind NAME KEYS...`, `rebind NAME none` | tidewm's own: gives the binding `bindsym --name NAME` named these keys in place of the ones it has, or none, so a shell's keyboard shortcuts can change one ([Named bindings](#named-bindings)). Only at the top level |
-| `bindswitch [--locked] SWITCH:STATE COMMANDS` | As sway's: a switch turning on, off or either (`lid:on`, `lid:off`, `lid:toggle`, and `tablet:` likewise) runs `COMMANDS`; on the lock screen, only a `--locked` one. Not in a mode. `bindswitch lid:on output eDP-1 disable` and `bindswitch --locked lid:off output eDP-1 enable` turn a laptop's panel off while its lid is closed, and its windows move over; like sway, it does so whether or not another output is on |
+| `bindswitch [--locked] [--desc TEXT] SWITCH:STATE COMMANDS` | As sway's: a switch turning on, off or either (`lid:on`, `lid:off`, `lid:toggle`, and `tablet:` likewise) runs `COMMANDS`; on the lock screen, only a `--locked` one. Not in a mode. `bindswitch lid:on output eDP-1 disable` and `bindswitch --locked lid:off output eDP-1 enable` turn a laptop's panel off while its lid is closed, and its windows move over; like sway, it does so whether or not another output is on |
 | `for_window [CRITERIA] COMMANDS` | Runs `COMMANDS` on each new window `CRITERIA` match, as below |
 | `output NAME SETTINGS` | Sets up the output called `NAME`, or every output for `*`, as below |
 | `input NAME SETTING VALUE` | Sets up the input devices `NAME` names, as below; `input NAME {` … `}` takes a setting a line |
@@ -104,6 +104,12 @@ press binding, as dwl's keys do. Flags, before the keys:
   mouse](#the-mouse)).
 - **`--name NAME`:** tidewm's own: names the binding, so a `rebind`
   line can give it other keys ([Named bindings](#named-bindings)).
+- **`--desc TEXT`:** tidewm's own, as Hyprland's `bindd`: says what the
+  binding does, for a shell's list of keyboard shortcuts, as
+  `bindsym --desc "Open a terminal" $mod+Return exec foot`. `TEXT` is a
+  word, or text in `"`; `--desc=TEXT` works too. The IPC's
+  `GET_BINDINGS` gives it ([`ipc.md`](ipc.md)). A `bindswitch` line
+  takes it as well.
 
 Any other flag is an error.
 
@@ -133,7 +139,9 @@ with the same flags, and those are its default keys. A later line that
 gives the name another command, flags or mode redefines it, as a later
 binding of the same keys replaces an earlier one: the name's earlier keys
 go, and its default keys start again from that line. So a config that
-includes tide's and binds tide's names to its own commands wins.
+includes tide's and binds tide's names to its own commands wins. A
+line's `--desc` is the name's, for all its keys; a redefined name has
+only its new lines'.
 
 `rebind NAME KEYS...` gives it these keys in place of the ones it has,
 and `rebind NAME none` takes them all away. Like a `bindsym` line, a

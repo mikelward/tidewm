@@ -27,6 +27,7 @@ typedef struct {
 	uint32_t button; /* a --whole-window binding's button, or scroll; 0 for a key */
 	char *keys; /* as written, for messages */
 	char *command;
+	char *desc; /* its --desc, or NULL */
 	size_t named; /* 1 + its NamedBinding's index in Settings, or 0 */
 } Binding;
 
@@ -46,6 +47,7 @@ typedef struct {
 	char *name;
 	size_t mode; /* in Settings' modes */
 	char *command;
+	char *desc; /* its lines' --desc, or NULL */
 	BindingFlags flags;
 	char **defaults; /* its bindsym lines' keys, as written */
 	size_t ndefaults;
@@ -80,6 +82,7 @@ typedef struct {
 	int state; /* SwOff, SwOn or SwToggle */
 	int locked; /* runs while the screen is locked, too */
 	char *command;
+	char *desc; /* its --desc, or NULL */
 } SwitchBinding;
 
 /* A submap: bindings in force while it's the current mode */
@@ -271,6 +274,15 @@ static struct {
 	xkb_keysym_t sym;
 } settings_tap;
 
+/* Frees what a binding holds, not the binding */
+static void
+settings_free_binding(Binding *b)
+{
+	free(b->keys);
+	free(b->command);
+	free(b->desc);
+}
+
 static void
 settings_free(Settings *s)
 {
@@ -278,10 +290,8 @@ settings_free(Settings *s)
 	if (!s)
 		return;
 	for (i = 0; i < s->nmodes; i++) {
-		for (j = 0; j < s->modes[i].nbindings; j++) {
-			free(s->modes[i].bindings[j].keys);
-			free(s->modes[i].bindings[j].command);
-		}
+		for (j = 0; j < s->modes[i].nbindings; j++)
+			settings_free_binding(&s->modes[i].bindings[j]);
 		free(s->modes[i].bindings);
 		free(s->modes[i].name);
 	}
@@ -300,8 +310,10 @@ settings_free(Settings *s)
 		settings_free_input(&s->inputs[i]);
 	free(s->inputs);
 	free(s->singles);
-	for (i = 0; i < s->nswitches; i++)
+	for (i = 0; i < s->nswitches; i++) {
 		free(s->switches[i].command);
+		free(s->switches[i].desc);
+	}
 	free(s->switches);
 	for (i = 0; i < s->nincludes; i++) {
 		free(s->includes[i].path);
@@ -314,6 +326,7 @@ settings_free(Settings *s)
 		free(s->named[i].defaults);
 		free(s->named[i].name);
 		free(s->named[i].command);
+		free(s->named[i].desc);
 	}
 	free(s->named);
 	free(s->text);
@@ -479,18 +492,54 @@ settings_arg(char **p)
 	return arg;
 }
 
+/* A --desc flag, tidewm's own, if *p starts with one: "--desc TEXT" or
+ * "--desc=TEXT", TEXT a word or in double quotes, as sway's strings are,
+ * which may be empty. Moves *p past it, and puts TEXT in *desc. Returns
+ * 1 for one, 0 for none, or -1 for one without TEXT or with an unclosed
+ * quote. */
+static int
+settings_desc_flag(char **p, char **desc)
+{
+	char *q = *p;
+	if (strncmp(q, "--desc", 6) || (q[6] && q[6] != '=' && !isspace((unsigned char)q[6])))
+		return 0;
+	q += 6;
+	if (*q == '=') {
+		if (!*++q || isspace((unsigned char)*q))
+			return -1;
+	} else {
+		while (isspace((unsigned char)*q))
+			q++;
+		if (!*q)
+			return -1;
+	}
+	if (!(*desc = settings_arg(&q)))
+		return -1;
+	*p = q;
+	return 1;
+}
+
 /* A bindswitch line, as sway's: "[--locked] lid|tablet:on|off|toggle
- * COMMAND". A later one for the same switch and state replaces an earlier
- * one. */
+ * COMMAND", and tidewm's own --desc. A later one for the same switch and
+ * state replaces an earlier one. */
 static int
 settings_add_switch(Settings *s, char *rest, unsigned int line, struct json_object *errors)
 {
 	static const char *const states[] = {[SwOff] = "off", [SwOn] = "on", [SwToggle] = "toggle"};
 	SwitchBinding b = {0}, *bs;
-	char *spec, *colon;
+	char *spec, *colon, *desc = NULL;
 	size_t i;
 	while (rest[0] == '-' && rest[1] == '-') {
-		char *flag = settings_word(&rest);
+		char *flag;
+		int d = settings_desc_flag(&rest, &desc);
+		if (d < 0) {
+			settings_error(errors, line, "bindswitch --desc needs a description, "
+					"in double quotes if it has spaces");
+			return 0;
+		}
+		if (d)
+			continue;
+		flag = settings_word(&rest);
 		if (!strcmp(flag, "--locked")) {
 			b.locked = 1;
 		} else {
@@ -529,8 +578,10 @@ settings_add_switch(Settings *s, char *rest, unsigned int line, struct json_obje
 		s->nswitches++;
 	} else {
 		free(s->switches[i].command);
+		free(s->switches[i].desc);
 	}
 	b.command = settings_strdup(rest, strlen(rest));
+	b.desc = desc ? settings_strdup(desc, strlen(desc)) : NULL;
 	s->switches[i] = b;
 	return 1;
 }
@@ -552,11 +603,13 @@ settings_parse_code(const char *word, uint32_t *code)
 	return 1;
 }
 
-/* Adds a binding of combo to the mode, running command, named if it's
- * not 0, or reports why it can't, as "what combo: why". */
+/* Adds a binding of combo to the mode, running command, described by
+ * desc if it's not NULL, named if named's not 0, or reports why it can't,
+ * as "what combo: why". */
 static int
 settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
-		const char *command, size_t named, unsigned int line, struct json_object *errors)
+		const char *command, const char *desc, size_t named, unsigned int line,
+		struct json_object *errors)
 {
 	char *spec, *last;
 	const char *bad = NULL;
@@ -609,8 +662,7 @@ settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
 		b = &mode->bindings[i];
 		if (b->mods == mods && b->sym == sym && b->code == code && b->button == button
 				&& b->release == f.release && b->kept_open == f.kept_open) {
-			free(b->keys);
-			free(b->command);
+			settings_free_binding(b);
 			break;
 		}
 	}
@@ -629,6 +681,7 @@ settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
 	b->kept_open = f.kept_open;
 	b->keys = spec;
 	b->command = settings_strdup(command, strlen(command));
+	b->desc = desc ? settings_strdup(desc, strlen(desc)) : NULL;
 	b->named = named;
 	return 1;
 }
@@ -660,10 +713,13 @@ settings_find_named(const Settings *s, const char *name)
 
 /* Registers combo as one of a named binding's keys: a new name, one more
  * line for a name already given the same command, mode and flags, or a
- * line that redefines the name. Returns its 1 + index, or 0 on an error. */
+ * line that redefines the name. A line's desc, if it's not NULL, is the
+ * name's; a redefined name has none but its new lines'. Returns its 1 +
+ * index, or 0 on an error. */
 static size_t
 settings_add_named(Settings *s, size_t mode, const char *name, const char *combo,
-		BindingFlags f, const char *command, unsigned int line, struct json_object *errors)
+		BindingFlags f, const char *command, const char *desc, unsigned int line,
+		struct json_object *errors)
 {
 	NamedBinding *n;
 	char **d;
@@ -694,12 +750,10 @@ settings_add_named(Settings *s, size_t mode, const char *name, const char *combo
 		Mode *m = &s->modes[n->mode];
 		size_t j, k;
 		for (j = k = 0; j < m->nbindings; j++) {
-			if (m->bindings[j].named == i + 1) {
-				free(m->bindings[j].keys);
-				free(m->bindings[j].command);
-			} else {
+			if (m->bindings[j].named == i + 1)
+				settings_free_binding(&m->bindings[j]);
+			else
 				m->bindings[k++] = m->bindings[j];
-			}
 		}
 		m->nbindings = k;
 		for (j = 0; j < n->ndefaults; j++)
@@ -709,8 +763,14 @@ settings_add_named(Settings *s, size_t mode, const char *name, const char *combo
 		n->ndefaults = 0;
 		free(n->command);
 		n->command = settings_strdup(command, strlen(command));
+		free(n->desc);
+		n->desc = NULL;
 		n->mode = mode;
 		n->flags = f;
+	}
+	if (desc) {
+		free(n->desc);
+		n->desc = settings_strdup(desc, strlen(desc));
 	}
 	for (i = 0; i < n->ndefaults; i++)
 		if (!strcmp(n->defaults[i], combo))
@@ -731,12 +791,21 @@ settings_add_binding(Settings *s, size_t mode, char *rest, int code, unsigned in
 {
 	const char *what = code ? "bindcode" : "bindsym";
 	BindingFlags f = {0};
-	char *combo, *name = NULL;
+	char *combo, *name = NULL, *desc = NULL;
 	size_t named = 0;
 
 	f.code = code;
 	while (rest[0] == '-' && rest[1] == '-') {
-		char *flag = settings_word(&rest);
+		char *flag;
+		int d = settings_desc_flag(&rest, &desc);
+		if (d < 0) {
+			settings_error(errors, line, "%s --desc needs a description, "
+					"in double quotes if it has spaces", what);
+			return 0;
+		}
+		if (d)
+			continue;
+		flag = settings_word(&rest);
 		if (!strcmp(flag, "--release")) {
 			f.release = 1;
 		} else if (!strcmp(flag, "--locked")) {
@@ -772,18 +841,18 @@ settings_add_binding(Settings *s, size_t mode, char *rest, int code, unsigned in
 	if (name) {
 		Mode scratch = {0};
 		char *copy = settings_strdup(combo, strlen(combo));
-		int ok = settings_put_binding(&scratch, "bindsym", copy, f, rest, 0, line, errors);
+		int ok = settings_put_binding(&scratch, "bindsym", copy, f, rest, NULL, 0, line, errors);
 		size_t j;
-		for (j = 0; j < scratch.nbindings; j++) {
-			free(scratch.bindings[j].keys);
-			free(scratch.bindings[j].command);
-		}
+		for (j = 0; j < scratch.nbindings; j++)
+			settings_free_binding(&scratch.bindings[j]);
 		free(scratch.bindings);
 		free(copy);
-		if (!ok || !(named = settings_add_named(s, mode, name, combo, f, rest, line, errors)))
+		if (!ok || !(named = settings_add_named(s, mode, name, combo, f, rest, desc, line,
+				errors)))
 			return 0;
 	}
-	return settings_put_binding(&s->modes[mode], what, combo, f, rest, named, line, errors);
+	return settings_put_binding(&s->modes[mode], what, combo, f, rest, desc, named, line,
+			errors);
 }
 
 /* Writes a problem with a line that doesn't stop the file loading to
@@ -833,14 +902,12 @@ settings_rebind(Settings *s, char *rest, unsigned int line, struct json_object *
 				settings_error(errors, line, "rebind %s: none is alone, for no keys", name);
 				ok = 0;
 			} else {
-				ok &= settings_put_binding(&scratch, what, combo, n->flags, n->command, 0,
-						line, errors);
+				ok &= settings_put_binding(&scratch, what, combo, n->flags, n->command,
+						NULL, 0, line, errors);
 			}
 		}
-		for (j = 0; j < scratch.nbindings; j++) {
-			free(scratch.bindings[j].keys);
-			free(scratch.bindings[j].command);
-		}
+		for (j = 0; j < scratch.nbindings; j++)
+			settings_free_binding(&scratch.bindings[j]);
 		free(scratch.bindings);
 		free(copy);
 		if (!ok)
@@ -848,16 +915,15 @@ settings_rebind(Settings *s, char *rest, unsigned int line, struct json_object *
 	}
 	mode = &s->modes[n->mode];
 	for (i = j = 0; i < mode->nbindings; i++) {
-		if (mode->bindings[i].named == idx + 1) {
-			free(mode->bindings[i].keys);
-			free(mode->bindings[i].command);
-		} else {
+		if (mode->bindings[i].named == idx + 1)
+			settings_free_binding(&mode->bindings[i]);
+		else
 			mode->bindings[j++] = mode->bindings[i];
-		}
 	}
 	mode->nbindings = j;
 	while (*(combo = settings_word(&rest)))
-		settings_put_binding(mode, what, combo, n->flags, n->command, idx + 1, line, errors);
+		settings_put_binding(mode, what, combo, n->flags, n->command, n->desc, idx + 1, line,
+				errors);
 	return 1;
 }
 
@@ -4097,6 +4163,7 @@ settings_json_bindings(void)
 	struct json_object *list = json_object_new_array(), *b;
 	const Binding *k;
 	const SwitchBinding *sw;
+	const char *desc;
 	char name[32];
 	size_t i, j;
 	for (i = 0; settings && i < settings->nmodes; i++) {
@@ -4113,6 +4180,9 @@ settings_json_bindings(void)
 			json_object_object_add(b, "name", json_object_new_string(
 					k->named ? settings->named[k->named - 1].name : ""));
 			json_object_object_add(b, "input_code", json_object_new_int64(k->code));
+			/* A named binding's every key has the name's */
+			desc = k->named ? settings->named[k->named - 1].desc : k->desc;
+			json_object_object_add(b, "description", json_object_new_string(desc ? desc : ""));
 			json_object_array_add(list, b);
 		}
 	}
@@ -4130,6 +4200,8 @@ settings_json_bindings(void)
 		json_object_object_add(b, "kept_open", json_object_new_boolean(0));
 		json_object_object_add(b, "name", json_object_new_string(""));
 		json_object_object_add(b, "input_code", json_object_new_int(0));
+		json_object_object_add(b, "description",
+				json_object_new_string(sw->desc ? sw->desc : ""));
 		json_object_array_add(list, b);
 	}
 	return list;
@@ -4165,6 +4237,8 @@ settings_json_named(void)
 		json_object_object_add(b, "release", json_object_new_boolean(n->flags.release));
 		json_object_object_add(b, "locked", json_object_new_boolean(n->flags.locked));
 		json_object_object_add(b, "kept_open", json_object_new_boolean(n->flags.kept_open));
+		json_object_object_add(b, "description",
+				json_object_new_string(n->desc ? n->desc : ""));
 		json_object_array_add(list, b);
 	}
 	return list;

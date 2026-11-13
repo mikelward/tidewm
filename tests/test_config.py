@@ -161,54 +161,88 @@ class BindingsTest(TidewmTest):
     """GET_BINDINGS, tidewm's own: the config file's bindings, for a shell's
     list of keyboard shortcuts."""
     CONFIG = """set $mod Mod4
-bindsym $mod+Return exec foot
-bindsym --release $mod+d exec launcher
+bindsym --desc "Open a terminal" $mod+Return exec foot
+bindsym --release --desc=Launcher $mod+d exec launcher
 bindsym --kept-open Ctrl+w kill
-bindcode --locked $mod+38 exec lock
+bindcode --locked --desc "Lock the screen" $mod+38 exec lock
 mode resize {
-    bindsym --locked Escape mode default
+    bindsym --locked --desc "" Escape mode default
 }
 bindsym $mod+r mode resize
-bindswitch --locked lid:on output eDP-1 disable
+bindswitch --desc="Turn the panel off" --locked lid:on output eDP-1 disable
 bindswitch tablet:toggle workspace tablet
 """
 
     def test_each_binding_with_its_keys_command_and_mode(self):
         def key(keys, command, mode="default", release=False, locked=False, kept_open=False,
-                input_code=0):
+                input_code=0, description=""):
             return {"type": "key", "keys": keys, "command": command, "mode": mode,
                     "release": release, "locked": locked, "kept_open": kept_open, "name": "",
-                    "input_code": input_code}
+                    "input_code": input_code, "description": description}
 
-        def switch(keys, command, locked=False):
+        def switch(keys, command, locked=False, description=""):
             return {"type": "switch", "keys": keys, "command": command, "mode": "default",
                     "release": False, "locked": locked, "kept_open": False, "name": "",
-                    "input_code": 0}
+                    "input_code": 0, "description": description}
 
         self.assertEqual(self.connect().request(GET_BINDINGS), [
-            key("Mod4+Return", "exec foot"),
-            key("Mod4+d", "exec launcher", release=True),
+            key("Mod4+Return", "exec foot", description="Open a terminal"),
+            key("Mod4+d", "exec launcher", release=True, description="Launcher"),
             key("Ctrl+w", "kill", kept_open=True),
-            key("Mod4+38", "exec lock", locked=True, input_code=38),
+            key("Mod4+38", "exec lock", locked=True, input_code=38,
+                description="Lock the screen"),
             key("Mod4+r", "mode resize"),
             key("Escape", "mode default", mode="resize", locked=True),
-            switch("lid:on", "output eDP-1 disable", locked=True),
+            switch("lid:on", "output eDP-1 disable", locked=True,
+                   description="Turn the panel off"),
             switch("tablet:toggle", "workspace tablet"),
         ])
 
     def test_a_reload_lists_the_new_ones(self):
-        self.wm.write_config("bindsym Mod1+x workspace x\n")
+        self.wm.write_config('bindsym --desc "Go to x" Mod1+x workspace x\n')
         self.command(self.connect(), "reload")
-        self.assertEqual([b["keys"] for b in self.connect().request(GET_BINDINGS)], ["Mod1+x"])
+        self.assertEqual([(b["keys"], b["description"])
+                          for b in self.connect().request(GET_BINDINGS)], [("Mod1+x", "Go to x")])
+
+    def test_a_later_binding_of_the_same_keys_takes_its_description(self):
+        self.wm.write_config('bindsym --desc "Go to x" Mod1+x workspace x\n'
+                             'bindsym Mod1+x workspace y\n'
+                             'bindswitch --desc Closed lid:on nop\nbindswitch lid:on nop\n')
+        self.command(self.connect(), "reload")
+        self.assertEqual([b["description"] for b in self.connect().request(GET_BINDINGS)],
+                         ["", ""])
+
+    def test_a_described_binding_runs_as_any_other(self):
+        self.wm.write_config('bindsym --desc "Go to x" Mod1+x workspace x\n')
+        self.command(self.connect(), "reload")
+        ipc = self.connect()
+        ipc.subscribe("workspace")
+        self.press("-M", "alt", "-k", "x", "-m", "alt")
+        self.assertEqual(ipc.next_event(EVENT_WORKSPACE, lambda e: e["change"] == "focus")
+                         ["current"]["name"], "x")
+
+    def test_desc_errors(self):
+        for text, error in [
+            ("bindsym --desc\n", ":1: bindsym --desc needs a description"),
+            ("bindsym --desc= Mod1+x nop\n", ":1: bindsym --desc needs a description"),
+            ('bindsym --desc "Go Mod1+x nop\n', ":1: bindsym --desc needs a description, "
+             "in double quotes if it has spaces"),
+            ("bindcode --desc\n", ":1: bindcode --desc needs a description"),
+            ("bindswitch --desc\n", ":1: bindswitch --desc needs a description"),
+            ("bindsym --description x Mod1+x nop\n", ":1: bindsym has no flag --description"),
+        ]:
+            self.wm.write_config(text)
+            result, = self.connect().request(RUN_COMMAND, "reload")
+            self.assertIn(error, result.get("error", ""), text)
 
 
 class NamedBindingsTest(KeysTest):
     """bindsym --name and rebind, tidewm's own: a shell's keyboard
     shortcuts give a named binding other keys in a file the config
     includes."""
-    CONFIG = """bindsym --name go_a Mod1+a workspace a
+    CONFIG = """bindsym --name go_a --desc "Go to a" Mod1+a workspace a
 bindsym --name go_b Mod1+b workspace b
-bindsym --name go_b Mod1+c workspace b
+bindsym --name go_b --desc "Go to b" Mod1+c workspace b
 bindsym --name=pinned --locked Mod1+p workspace p
 bindsym Mod1+z workspace marker
 mode resize {
@@ -241,16 +275,16 @@ include tide-keys.conf
         self.assertEqual(self.connect().request(GET_NAMED_BINDINGS), [
             {"name": "go_a", "type": "key", "keys": ["Mod1+a"], "default_keys": ["Mod1+a"],
              "command": "workspace a", "mode": "default", "release": False, "locked": False,
-             "kept_open": False},
+             "kept_open": False, "description": "Go to a"},
             {"name": "go_b", "type": "key", "keys": ["Mod1+b", "Mod1+c"],
              "default_keys": ["Mod1+b", "Mod1+c"], "command": "workspace b", "mode": "default",
-             "release": False, "locked": False, "kept_open": False},
+             "release": False, "locked": False, "kept_open": False, "description": "Go to b"},
             {"name": "pinned", "type": "key", "keys": ["Mod1+p"], "default_keys": ["Mod1+p"],
              "command": "workspace p", "mode": "default", "release": False, "locked": True,
-             "kept_open": False},
+             "kept_open": False, "description": ""},
             {"name": "grow", "type": "key", "keys": ["Mod1+g"], "default_keys": ["Mod1+g"],
              "command": "workspace grown", "mode": "resize", "release": False, "locked": False,
-             "kept_open": False},
+             "kept_open": False, "description": ""},
         ])
         self.assertEqual({b["keys"]: b["name"] for b in self.connect().request(GET_BINDINGS)}, {
             "Mod1+a": "go_a", "Mod1+b": "go_b", "Mod1+c": "go_b", "Mod1+p": "pinned",
@@ -262,6 +296,21 @@ include tide-keys.conf
         self.assertEqual(self.ran("b"), "marker", "go_b's own keys are gone")
         self.assertEqual(self.ran("c"), "marker")
         self.assertEqual(self.named()["go_b"], (["Mod1+x"], ["Mod1+b", "Mod1+c"]))
+
+    def test_each_key_of_a_name_has_its_description_and_a_rebind_keeps_it(self):
+        def described():
+            return {b["keys"]: b["description"] for b in self.connect().request(GET_BINDINGS)
+                    if b["name"] == "go_b"}
+        self.assertEqual(described(), {"Mod1+b": "Go to b", "Mod1+c": "Go to b"})
+        self.rebind("rebind go_b Mod1+x\n")
+        self.assertEqual(described(), {"Mod1+x": "Go to b"})
+        self.assertEqual(next(b for b in self.connect().request(GET_NAMED_BINDINGS)
+                              if b["name"] == "go_b")["description"], "Go to b")
+
+    def test_redefining_a_name_drops_its_description(self):
+        self.rebind("bindsym --name go_a Mod1+a workspace elsewhere\n")
+        self.assertEqual(next(b for b in self.connect().request(GET_NAMED_BINDINGS)
+                              if b["name"] == "go_a")["description"], "")
 
     def test_rebind_keeps_the_bindings_flags(self):
         self.rebind("rebind pinned Mod1+q\n")
