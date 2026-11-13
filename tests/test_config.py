@@ -90,6 +90,19 @@ class ConfigTest(KeysTest):
         config = self.connect().request(GET_CONFIG)
         self.assertEqual((config["config"], config["errors"]), (CONFIG, [error]))
 
+    def test_a_reload_sends_a_workspace_event_as_i3s(self):
+        ipc = self.workspaces_ipc()
+        self.command(self.connect(), "reload")
+        self.assertEqual(ipc.next_event(EVENT_WORKSPACE, lambda e: e["change"] == "reload"),
+                         {"change": "reload", "current": None, "old": None})
+
+    def test_a_failed_reload_sends_one_too_for_its_errors(self):
+        self.wm.write_config("frobnicate now\n")
+        ipc = self.workspaces_ipc()
+        self.fails("reload")
+        ipc.next_event(EVENT_WORKSPACE, lambda e: e["change"] == "reload")
+        self.assertEqual(len(self.connect().request(GET_CONFIG)["errors"]), 1)
+
     def test_a_modifier_or_key_tidewm_doesnt_know_is_an_error(self):
         self.wm.write_config("bindsym Hyper+x nop\nbindsym Mod1+NoSuchKey nop\n")
         error = self.fails("reload")["error"]
