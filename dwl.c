@@ -223,6 +223,7 @@ typedef struct {
 	struct wlr_keyboard *virtual_keyboard;
 
 	xkb_keysym_t keysyms[2];
+	uint32_t keycode; /* XKB's, of the key that gave keysyms */
 	uint32_t mods;
 	struct wl_event_source *key_repeat_source;
 
@@ -410,7 +411,7 @@ static void pointerfocus(Client *c, LayerSurface* l, struct wlr_surface *surface
 static void printstatus(void);
 static void powermgrsetmode(struct wl_listener *listener, void *data);
 static void quit(const Arg *arg);
-static int runbinding(uint32_t mods, xkb_keysym_t sym);
+static int runbinding(uint32_t mods, uint32_t code, xkb_keysym_t sym);
 static void rendermon(struct wl_listener *listener, void *data);
 static void requestdecorationmode(struct wl_listener *listener, void *data);
 static void requeststartdrag(struct wl_listener *listener, void *data);
@@ -2100,6 +2101,7 @@ keypress(struct wl_listener *listener, void *data)
 	// multiple keysyms per keycode don't really exist in the real world
 	for (int i = 0; i < 2; i++)
 		group->keysyms[i] = keymap_get_one_sym_by_level(kb->keymap, keycode, layout, i);
+	group->keycode = keycode;
 	group->mods = wlr_keyboard_get_modifiers(&group->wlr_group->keyboard);
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
@@ -2112,7 +2114,7 @@ keypress(struct wl_listener *listener, void *data)
 		fg_key();
 		settings_key_pressed(event->keycode, group->mods, group->keysyms);
 		for (int i = 0; i < 2; i++) {
-			if (runbinding(group->mods, group->keysyms[i])) {
+			if (runbinding(group->mods, keycode, group->keysyms[i])) {
 				if (event->keycode <= KEY_MAX)
 					consumed[event->keycode] = 1;
 				handled = 1;
@@ -2193,7 +2195,7 @@ keyrepeat(void *data)
 			1000 / group->wlr_group->keyboard.repeat_info.rate);
 
 	for (int i = 0; i < 2; i++)
-		if (runbinding(group->mods, group->keysyms[i]))
+		if (runbinding(group->mods, group->keycode, group->keysyms[i]))
 			break;
 
 	return 0;
@@ -3217,14 +3219,15 @@ run(char *startup_cmd)
 	wl_display_run(dpy);
 }
 
-/* Runs the binding for these keys: the config file's, once one is loaded,
- * or config.h's. Returns whether there was one. */
+/* Runs the binding for these keys, the key with XKB keycode code giving
+ * sym: the config file's, once one is loaded, or config.h's. Returns
+ * whether there was one. */
 int
-runbinding(uint32_t mods, xkb_keysym_t sym)
+runbinding(uint32_t mods, uint32_t code, xkb_keysym_t sym)
 {
 	const Key *key;
 	if (settings_keys())
-		return settings_run_binding(mods, sym, 0);
+		return settings_run_binding(mods, code, sym, 0);
 	/* config.h's keys are all off on the lock screen */
 	if (locked || !(key = keybinding(mods, sym)))
 		return 0;

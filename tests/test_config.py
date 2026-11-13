@@ -12,6 +12,7 @@ from harness import (EVENT_BINDING, EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MOD
                      GET_VERSION, ROOT, RUN_COMMAND, TIMEOUT, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
+KEYBOARD = os.path.join(ROOT, "tests", "keyboard")
 
 CONFIG = """# Lines like this, and blank ones, are skipped
 
@@ -163,6 +164,7 @@ class BindingsTest(TidewmTest):
 bindsym $mod+Return exec foot
 bindsym --release $mod+d exec launcher
 bindsym --kept-open Ctrl+w kill
+bindcode --locked $mod+38 exec lock
 mode resize {
     bindsym --locked Escape mode default
 }
@@ -172,18 +174,22 @@ bindswitch tablet:toggle workspace tablet
 """
 
     def test_each_binding_with_its_keys_command_and_mode(self):
-        def key(keys, command, mode="default", release=False, locked=False, kept_open=False):
+        def key(keys, command, mode="default", release=False, locked=False, kept_open=False,
+                input_code=0):
             return {"type": "key", "keys": keys, "command": command, "mode": mode,
-                    "release": release, "locked": locked, "kept_open": kept_open, "name": ""}
+                    "release": release, "locked": locked, "kept_open": kept_open, "name": "",
+                    "input_code": input_code}
 
         def switch(keys, command, locked=False):
             return {"type": "switch", "keys": keys, "command": command, "mode": "default",
-                    "release": False, "locked": locked, "kept_open": False, "name": ""}
+                    "release": False, "locked": locked, "kept_open": False, "name": "",
+                    "input_code": 0}
 
         self.assertEqual(self.connect().request(GET_BINDINGS), [
             key("Mod4+Return", "exec foot"),
             key("Mod4+d", "exec launcher", release=True),
             key("Ctrl+w", "kill", kept_open=True),
+            key("Mod4+38", "exec lock", locked=True, input_code=38),
             key("Mod4+r", "mode resize"),
             key("Escape", "mode default", mode="resize", locked=True),
             switch("lid:on", "output eDP-1 disable", locked=True),
@@ -662,6 +668,55 @@ bindsym Mod1+Shift+z nop marker
         binding = ipc.next_event(EVENT_BINDING)["binding"]
         self.assertEqual((binding["command"], binding["event_state_mask"], binding["symbol"]),
                          ("nop marker", ["Shift", "Mod1"], "z"))
+
+
+class BindcodeTest(KeysTest):
+    """bindcode, as sway's: a key by its XKB keycode, evdev's code plus 8,
+    as wev shows it, whatever the layout makes of it. The tests' keyboard
+    sends evdev's codes on a US layout, where 45 is x and 21 is y."""
+    CONFIG = """bindcode 53 workspace coded
+bindcode --release 53 workspace released
+bindsym y workspace typed
+bindcode 29 workspace by_code
+"""
+
+    def tap(self, code):
+        """Presses and lets go of the key with evdev's code."""
+        keyboard = subprocess.Popen([KEYBOARD, "0"],
+                                    env=dict(self.wm.env, XKB_LAYOUT="us", KEY=str(code)),
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.wm.clients.append(keyboard)
+
+    def test_a_keycode_runs_its_press_then_its_release_binding(self):
+        ipc = self.workspaces_ipc()
+        self.tap(45)
+        self.assertEqual([self.shown(ipc), self.shown(ipc)], ["coded", "released"])
+
+    def test_a_keycode_comes_before_its_keysym_as_in_sway(self):
+        ipc = self.workspaces_ipc()
+        self.tap(21)
+        self.assertEqual(self.shown(ipc), "by_code")
+
+    def test_the_binding_event_has_the_code_and_no_symbol(self):
+        ipc = self.connect()
+        ipc.subscribe("binding")
+        self.tap(21)
+        self.assertEqual(ipc.next_event(EVENT_BINDING), {"change": "run", "binding": {
+            "command": "workspace by_code", "event_state_mask": [], "input_code": 29,
+            "symbol": None, "input_type": "keyboard"}})
+
+    def test_bindcode_errors(self):
+        for text, error in [
+            ("bindcode Mod1+x nop\n", ":1: bindcode Mod1+x: x is no keycode, a number from 8 up"),
+            ("bindcode 7 nop\n", ":1: bindcode 7: 7 is no keycode"),
+            ("bindcode 53x nop\n", ":1: bindcode 53x: 53x is no keycode"),
+            ("bindcode Hyper+53 nop\n", ":1: bindcode Hyper+53: no modifier or key is called Hyper"),
+            ("bindcode 53\n", ":1: bindcode needs keys and a command"),
+            ("bindcode --name go 53 nop\n", ":1: bindcode has no flag --name"),
+            ("bindcode --whole-window button1 nop\n", ":1: bindcode has no flag --whole-window"),
+        ]:
+            self.wm.write_config(text)
+            self.assertIn(error, self.fails("reload")["error"], text)
 
 
 class LockedSwitchTest(KeysTest):
