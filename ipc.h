@@ -1159,7 +1159,11 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 	}
 	if (!has_criteria && !strcasecmp(cmd, "reload")) {
 		char errors[512];
-		if (!settings_reload(errors, sizeof(errors)))
+		int ok = settings_reload(errors, sizeof(errors));
+		/* As i3's and sway's, with no workspace; after a failed reload
+		 * too, unlike sway's, as GET_CONFIG's errors change either way */
+		ipc_event_workspace("reload", NULL, NULL);
+		if (!ok)
 			return ipc_json_success(0, errors);
 		return ipc_json_success(1, NULL);
 	}
@@ -1985,8 +1989,8 @@ ipc_event_binding(const char *command, uint32_t mods, xkb_keysym_t sym, uint32_t
 	ipc_broadcast(IpcEvBinding, obj);
 }
 
-/* A workspace event: init, empty, focus (with the old one), rename or
- * urgent. */
+/* A workspace event: init, empty, focus (with the old one), rename,
+ * urgent, or reload, with neither. */
 static void
 ipc_event_workspace(const char *change, Workspace *cur, Workspace *old)
 {

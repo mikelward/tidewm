@@ -520,7 +520,7 @@ fails is written to stderr, with the binding's keys.
 
 | Request | Gives |
 |---|---|
-| `reload` (a command) | Reads the file again; fails with its errors and keeps what was loaded. Without the file, goes back to `config.h`'s keys |
+| `reload` (a command) | Reads the file again; fails with its errors and keeps what was loaded. Without the file, goes back to `config.h`'s keys. Either way, it sends a `workspace` event with `"change": "reload"`, as i3 does |
 | `GET_CONFIG` (type 9) | `config`, the loaded file's text (`""` with `config.h`'s keys), and tidewm's own `path`, where it looks, and `errors`, the last load's |
 | `GET_VERSION` | Its `loaded_config_file_name` is the loaded file, or `""` |
 | `mode NAME` (a command) | Makes `NAME` the mode, or `default` the top level; fails for a mode the file hasn't |
