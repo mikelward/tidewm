@@ -4,7 +4,7 @@ kill, and a close_refused event says so, for the shell to tell you why.
 A binding with --kept-open counts only while the keyboard is in a window
 kept open, so it can take an app's own close keys from that window alone.
 It's kept open on the workspace it's on: on any other, however it got
-there, it isn't, and minimized, it closes as any other (docs/ipc.md,
+there, it isn't. Minimized, it's still kept open (docs/ipc.md,
 docs/config.md)."""
 
 import os
@@ -165,12 +165,14 @@ class KeepOpenTest(KeepOpenHelpers):
         again = self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "new")["container"]
         self.assertEqual((again["id"], again["keep_open"]), (a, False))
 
-    def test_minimized_it_closes_as_any_other(self):
-        _, a = self.open("test.kept")
+    def test_minimized_it_stays_open(self):
+        client, a = self.open("test.kept")
         self.keep(a)
         self.command(self.connect(), f"[con_id={a}] minimize")
-        self.command(self.connect(), f"[con_id={a}] kill")
-        self.closed(a)
+        self.assertTrue(self.windows()[a]["keep_open"])
+        self.assertEqual(self.fails(f"[con_id={a}] kill"), "The window is kept open")
+        self.refused(a)
+        self.still_open(client)
 
     def test_keep_open_errors(self):
         _, a = self.open("test.kept")
