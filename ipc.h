@@ -1951,11 +1951,12 @@ ipc_event_window(Client *c, const char *change)
 }
 
 /* A binding event, as sway's: the config file's binding of mods and sym,
- * or of the button or scroll named name, ran command, as a tap of Super
- * runs tide's launcher's */
+ * or of keycode code (a bindcode's, whose symbol is null), or of the
+ * button or scroll named name, ran command, as a tap of Super runs tide's
+ * launcher's */
 static void
-ipc_event_binding(const char *command, uint32_t mods, xkb_keysym_t sym, const char *name,
-		const char *input_type)
+ipc_event_binding(const char *command, uint32_t mods, xkb_keysym_t sym, uint32_t code,
+		const char *name, const char *input_type)
 {
 	/* WLR_MODIFIER_SHIFT up to WLR_MODIFIER_MOD5, as sway names them */
 	static const char *const names[] = {
@@ -1973,7 +1974,7 @@ ipc_event_binding(const char *command, uint32_t mods, xkb_keysym_t sym, const ch
 	binding = json_object_new_object();
 	json_object_object_add(binding, "command", json_object_new_string(command));
 	json_object_object_add(binding, "event_state_mask", mask);
-	json_object_object_add(binding, "input_code", json_object_new_int(0));
+	json_object_object_add(binding, "input_code", json_object_new_int64(code));
 	json_object_object_add(binding, "symbol", name ? json_object_new_string(name)
 			: sym != XKB_KEY_NoSymbol && xkb_keysym_get_name(sym, symbol, sizeof(symbol)) > 0
 			? json_object_new_string(symbol) : NULL);

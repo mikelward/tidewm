@@ -38,6 +38,7 @@ supported yet. In an `input` or `output` line, a name or value may be in
 | `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
 | `include PATH` | As sway's: reads each file `PATH` matches, a word or text in `"` that may be a pattern such as `tide-*.conf`, in order, as if its lines were here, so a shell can keep settings of its own in a file the config takes in. `~/` is your home, and a relative path is from the directory of the file the line is in. A file that isn't there, or a pattern nothing matches, includes nothing. Variables set before it hold in it, and those it sets hold after. Only at the top level: a mode or input block an included file opens closes in it. Includes nest 10 deep at most. `reload` reads them again, and an error in one names that file |
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
+| `bindcode KEYS COMMANDS` | As sway's: `bindsym`, with the key as its keycode, as below |
 | `rebind NAME KEYS...`, `rebind NAME none` | tidewm's own: gives the binding `bindsym --name NAME` named these keys in place of the ones it has, or none, so a shell's keyboard shortcuts can change one ([Named bindings](#named-bindings)). Only at the top level |
 | `bindswitch [--locked] SWITCH:STATE COMMANDS` | As sway's: a switch turning on, off or either (`lid:on`, `lid:off`, `lid:toggle`, and `tablet:` likewise) runs `COMMANDS`; on the lock screen, only a `--locked` one. Not in a mode. `bindswitch lid:on output eDP-1 disable` and `bindswitch --locked lid:off output eDP-1 enable` turn a laptop's panel off while its lid is closed, and its windows move over; like sway, it does so whether or not another output is on |
 | `for_window [CRITERIA] COMMANDS` | Runs `COMMANDS` on each new window `CRITERIA` match, as below |
@@ -69,6 +70,12 @@ supported yet. In an `input` or `output` line, a name or value may be in
   the x key, so `Mod1+X` and `Mod1+x` are the same binding. A key matches
   whether it's typed shifted or not, so `Mod1+Shift+period` and
   `Mod1+Shift+greater` both work on a US keyboard.
+- **Keycodes:** a `bindcode` line's key is a keycode, as `wev` and `xev`
+  show it, evdev's code plus 8, from 8 up: `bindcode Mod4+38 ...` is
+  Super and the key where a US keyboard has A, whatever the layout. It
+  takes the same flags as `bindsym`, but not `--whole-window` or
+  `--name`. A `bindcode` binding of a key comes before a `bindsym` one,
+  as in sway.
 
 A later binding of the same keys replaces an earlier one, though a
 `--release` binding is apart from the press one, and a `--kept-open` one
@@ -476,7 +483,7 @@ canceled grant places on another workspace.
 ## Errors
 
 Each error names the file, the line and what's wrong, as
-`/path/to/config:12: no setting is called bindcode`.
+`/path/to/config:12: no setting is called bindgesture`.
 
 - **At startup**, tidewm writes the errors to stderr and leaves those
   lines out: the rest of the file loads, with its keys and the commands

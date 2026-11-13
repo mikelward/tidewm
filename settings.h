@@ -19,7 +19,8 @@
 
 typedef struct {
 	uint32_t mods;
-	xkb_keysym_t sym;
+	xkb_keysym_t sym; /* a bindsym's key; XKB_KEY_NoSymbol for a bindcode's */
+	uint32_t code; /* a bindcode's key, an XKB keycode; 0 for a bindsym's */
 	int release; /* runs when the key comes up, if it was tapped */
 	int locked; /* runs while the screen is locked, too */
 	int kept_open; /* counts only while the keyboard's in a window kept open */
@@ -35,6 +36,7 @@ typedef struct {
 	int locked; /* runs while the screen is locked, too */
 	int kept_open; /* counts only while the keyboard's in a window kept open */
 	int whole_window; /* binds a button, or scroll, rather than a key */
+	int code; /* a bindcode line's: the key is a keycode, not a keysym */
 } BindingFlags;
 
 /* A named binding, bindsym --name's: one action, whose keys are its
@@ -533,6 +535,23 @@ settings_add_switch(Settings *s, char *rest, unsigned int line, struct json_obje
 	return 1;
 }
 
+/* A bindcode line's key: an XKB keycode, as wev and xev show it, evdev's
+ * code plus 8, in decimal, into *code. Returns whether it's one. */
+static int
+settings_parse_code(const char *word, uint32_t *code)
+{
+	unsigned long n;
+	char *end;
+	if (!isdigit((unsigned char)*word))
+		return 0;
+	errno = 0;
+	n = strtoul(word, &end, 10);
+	if (*end || errno || n < 8 || n > UINT32_MAX)
+		return 0;
+	*code = (uint32_t)n;
+	return 1;
+}
+
 /* Adds a binding of combo to the mode, running command, named if it's
  * not 0, or reports why it can't, as "what combo: why". */
 static int
@@ -541,7 +560,7 @@ settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
 {
 	char *spec, *last;
 	const char *bad = NULL;
-	uint32_t mods, button = 0;
+	uint32_t mods, button = 0, code = 0;
 	xkb_keysym_t sym = XKB_KEY_NoSymbol;
 	size_t i;
 	Binding *b;
@@ -554,7 +573,7 @@ settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
 	}
 	/* A button, as sway's: over a window, or none, with --whole-window,
 	 * as tidewm has no title bars, where sway's runs without it */
-	if ((button = settings_button(last)) && !f.whole_window) {
+	if (!f.code && (button = settings_button(last)) && !f.whole_window) {
 		settings_error(errors, line, "%s %s: a button's binding needs --whole-window, "
 				"as there are no title bars", what, spec);
 		free(spec);
@@ -572,7 +591,13 @@ settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
 		free(spec);
 		return 0;
 	}
-	if (!button && !settings_parse_keys(combo, &mods, &sym, &bad)) {
+	if (f.code && !settings_parse_code(last, &code)) {
+		settings_error(errors, line, "%s %s: %s is no keycode, a number from 8 up, "
+				"as wev shows it", what, spec, last);
+		free(spec);
+		return 0;
+	}
+	if (!button && !f.code && !settings_parse_keys(combo, &mods, &sym, &bad)) {
 		settings_error(errors, line, "%s %s: no modifier or key is called %s", what, spec, bad);
 		free(spec);
 		return 0;
@@ -582,8 +607,8 @@ settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
 	 * for every window */
 	for (i = 0; i < mode->nbindings; i++) {
 		b = &mode->bindings[i];
-		if (b->mods == mods && b->sym == sym && b->button == button && b->release == f.release
-				&& b->kept_open == f.kept_open) {
+		if (b->mods == mods && b->sym == sym && b->code == code && b->button == button
+				&& b->release == f.release && b->kept_open == f.kept_open) {
 			free(b->keys);
 			free(b->command);
 			break;
@@ -597,6 +622,7 @@ settings_put_binding(Mode *mode, const char *what, char *combo, BindingFlags f,
 	}
 	b->mods = mods;
 	b->sym = sym;
+	b->code = code;
 	b->button = button;
 	b->release = f.release;
 	b->locked = f.locked;
@@ -696,15 +722,19 @@ settings_add_named(Settings *s, size_t mode, const char *name, const char *combo
 	return (size_t)(n - s->named) + 1;
 }
 
-/* A bindsym line: "[FLAGS] KEYS COMMAND", in the mode. */
+/* A bindsym line: "[FLAGS] KEYS COMMAND", in the mode; or with code, a
+ * bindcode line, whose key is a keycode, and which takes no --name or
+ * --whole-window. */
 static int
-settings_add_binding(Settings *s, size_t mode, char *rest, unsigned int line,
+settings_add_binding(Settings *s, size_t mode, char *rest, int code, unsigned int line,
 		struct json_object *errors)
 {
+	const char *what = code ? "bindcode" : "bindsym";
 	BindingFlags f = {0};
 	char *combo, *name = NULL;
 	size_t named = 0;
 
+	f.code = code;
 	while (rest[0] == '-' && rest[1] == '-') {
 		char *flag = settings_word(&rest);
 		if (!strcmp(flag, "--release")) {
@@ -713,6 +743,10 @@ settings_add_binding(Settings *s, size_t mode, char *rest, unsigned int line,
 			f.locked = 1;
 		} else if (!strcmp(flag, "--kept-open")) {
 			f.kept_open = 1;
+		} else if (code) {
+			/* A button has no keycode, and rebind takes keysyms */
+			settings_error(errors, line, "bindcode has no flag %s", flag);
+			return 0;
 		} else if (!strcmp(flag, "--whole-window")) {
 			f.whole_window = 1;
 		} else if (!strncmp(flag, "--name=", 7) && flag[7]) {
@@ -729,7 +763,7 @@ settings_add_binding(Settings *s, size_t mode, char *rest, unsigned int line,
 	}
 	combo = settings_word(&rest);
 	if (!*combo || !*rest) {
-		settings_error(errors, line, "bindsym needs keys and a command");
+		settings_error(errors, line, "%s needs keys and a command", what);
 		return 0;
 	}
 	/* A named line's keys are checked before the name takes it, which can
@@ -749,7 +783,7 @@ settings_add_binding(Settings *s, size_t mode, char *rest, unsigned int line,
 		if (!ok || !(named = settings_add_named(s, mode, name, combo, f, rest, line, errors)))
 			return 0;
 	}
-	return settings_put_binding(&s->modes[mode], "bindsym", combo, f, rest, named, line, errors);
+	return settings_put_binding(&s->modes[mode], what, combo, f, rest, named, line, errors);
 }
 
 /* Writes a problem with a line that doesn't stop the file loading to
@@ -1926,8 +1960,8 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 		} else if (output) {
 			free(output);
 			output = NULL;
-		} else if (!strcasecmp(word, "bindsym")) {
-			ok &= settings_add_binding(s, mode, p, line, errors);
+		} else if (!strcasecmp(word, "bindsym") || !strcasecmp(word, "bindcode")) {
+			ok &= settings_add_binding(s, mode, p, !strcasecmp(word, "bindcode"), line, errors);
 		} else if (!strcasecmp(word, "rebind")) {
 			if (mode) {
 				settings_error(errors, line, "rebind can't be in a mode");
@@ -2459,14 +2493,16 @@ settings_loaded_path(void)
 	return settings ? settings_path : "";
 }
 
-/* The current mode's press or release binding for these keys, or NULL.
- * While the screen is locked, only a --locked one counts. A --kept-open
- * one counts only while the keyboard's in a window kept open, and then
- * before one for every window; otherwise the key goes to the window. */
+/* The current mode's press or release binding for these keys, the key
+ * with XKB keycode code giving sym, or NULL. A bindcode binding comes
+ * before a bindsym one, as in sway. While the screen is locked, only a
+ * --locked one counts. A --kept-open one counts only while the keyboard's
+ * in a window kept open, and then before one for every window; otherwise
+ * the key goes to the window. */
 static const Binding *
-settings_find(uint32_t mods, xkb_keysym_t sym, int release)
+settings_find(uint32_t mods, uint32_t code, xkb_keysym_t sym, int release)
 {
-	const Binding *found = NULL;
+	const Binding *found = NULL, *kept_found = NULL, **slot;
 	const Mode *mode;
 	size_t i;
 	int kept = -1; /* not asked yet */
@@ -2475,19 +2511,21 @@ settings_find(uint32_t mods, xkb_keysym_t sym, int release)
 	mode = &settings->modes[settings_mode];
 	for (i = 0; i < mode->nbindings; i++) {
 		const Binding *b = &mode->bindings[i];
-		if (b->button || b->mods != CLEANMASK(mods) || b->sym != sym
+		if (b->button || b->mods != CLEANMASK(mods) || (b->code ? b->code != code : b->sym != sym)
 				|| b->release != release || (locked && !b->locked))
 			continue;
-		if (!b->kept_open) {
-			found = found ? found : b;
-			continue;
+		slot = &found;
+		if (b->kept_open) {
+			if (kept < 0)
+				kept = keyboard_kept_open();
+			if (!kept)
+				continue;
+			slot = &kept_found;
 		}
-		if (kept < 0)
-			kept = keyboard_kept_open();
-		if (kept)
-			return b;
+		if (!*slot || (b->code && !(*slot)->code))
+			*slot = b;
 	}
-	return found;
+	return kept_found ? kept_found : found;
 }
 
 /* Runs a binding's or a rule's commands, on window if it's given, and
@@ -2516,15 +2554,15 @@ settings_run(const char *commands, const char *what, Client *window)
 /* Runs the loaded file's press or release binding for these keys.
  * Returns whether it has one. */
 static int
-settings_run_binding(uint32_t mods, xkb_keysym_t sym, int release)
+settings_run_binding(uint32_t mods, uint32_t code, xkb_keysym_t sym, int release)
 {
-	const Binding *b = settings_find(mods, sym, release);
+	const Binding *b = settings_find(mods, code, sym, release);
 	char what[300];
 	if (!b)
 		return 0;
 	snprintf(what, sizeof(what), "binding %s", b->keys);
 	/* Said first, as the command may reload the file b is in */
-	ipc_event_binding(b->command, b->mods, b->sym, NULL, "keyboard");
+	ipc_event_binding(b->command, b->mods, b->sym, b->code, NULL, "keyboard");
 	focus_asked++;
 	settings_run(b->command, what, NULL);
 	focus_asked--;
@@ -2599,7 +2637,7 @@ settings_run_button(uint32_t mods, uint32_t button)
 	snprintf(what, sizeof(what), "binding %s", b->keys);
 	/* Copied first, as the command may reload the file b is in */
 	command = settings_strdup(b->command, strlen(b->command));
-	ipc_event_binding(command, b->mods, XKB_KEY_NoSymbol, symbol, "mouse");
+	ipc_event_binding(command, b->mods, XKB_KEY_NoSymbol, 0, symbol, "mouse");
 	focus_asked++;
 	settings_run(command, what, NULL);
 	focus_asked--;
@@ -2642,7 +2680,7 @@ settings_run_switch(int type, int on)
 		snprintf(what, sizeof(what), "bindswitch %s", type == WLR_SWITCH_TYPE_LID ? "lid" : "tablet");
 		/* Copied first, as the command may reload the file b is in */
 		command = settings_strdup(b->command, strlen(b->command));
-		ipc_event_binding(command, 0, XKB_KEY_NoSymbol, NULL, "switch");
+		ipc_event_binding(command, 0, XKB_KEY_NoSymbol, 0, NULL, "switch");
 		settings_run(command, what, NULL);
 		free(command);
 	}
@@ -3972,7 +4010,7 @@ settings_key_pressed(uint32_t keycode, uint32_t mods, const xkb_keysym_t syms[2]
 	int i;
 	settings_tap.armed = 0;
 	for (i = 0; i < 2; i++) {
-		if (settings_find(mods, syms[i], 1)) {
+		if (settings_find(mods, keycode + 8, syms[i], 1)) {
 			settings_tap.armed = 1;
 			settings_tap.keycode = keycode;
 			settings_tap.mods = mods;
@@ -3999,7 +4037,7 @@ settings_key_released(uint32_t keycode)
 	if (!settings_tap.armed || settings_tap.keycode != keycode)
 		return 0;
 	settings_tap.armed = 0;
-	return settings_run_binding(settings_tap.mods, settings_tap.sym, 1);
+	return settings_run_binding(settings_tap.mods, settings_tap.keycode + 8, settings_tap.sym, 1);
 }
 
 /* The mode command: makes name's bindings the ones in force. Returns 0 if
@@ -4046,10 +4084,11 @@ settings_json_modes(void)
 	return list;
 }
 
-/* The config file's bindings, for GET_BINDINGS: each mode's bindsym
- * lines, the top level's first, with their keys as written, after its
- * variables, then the bindswitch lines, each as sway's identifier for its
- * switch and state. config.h's keys, which have no commands to show, are
+/* The config file's bindings, for GET_BINDINGS: each mode's bindsym and
+ * bindcode lines, the top level's first, with their keys as written, after
+ * its variables, and a bindcode's keycode as input_code, as sway's binding
+ * event has it; then the bindswitch lines, each as sway's identifier for
+ * its switch and state. config.h's keys, which have no commands to show, are
  * left out: without a file, there are none. */
 static struct json_object *
 settings_json_bindings(void)
@@ -4073,6 +4112,7 @@ settings_json_bindings(void)
 			json_object_object_add(b, "kept_open", json_object_new_boolean(k->kept_open));
 			json_object_object_add(b, "name", json_object_new_string(
 					k->named ? settings->named[k->named - 1].name : ""));
+			json_object_object_add(b, "input_code", json_object_new_int64(k->code));
 			json_object_array_add(list, b);
 		}
 	}
@@ -4089,6 +4129,7 @@ settings_json_bindings(void)
 		json_object_object_add(b, "locked", json_object_new_boolean(sw->locked));
 		json_object_object_add(b, "kept_open", json_object_new_boolean(0));
 		json_object_object_add(b, "name", json_object_new_string(""));
+		json_object_object_add(b, "input_code", json_object_new_int(0));
 		json_object_array_add(list, b);
 	}
 	return list;
