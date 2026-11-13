@@ -307,8 +307,8 @@ and a `close_refused` window event lets a shell say why. A key bound
 with `--kept-open` counts only while you're typing in such a window, so a
 config can take an app's own close keys, as Ctrl+W, from it alone: every
 other window still gets them. It's kept open on the workspace it's on:
-on any other, however it got there, it isn't, and minimized it closes as
-any other.
+on any other, however it got there, it isn't. Minimized, it's still
+kept open.
 The window's own close button still closes it.
 
 ### Touchpad gestures
