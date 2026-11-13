@@ -56,6 +56,14 @@ static const int resize_grab               = 4;
  * to 1, black; tide's is 0.07 (its SPEC §6.2) */
 static const float dim_inactive            = 0;
 
+/* How long a fade takes, in milliseconds: a window's as it opens, and the
+ * dim's as focus moves; 0, as it comes, makes them instant. tide's is 300,
+ * as its Hyprland config's (effects.h). */
+static const int fade_duration             = 0;
+
+/* Whether a floating window casts a soft shadow; tide's does (effects.h) */
+static const int shadows                   = 0;
+
 static const Rule rules[] = {
 	/* app_id             title       workspace     isfloating   monitor */
 	{ "Gimp_EXAMPLE",     NULL,       NULL,         1,           -1 }, /* Start on the current workspace, floating, not tiled */

@@ -224,6 +224,8 @@ typedef struct {
 	size_t ninputs;
 	int focus_guard; /* focus_guard enable|disable; -1: not given */
 	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
+	int fade_duration; /* fade_duration MILLISECONDS; -1: not given */
+	int shadows; /* shadows enable|disable; -1: not given */
 	int resize_grab; /* resize_grab PIXELS; -1: not given */
 	int border; /* default_border none|pixel [N]: its width; -1: not given */
 	int xwayland_scaling; /* xwayland_scaling enable|disable; -1: not given */
@@ -264,6 +266,7 @@ static int settings_enable_any_mode(struct wlr_output *wlr_output);
 static int settings_apply_inputs(const InputConfig *only);
 static void fg_arm(void);
 static void dim_update(void);
+static void shadow_update_all(void);
 static int settings_keys(void);
 static void settings_group_register(KeyboardGroup *group);
 static void settings_free_input(InputConfig *ic);
@@ -1745,6 +1748,38 @@ settings_dim(Settings *s, char *rest, unsigned int line, struct json_object *err
 	return 1;
 }
 
+/* A fade_duration line: how long a fade takes, in milliseconds, up to an
+ * hour; 0 makes them instant (effects.h) */
+static int
+settings_fade_duration(Settings *s, char *rest, unsigned int line,
+		struct json_object *errors)
+{
+	char *end;
+	long v;
+	errno = 0;
+	v = strtol(rest, &end, 10);
+	if (!*rest || *end || errno || v < 0 || v > 3600000) {
+		settings_error(errors, line, "fade_duration takes milliseconds, from 0 to 3600000");
+		return 0;
+	}
+	s->fade_duration = (int)v;
+	return 1;
+}
+
+/* A shadows line: enable, for a soft shadow under each floating window,
+ * or disable (effects.h) */
+static int
+settings_shadows(Settings *s, char *rest, unsigned int line, struct json_object *errors)
+{
+	char *word = settings_arg(&rest);
+	if (!word || (strcmp(word, "enable") && strcmp(word, "disable")) || *rest) {
+		settings_error(errors, line, "shadows takes enable or disable");
+		return 0;
+	}
+	s->shadows = !strcmp(word, "enable");
+	return 1;
+}
+
 /* A default_border line, as sway's: none, or pixel and how wide, 0 to
  * 100, config.h's borderpx without one. tidewm has no title bars, so
  * there's no normal, and one width serves tiled and floating windows. */
@@ -2109,6 +2144,20 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			} else {
 				ok &= settings_dim(s, p, line, errors);
 			}
+		} else if (!strcasecmp(word, "fade_duration")) {
+			if (mode) {
+				settings_error(errors, line, "fade_duration can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_fade_duration(s, p, line, errors);
+			}
+		} else if (!strcasecmp(word, "shadows")) {
+			if (mode) {
+				settings_error(errors, line, "shadows can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_shadows(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "default_border")) {
 			if (mode) {
 				settings_error(errors, line, "default_border can't be in a mode");
@@ -2317,6 +2366,8 @@ settings_parse(char *text, struct json_object *errors, int partial)
 	s->text = text;
 	s->focus_guard = -1;
 	s->dim_inactive = -1;
+	s->fade_duration = -1;
+	s->shadows = -1;
 	s->resize_grab = -1;
 	s->border = -1;
 	s->new_window = -1;
@@ -2441,8 +2492,9 @@ settings_load(int partial)
 		lt_reset_modes();
 	/* A notification's grant lapses by the new grant_seconds */
 	fg_arm();
-	/* Windows dim at the new strength */
+	/* Windows dim at the new strength, and cast shadows, or not, at once */
 	dim_update();
+	shadow_update_all();
 	/* Borders take the new width at once */
 	border_update();
 	/* X11 windows scale, or not, at once; with no file, they scale */
