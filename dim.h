@@ -7,7 +7,8 @@
  * apart, a monitor showing one window or a fullscreen one, nothing dims;
  * nor does a window that would look broken dimmed: picture-in-picture,
  * video by its content type, and one the dim command or a for_window rule
- * exempts. A window's menus and tooltips stay over the layer.
+ * exempts. A window's menus and tooltips stay over the layer. As focus
+ * moves, the dim fades (effects.h), unless the window wasn't shown before.
  */
 
 /* The layer's one black pixel, which each window's scene buffer stretches */
@@ -127,18 +128,56 @@ dim_wanted(Client *c, float strength)
 			&& dim_shown(c->mon) > 1;
 }
 
-/* Dims c, or not, as it is now */
+/* Shows c's dim at the strength it has reached, as far in as c is while
+ * it fades in as it opens (effects.h) */
+static void
+dim_apply(Client *c)
+{
+	if (!c->dim)
+		return;
+	wlr_scene_node_set_enabled(&c->dim->node, c->dim_now > 0);
+	if (c->dim_now > 0)
+		wlr_scene_buffer_set_opacity(c->dim, c->fading_in ? c->dim_now * c->fade_now : c->dim_now);
+}
+
+/* Dims c, or not, as it is now: fading there, if it was shown and is
+ * still, or at once */
 static void
 dim_update_one(Client *c)
 {
-	float strength = dim_strength();
-	int on;
+	float strength = dim_strength(), to;
+	int shown;
 	if (!c->dim)
 		return;
-	on = dim_wanted(c, strength);
-	wlr_scene_node_set_enabled(&c->dim->node, on);
-	if (on)
-		wlr_scene_buffer_set_opacity(c->dim, strength);
+	to = dim_wanted(c, strength) ? strength : 0;
+	shown = c->mon && VISIBLEON(c, c->mon);
+	if (!shown || !c->dim_seen || fx_fade_duration() <= 0) {
+		c->dim_now = c->dim_from = c->dim_to = to;
+		dim_apply(c);
+	} else if (to != c->dim_to) {
+		c->dim_from = c->dim_now;
+		c->dim_to = to;
+		c->dim_start = fx_now();
+		wlr_output_schedule_frame(c->mon->wlr_output);
+	}
+	c->dim_seen = shown;
+}
+
+/* Steps c's dim's fade as its monitor draws a frame (effects.h) */
+static void
+dim_step(Client *c, int64_t now, int *more)
+{
+	double p;
+	if (!c->dim || c->dim_now == c->dim_to)
+		return;
+	p = fx_eased(c->dim_start, now);
+	if (p >= 1.0) {
+		c->dim_now = c->dim_to;
+	} else {
+		c->dim_now = c->dim_from + (c->dim_to - c->dim_from) * (float)p;
+		*more = 1;
+	}
+	dim_apply(c);
 }
 
 /* Dims every window, or not, as it is now: after focus moves, the

@@ -400,9 +400,10 @@ ipc_json_window(Client *c)
 	json_object_object_add(obj, "visible", json_object_new_boolean(c->mon && VISIBLEON(c, c->mon)));
 	json_object_object_add(obj, "fullscreen_mode", json_object_new_int(c->isfullscreen));
 	json_object_object_add(obj, "sticky", json_object_new_boolean(c->issticky));
-	/* tidewm's own: whether it dims when it isn't focused, and is now */
+	/* tidewm's own: whether it dims when it isn't focused, and is now, or
+	 * is fading to dimmed (effects.h) */
 	json_object_object_add(obj, "dim", json_object_new_boolean(!c->nodim));
-	json_object_object_add(obj, "dimmed", json_object_new_boolean(c->dim && c->dim->node.enabled));
+	json_object_object_add(obj, "dimmed", json_object_new_boolean(c->dim && c->dim_to > 0));
 	/* tidewm's own, tide's SPEC §6.3: over the window area, the bar showing */
 	json_object_object_add(obj, "maximized", json_object_new_boolean(c->ismaximized));
 	/* tidewm's own, tide's SPEC §6.7: hidden until it's focused */

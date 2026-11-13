@@ -12,10 +12,13 @@
  *
  * capture shot APP_ID instead takes one frame of the window, as grim -T
  * does, into shared memory, and prints its size and the color of its
- * middle pixel as "WIDTHxHEIGHT RRGGBB", or "failed REASON".
+ * middle pixel as "WIDTHxHEIGHT RRGGBB", or "failed REASON". capture
+ * pixels X,Y... takes one frame of the first output, as grim does, and
+ * prints the color of each pixel named, in the output's own pixels, as
+ * "RRGGBB ...", "none" for one outside it.
  *
  * Usage: capture output | capture window APP_ID | capture cursor |
- *        capture shot APP_ID
+ *        capture shot APP_ID | capture pixels X,Y...
  */
 #define _GNU_SOURCE /* memfd_create */
 #include <stdint.h>
@@ -38,6 +41,7 @@ static struct ext_output_image_capture_source_manager_v1 *output_sources;
 static struct ext_foreign_toplevel_image_capture_source_manager_v1 *toplevel_sources;
 static struct ext_image_copy_capture_manager_v1 *copy_capture;
 static const char *wanted; /* the app ID of the window to capture */
+static char **points; /* capture pixels' X,Y, NULL-terminated */
 static struct ext_foreign_toplevel_handle_v1 *found;
 
 static void
@@ -277,6 +281,19 @@ shot(struct wl_display *display, struct ext_image_copy_capture_session_v1 *sessi
 			die("lost the compositor");
 	if (shot_failure) {
 		printf("failed %s\n", shot_failure);
+	} else if (points) {
+		char **p;
+		for (p = points; *p; p++) {
+			unsigned int x, y;
+			if (sscanf(*p, "%u,%u", &x, &y) != 2)
+				die("a pixel is X,Y");
+			if (x < shot_width && y < shot_height)
+				printf("%s%06x", p == points ? "" : " ",
+						pixels[y * shot_width + x] & 0xffffff);
+			else
+				printf("%snone", p == points ? "" : " ");
+		}
+		printf("\n");
 	} else {
 		middle = pixels[(shot_height / 2) * shot_width + shot_width / 2];
 		printf("%ux%u %06x\n", shot_width, shot_height, middle & 0xffffff);
@@ -298,11 +315,15 @@ main(int argc, char *argv[])
 	int of_cursor = argc == 2 && !strcmp(argv[1], "cursor");
 	int a_shot = argc == 3 && !strcmp(argv[1], "shot");
 
-	if (argc == 3 && (!strcmp(argv[1], "window") || a_shot))
+	if (argc >= 3 && !strcmp(argv[1], "pixels")) {
+		points = argv + 2;
+		a_shot = 1;
+	} else if (argc == 3 && (!strcmp(argv[1], "window") || a_shot)) {
 		wanted = argv[2];
-	else if (argc != 2 || (strcmp(argv[1], "output") && !of_cursor))
+	} else if (argc != 2 || (strcmp(argv[1], "output") && !of_cursor)) {
 		die("usage: capture output | capture window APP_ID | capture cursor | "
-				"capture shot APP_ID");
+				"capture shot APP_ID | capture pixels X,Y...");
+	}
 	if (!(display = wl_display_connect(NULL)))
 		die("can't connect to the compositor");
 	wl_registry_add_listener(wl_display_get_registry(display), &registry_listener, NULL);

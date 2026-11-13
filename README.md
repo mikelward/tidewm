@@ -246,6 +246,13 @@ app's content type (wp-content-type-v1), and a window the `dim disable`
 command exempts, as a `for_window` rule can for a screen share's preview.
 A window's menus and tooltips aren't dimmed.
 
+### Fades and shadows
+
+With `fade_duration 300` in the config file, a window fades in over 300
+milliseconds as it opens, and the dim fades as focus moves, as in tide's
+Hyprland config. With `shadows enable`, a floating window casts a soft
+shadow, which clicks go through. Both are off in `config.h` as it comes.
+
 ### X11 at a fractional scale
 
 With `xwayland_scaling disable` in the config file, X11 windows are in
@@ -379,7 +386,7 @@ Feature *non-goals* for the main codebase include:
 - Client-side decoration (any more than is necessary to tell the clients not to)
 - Client-initiated window management, such as move, resize, and close, which can
   be done through the compositor
-- Animations and visual effects
+- Animations and visual effects, beyond tide's fades and shadows
 
 ## Acknowledgements
 

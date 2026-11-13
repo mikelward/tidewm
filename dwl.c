@@ -200,6 +200,14 @@ typedef struct {
 	int issticky; /* floating, it's on every workspace, as sway's sticky */
 	int recenter; /* it followed its parent: to its middle once laid out */
 	struct wlr_scene_buffer *dim; /* dim.h's layer over it */
+	float dim_now, dim_from, dim_to; /* the dim's strength: shown, and fading from and to */
+	int64_t dim_start; /* when its fade started (effects.h's fx_now) */
+	int dim_seen; /* shown at the last dim_update, so a change fades */
+	int fading_in; /* fading in as it opened (effects.h) */
+	float fade_now; /* how far in, from 0 to 1, while it is */
+	int64_t fade_start; /* when it started */
+	struct wlr_scene_tree *shadow; /* effects.h's, under it */
+	struct wlr_scene_buffer *shadow_part[8];
 	int nodim; /* the dim command's or a rule's: it never dims */
 	int wantsfullscreen; /* asked for fullscreen while held, so waits for focus */
 	struct wlr_box unmaximized; /* its place before it was maximized; none if it opened so */
@@ -597,6 +605,7 @@ static struct wlr_xwayland *xwayland;
 #include "grab.h"
 #include "split.h"
 #include "floating.h"
+#include "effects.h"
 #include "dim.h"
 #include "capture.h"
 #include "gesture.h"
@@ -712,6 +721,10 @@ arrange(Monitor *m)
 				placefloating(c, c->geom);
 		}
 	} while (recentered);
+	/* Floated, fullscreen or maximized, or not, it casts a shadow, or not */
+	wl_list_for_each(c, &clients, link)
+		if (c->mon == m)
+			shadow_update(c);
 	dim_update();
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
@@ -1013,6 +1026,7 @@ cleanup(void)
 		ownswitch = NULL;
 	}
 	dim_finish();
+	fx_finish();
 	settings_finish();
 	lt_finish();
 	ws_protocol_finish();
@@ -2302,6 +2316,7 @@ mapnotify(struct wl_listener *listener, void *data)
 		c->border[i]->node.data = c;
 	}
 	dim_attach(c);
+	shadow_attach(c);
 
 	/* Initialize client geometry with room for border */
 	client_set_tiled(c, WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT |
@@ -2372,6 +2387,7 @@ mapnotify(struct wl_listener *listener, void *data)
 		placefloating(c, asked);
 	}
 	printstatus();
+	fade_in(c);
 	/* Now it has a monitor, workspace and floating state; its focus waited for this */
 	ipc_event_window(c, "new");
 	if (c == focused_client)
@@ -3061,6 +3077,9 @@ rendermon(struct wl_listener *listener, void *data)
 	Monitor *m = wl_container_of(listener, m, frame);
 	struct timespec now;
 
+	/* Its fades, before it's drawn: an app's commit since may have set
+	 * its surfaces' opacity again */
+	fx_frame(m);
 	if (!wlr_scene_output_needs_frame(m->scene_output)) {
 		return;
 	}
@@ -3131,6 +3150,7 @@ resize(Client *c, struct wlr_box geo, int interact)
 	wlr_scene_node_set_position(&c->border[3]->node, c->geom.width - c->bw, c->bw);
 	if (c->dim)
 		wlr_scene_buffer_set_dest_size(c->dim, c->geom.width, c->geom.height);
+	shadow_update(c);
 
 	client_set_size(c, c->geom.width - 2 * c->bw, c->geom.height - 2 * c->bw);
 	client_get_clip(c, &clip);
@@ -3339,6 +3359,8 @@ setfloating(Client *c, int floating)
 	Client *p = client_get_parent(c);
 	int changed = c->isfloating != floating;
 	c->isfloating = floating;
+	/* The floating layout arranges nothing below, so here */
+	shadow_update(c);
 	if (changed && c->mon && client_surface(c)->mapped)
 		ipc_event_window(c, "floating");
 	/* Tiled again, it joins the end of the stack, as a new window does */
@@ -3576,6 +3598,7 @@ setup(void)
 	wlr_viewporter_create(dpy);
 	wlr_single_pixel_buffer_manager_v1_create(dpy);
 	dim_init();
+	fx_init();
 	wlr_fractional_scale_manager_v1_create(dpy, 1);
 	wlr_presentation_create(dpy, backend, 2);
 	wlr_alpha_modifier_v1_create(dpy);
@@ -3923,7 +3946,10 @@ unmapnotify(struct wl_listener *listener, void *data)
 	c->image_capture_scene = NULL;
 	c->image_capture_source = NULL;
 	wlr_scene_node_destroy(&c->scene->node);
-	c->dim = NULL; /* it went with the tree */
+	c->dim = NULL; /* it went with the tree, as its shadow did */
+	c->shadow = NULL;
+	c->fading_in = 0;
+	c->dim_seen = 0; /* mapped again, it dims at once */
 	client_surface(c)->data = NULL;
 	printstatus();
 	motionnotify(0, NULL, 0, 0, 0, 0);
