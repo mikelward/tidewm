@@ -60,7 +60,7 @@ sway's `opacity` shows the wallpaper through a window rather than darkening it.
 
 ## A small sway fork
 
-These patches would close the gaps, smallest first by what they buy. Sizes are
+These patches would close the gaps, most valuable first. Sizes are
 estimates from sway 1.12's source. Upstream would likely refuse all of them but the
 first half of the second.
 
