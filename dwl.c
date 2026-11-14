@@ -2639,7 +2639,8 @@ setmaximized(Client *c, int maximized)
 /* Minimizes c, or brings it back, as tide's SPEC §6.7 has it. A minimized
  * window keeps its workspace, monitor and states, so a workspace with one
  * stays while it waits, but it isn't shown, laid out or focused: focus on
- * it goes to the top window left on the focused monitor. Brought back, it
+ * it goes to the window on the focused monitor you were in before it, the
+ * top of the focus stack (focustop). Brought back, it
  * joins the end of its part's stack, as a window that arrives does.
  * Focusing it brings it back (focusclient). An app's own minimize request
  * does nothing. */
