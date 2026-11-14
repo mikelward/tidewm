@@ -538,6 +538,10 @@ static Client *
 ipc_find_window(unsigned long id)
 {
 	Client *c;
+	/* A window the IPC hasn't shown yet has no id, 0, which no
+	 * criteria may name */
+	if (!id)
+		return NULL;
 	wl_list_for_each(c, &clients, link)
 		if (c->ipc_id == id)
 			return c;

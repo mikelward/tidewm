@@ -252,6 +252,18 @@ class CommandTest(TidewmTest):
         self.assertTrue(self.fails("chvt two")["parse_error"])
 
 
+class CriteriaTest(CommandTest):
+    def test_con_id_0_is_no_window(self):
+        # A window has no id until the IPC first shows it, in a reply or an
+        # event, so this one, which nothing has shown, has none yet
+        client = self.wm.open_window("test.unseen", "unseen", fullscreen=True, stdout=True)
+        # A window asking for fullscreen before it maps is told once it's mapped
+        self.assertTrue(select.select([client.stdout], [], [], TIMEOUT)[0], "it never mapped")
+        self.assertEqual(client.stdout.readline().decode().strip(), "fullscreen")
+        self.assertEqual(self.fails("[con_id=0] kill")["error"], "No window matches the criteria")
+        self.assertEqual(len(self.windows()), 1, "and the window is still open")
+
+
 class TwoMonitorOrderTest(TidewmTest):
     OUTPUTS = 2
     rect = CommandTest.rect
