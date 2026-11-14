@@ -225,7 +225,8 @@ typedef struct {
 	int focus_guard; /* focus_guard enable|disable; -1: not given */
 	double dim_inactive; /* dim_inactive STRENGTH; -1: not given */
 	int fade_duration; /* fade_duration MILLISECONDS; -1: not given */
-	int shadows; /* shadows enable|disable; -1: not given */
+	int shadows; /* shadows disable|floating|active|all: a Shadows...; -1: not given */
+	int shadow_blur_radius; /* shadow_blur_radius PIXELS; -1: not given */
 	int resize_grab; /* resize_grab PIXELS; -1: not given */
 	int border; /* default_border none|pixel [N]: its width; -1: not given */
 	int xwayland_scaling; /* xwayland_scaling enable|disable; -1: not given */
@@ -1766,17 +1767,44 @@ settings_fade_duration(Settings *s, char *rest, unsigned int line,
 	return 1;
 }
 
-/* A shadows line: enable, for a soft shadow under each floating window,
- * or disable (effects.h) */
+/* A shadows line: which windows cast a soft shadow, each floating one,
+ * the focused one, or all, or disable; enable, as it was before there
+ * was a choice, is floating (effects.h) */
 static int
 settings_shadows(Settings *s, char *rest, unsigned int line, struct json_object *errors)
 {
+	static const struct { const char *word; int shadows; } modes[] = {
+		{ "disable", ShadowsNone }, { "floating", ShadowsFloating },
+		{ "enable", ShadowsFloating }, { "active", ShadowsActive },
+		{ "all", ShadowsAll },
+	};
 	char *word = settings_arg(&rest);
-	if (!word || (strcmp(word, "enable") && strcmp(word, "disable")) || *rest) {
-		settings_error(errors, line, "shadows takes enable or disable");
+	size_t i;
+	for (i = 0; word && !*rest && i < LENGTH(modes); i++) {
+		if (!strcmp(word, modes[i].word)) {
+			s->shadows = modes[i].shadows;
+			return 1;
+		}
+	}
+	settings_error(errors, line, "shadows takes disable, floating, active or all");
+	return 0;
+}
+
+/* A shadow_blur_radius line: how far a shadow reaches past its window,
+ * in pixels; 0 draws none (effects.h) */
+static int
+settings_shadow_blur_radius(Settings *s, char *rest, unsigned int line,
+		struct json_object *errors)
+{
+	char *end;
+	long v;
+	errno = 0;
+	v = strtol(rest, &end, 10);
+	if (!*rest || *end || errno || v < 0 || v > 100) {
+		settings_error(errors, line, "shadow_blur_radius takes pixels, from 0 to 100");
 		return 0;
 	}
-	s->shadows = !strcmp(word, "enable");
+	s->shadow_blur_radius = (int)v;
 	return 1;
 }
 
@@ -2158,6 +2186,13 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			} else {
 				ok &= settings_shadows(s, p, line, errors);
 			}
+		} else if (!strcasecmp(word, "shadow_blur_radius")) {
+			if (mode) {
+				settings_error(errors, line, "shadow_blur_radius can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_shadow_blur_radius(s, p, line, errors);
+			}
 		} else if (!strcasecmp(word, "default_border")) {
 			if (mode) {
 				settings_error(errors, line, "default_border can't be in a mode");
@@ -2368,6 +2403,7 @@ settings_parse(char *text, struct json_object *errors, int partial)
 	s->dim_inactive = -1;
 	s->fade_duration = -1;
 	s->shadows = -1;
+	s->shadow_blur_radius = -1;
 	s->resize_grab = -1;
 	s->border = -1;
 	s->new_window = -1;

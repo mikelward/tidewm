@@ -105,6 +105,7 @@ enum { XDGShell, LayerShell, X11 }; /* client types */
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrUnmanaged, LyrOverlay,
 	LyrIMPopup, LyrBlock, NUM_LAYERS }; /* scene layers */
 enum { AxisUp, AxisRight, AxisDown, AxisLeft };
+enum { ShadowsNone, ShadowsFloating, ShadowsActive, ShadowsAll }; /* which windows cast one (effects.h) */
 enum { FgFree, FgWaiting, FgPopup }; /* how the focus guard holds a window (focus.h) */
 
 typedef union {
@@ -206,8 +207,9 @@ typedef struct {
 	int fading_in; /* fading in as it opened (effects.h) */
 	float fade_now; /* how far in, from 0 to 1, while it is */
 	int64_t fade_start; /* when it started */
-	struct wlr_scene_tree *shadow; /* effects.h's, under it */
+	struct wlr_scene_tree *shadow; /* effects.h's, under it, or over or under the tiles */
 	struct wlr_scene_buffer *shadow_part[8];
+	int shadow_range; /* the shadow_blur_radius its parts' image is drawn for, or 0 */
 	int nodim; /* the dim command's or a rule's: it never dims */
 	int wantsfullscreen; /* asked for fullscreen while held, so waits for focus */
 	struct wlr_box unmaximized; /* its place before it was maximized; none if it opened so */
@@ -721,7 +723,8 @@ arrange(Monitor *m)
 				placefloating(c, c->geom);
 		}
 	} while (recentered);
-	/* Floated, fullscreen or maximized, or not, it casts a shadow, or not */
+	/* Floated, tiled, fullscreen or maximized, or not, it casts a shadow,
+	 * or not, and where */
 	wl_list_for_each(c, &clients, link)
 		if (c->mon == m)
 			shadow_update(c);
@@ -1844,6 +1847,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 	}
 	printstatus();
 	dim_update();
+	shadow_update_all();
 
 	if (!c && !l) {
 		/* With no client, all we have left is to clear focus */
@@ -1865,8 +1869,10 @@ focusclient(Client *c, LayerSurface *l, int lift)
 
 	if (!client_is_unmanaged(c)) {
 		focused_client = c;
-		/* Undimmed before the event says so */
+		/* Undimmed, and casting the focused window's shadow, before the
+		 * event says so */
 		dim_update();
+		shadow_update_all();
 		ipc_event_window(c, "focus");
 		fg_focused(c);
 	}
@@ -3945,9 +3951,9 @@ unmapnotify(struct wl_listener *listener, void *data)
 	wlr_scene_node_destroy(&c->image_capture_scene->tree.node);
 	c->image_capture_scene = NULL;
 	c->image_capture_source = NULL;
+	shadow_detach(c); /* a tile's is outside the tree */
 	wlr_scene_node_destroy(&c->scene->node);
-	c->dim = NULL; /* it went with the tree, as its shadow did */
-	c->shadow = NULL;
+	c->dim = NULL; /* it went with the tree */
 	c->fading_in = 0;
 	c->dim_seen = 0; /* mapped again, it dims at once */
 	client_surface(c)->data = NULL;

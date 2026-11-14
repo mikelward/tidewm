@@ -1,14 +1,15 @@
 """Effects (effects.h, docs/config.md): a window fades in as it opens, and
 the dim fades as focus moves, each over fade_duration, at once without
-it; with shadows enable, a floating window casts a soft shadow, and a
-tiled one none. A fade_duration of an hour keeps a fade near its start for
-as long as a test looks."""
+it; shadows says which windows cast a soft shadow, each floating one, the
+focused one, or all, and shadow_blur_radius how far it reaches. A
+fade_duration of an hour keeps a fade near its start for as long as a test
+looks."""
 
 import os
 import subprocess
 import unittest
 
-from harness import EVENT_WINDOW, ROOT, RUN_COMMAND, TIMEOUT, TidewmTest
+from harness import EVENT_WINDOW, GET_OUTPUTS, ROOT, RUN_COMMAND, TIMEOUT, TidewmTest
 
 CAPTURE = os.path.join(ROOT, "tests", "capture")
 FLOAT = 'for_window [app_id="^test.float$"] floating enable\n'
@@ -168,7 +169,298 @@ class EffectsConfigTest(EffectsHelpers):
         self.assertIn("fade_duration takes milliseconds", self.fails("fade_duration -1\n"))
         self.assertIn("fade_duration takes milliseconds", self.fails("fade_duration 3600001\n"))
         self.assertIn("fade_duration takes milliseconds", self.fails("fade_duration soon\n"))
-        self.assertIn("shadows takes enable or disable", self.fails("shadows on\n"))
+        for line in ("shadows on\n", "shadows\n", "shadows all floating\n"):
+            self.assertIn("shadows takes disable, floating, active or all", self.fails(line))
+        for line in ("shadow_blur_radius -1\n", "shadow_blur_radius 101\n",
+                     "shadow_blur_radius wide\n", "shadow_blur_radius\n",
+                     "shadow_blur_radius 8 9\n"):
+            self.assertIn("shadow_blur_radius takes pixels, from 0 to 100", self.fails(line))
+
+    def test_a_shadow_line_cant_be_in_a_mode(self):
+        self.assertIn("shadows can't be in a mode", self.fails("mode m {\nshadows all\n}\n"))
+        self.assertIn("shadow_blur_radius can't be in a mode",
+                      self.fails("mode m {\nshadow_blur_radius 8\n}\n"))
+
+
+NO_BORDER = "default_border none\n"  # so a window's edge is its own color
+
+
+class ShadowHelpers(EffectsHelpers):
+    """Helpers, with no tests of their own."""
+
+    def configure(self, lines):
+        self.wm.write_config(lines + NO_BORDER + FLOAT)
+        result, = self.connect().request(RUN_COMMAND, "reload")
+        self.assertTrue(result["success"], result)
+
+    def casting(self):
+        """The app_ids of the windows casting a shadow."""
+        return {w["app_id"] for w in self.windows().values() if w["shadow"]}
+
+    def focus(self, con_id):
+        self.command(self.connect(), f"[con_id={con_id}] focus")
+
+    def shadowed(self, point, under):
+        """Whether the pixel at point is darker than under, what's there."""
+        color, = self.pixels(point)
+        self.assertTrue(all(c <= u for c, u in zip(color, under)), f"{color} at {point}")
+        return color != under
+
+
+class ShadowModesTest(ShadowHelpers):
+    """Two tiles and a floating window over them."""
+
+    CONFIG = "shadows all\n" + NO_BORDER + FLOAT
+
+    def setUp(self):
+        super().setUp()
+        self.first = self.open("test.first")
+        self.second = self.open("test.second")
+        self.float = self.open("test.float", size="300x200")
+
+    def test_all_is_every_window_whichever_is_focused(self):
+        everything = {"test.first", "test.second", "test.float"}
+        self.assertEqual(self.casting(), everything)
+        self.focus(self.first)
+        self.assertEqual(self.casting(), everything)
+
+    def test_floating_is_each_floating_window_focused_or_not(self):
+        self.configure("shadows floating\n")
+        self.assertEqual(self.casting(), {"test.float"})
+        self.focus(self.first)
+        self.assertEqual(self.casting(), {"test.float"})
+
+    def test_enable_means_floating(self):
+        self.configure("shadows enable\n")
+        self.focus(self.first)
+        self.assertEqual(self.casting(), {"test.float"})
+
+    def test_disable_is_none(self):
+        self.configure("shadows disable\n")
+        self.assertEqual(self.casting(), set())
+
+    def test_without_the_line_none_casts_one(self):
+        self.configure("")
+        self.assertEqual(self.casting(), set())
+
+    def test_active_is_the_focused_window_and_follows_focus(self):
+        self.configure("shadows active\n")
+        self.assertEqual(self.casting(), {"test.float"})
+        self.focus(self.first)
+        self.assertEqual(self.casting(), {"test.first"})
+        self.focus(self.second)
+        self.assertEqual(self.casting(), {"test.second"})
+        self.focus(self.float)
+        self.assertEqual(self.casting(), {"test.float"})
+
+    def test_a_focus_event_says_the_window_casts_one(self):
+        self.configure("shadows active\n")
+        self.focus(self.first)
+        event = self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "focus"
+                                    and e["container"]["id"] == self.first)
+        self.assertTrue(event["container"]["shadow"])
+
+    def test_with_no_window_focused_active_casts_none(self):
+        self.configure("shadows active\n")
+        here = self.windows()[self.first]["workspace"]
+        self.command(self.connect(), "workspace empty")
+        self.assertEqual(self.casting(), set())
+        self.command(self.connect(), f"workspace {here}")
+        self.assertEqual(len(self.casting()), 1)
+        focused, = [w["app_id"] for w in self.windows().values() if w["focused"]]
+        self.assertEqual(self.casting(), {focused})
+
+    def test_a_window_on_a_workspace_not_shown_casts_none(self):
+        self.command(self.connect(), "workspace empty")
+        self.assertEqual(self.casting(), set())
+
+    def test_a_fullscreen_window_casts_none(self):
+        for window, app_id in ((self.first, "test.first"), (self.float, "test.float")):
+            for mode in ("all", "active"):
+                with self.subTest(window=app_id, shadows=mode):
+                    self.configure(f"shadows {mode}\n")
+                    self.focus(window)
+                    self.assertIn(app_id, self.casting())
+                    self.command(self.connect(), f"[con_id={window}] fullscreen enable")
+                    self.assertNotIn(app_id, self.casting())
+                    self.command(self.connect(), f"[con_id={window}] fullscreen disable")
+                    self.assertIn(app_id, self.casting())
+
+    def test_a_maximized_window_casts_none(self):
+        for window, app_id in ((self.first, "test.first"), (self.float, "test.float")):
+            for mode in ("all", "active", "floating"):
+                with self.subTest(window=app_id, shadows=mode):
+                    self.configure(f"shadows {mode}\n")
+                    self.focus(window)
+                    self.command(self.connect(), f"[con_id={window}] maximize enable")
+                    self.assertNotIn(app_id, self.casting())
+                    self.command(self.connect(), f"[con_id={window}] maximize disable")
+                    self.assertEqual(app_id in self.casting(),
+                                     mode != "floating" or window == self.float)
+
+    def test_a_reload_changes_which_windows_cast_one(self):
+        self.focus(self.second)
+        for mode, casting in (("active", {"test.second"}), ("floating", {"test.float"}),
+                              ("all", {"test.first", "test.second", "test.float"}),
+                              ("disable", set())):
+            self.configure(f"shadows {mode}\n")
+            self.assertEqual(self.casting(), casting, mode)
+
+    def test_a_radius_of_0_casts_none(self):
+        self.configure("shadows all\nshadow_blur_radius 0\n")
+        self.assertEqual(self.casting(), set())
+        self.configure("shadows all\nshadow_blur_radius 1\n")
+        self.assertEqual(self.casting(), {"test.first", "test.second", "test.float"})
+
+    def test_a_bad_reload_leaves_the_shadows_as_they_were(self):
+        self.wm.write_config("shadows none\n")
+        result, = self.connect().request(RUN_COMMAND, "reload")
+        self.assertFalse(result["success"], result)
+        self.assertEqual(self.casting(), {"test.first", "test.second", "test.float"})
+
+
+class TileShadowTest(ShadowHelpers):
+    """Two tiles side by side: tiles touch, so one's shadow can only fall
+    on the other."""
+
+    CONFIG = "shadows active\n" + NO_BORDER
+
+    def setUp(self):
+        super().setUp()
+        self.first = self.open("test.first")
+        self.second = self.open("test.second")
+        x, y, w, h = self.rect(self.first)
+        self.assertEqual(self.rect(self.second)[0], x + w, "the second is beside it")
+        # Just inside each, either side of where they meet
+        self.in_first, self.in_second = (x + w - 2, y + h // 2), (x + w + 1, y + h // 2)
+
+    def falls_on(self):
+        """Which of the two a shadow falls on."""
+        return {name for name, point in (("first", self.in_first), ("second", self.in_second))
+                if self.shadowed(point, WINDOW)}
+
+    def test_the_focused_tiles_shadow_lies_over_its_neighbor(self):
+        self.assertEqual(self.falls_on(), {"first"})
+        self.focus(self.first)
+        self.assertEqual(self.falls_on(), {"second"})
+
+    def test_with_all_only_the_focused_tiles_lies_over_its_neighbor(self):
+        self.configure("shadows all\n")
+        self.assertEqual(self.casting(), {"test.first", "test.second"})
+        self.assertEqual(self.falls_on(), {"first"})
+        self.focus(self.first)
+        self.assertEqual(self.falls_on(), {"second"})
+
+    def test_with_floating_a_tile_casts_none(self):
+        self.configure("shadows floating\n")
+        self.assertEqual(self.falls_on(), set())
+
+    def test_a_tiles_shadow_reaches_the_radius(self):
+        x, y = self.in_first
+        self.assertFalse(self.shadowed((x - 10, y), WINDOW), "past 8 pixels")
+        self.configure("shadows active\nshadow_blur_radius 20\n")
+        self.assertTrue(self.shadowed((x - 10, y), WINDOW))
+        self.assertFalse(self.shadowed((x - 20, y), WINDOW), "past 20 pixels")
+
+    def test_a_click_goes_through_a_tiles_shadow(self):
+        # A shadow wide enough to click clear of the edge between the two,
+        # which a press drags: the second's is over the first there, and
+        # the click is the first's
+        self.configure("shadows active\nshadow_blur_radius 100\n")
+        x, y = self.in_first[0] - 50, self.in_first[1]
+        self.assertTrue(self.shadowed((x, y), WINDOW))
+        area = self.connect().request(GET_OUTPUTS)[0]["rect"]
+        subprocess.run([os.path.join(ROOT, "tests", "pointer"), "move", str(x), str(y),
+                        str(area["width"]), str(area["height"]), "click"],
+                       env=self.wm.env, check=True, timeout=TIMEOUT)
+        self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "focus"
+                            and e["container"]["id"] == self.first)
+        self.assertEqual(self.casting(), {"test.first"})
+
+
+class WallpaperShadowTest(ShadowHelpers):
+    """A lone tile at half the width, the wallpaper either side, with a
+    floating window over it."""
+
+    CONFIG = "single_window 1.5 0.5\nshadows all\n" + NO_BORDER + FLOAT
+
+    def setUp(self):
+        super().setUp()
+        self.lone = self.open("test.lone")
+        self.float = self.open("test.float", size="300x200")
+        x, y, w, h = self.rect(self.lone)
+        self.assertGreater(x, 20, "the wallpaper shows beside it")
+        self.beside = (x - 2, y + 10)
+
+    def test_with_all_a_tile_not_focused_shadows_the_wallpaper(self):
+        self.assertTrue(self.shadowed(self.beside, BACKGROUND))
+        self.focus(self.lone)
+        self.assertTrue(self.shadowed(self.beside, BACKGROUND))
+
+    def test_with_active_only_the_focused_one_does(self):
+        self.configure("single_window 1.5 0.5\nshadows active\n")
+        self.assertFalse(self.shadowed(self.beside, BACKGROUND))
+        self.focus(self.lone)
+        self.assertTrue(self.shadowed(self.beside, BACKGROUND))
+
+    def test_in_the_floating_layout_a_window_not_floating_casts_one_too(self):
+        self.command(self.connect(), "layout floating")
+        self.assertEqual(self.casting(), {"test.lone", "test.float"})
+        self.assertTrue(self.shadowed(self.beside, BACKGROUND))
+
+
+class FloatingShadowTest(ShadowHelpers):
+    """A floating window alone, over the wallpaper."""
+
+    CONFIG = "shadows floating\nshadow_blur_radius 4\n" + NO_BORDER + FLOAT
+
+    def setUp(self):
+        super().setUp()
+        x, y, w, h = self.rect(self.open("test.float", size="300x200"))
+        self.near, self.far = (x - 2, y + h // 2), (x - 5, y + h // 2)
+
+    def test_the_radius_is_how_far_the_shadow_reaches(self):
+        self.assertTrue(self.shadowed(self.near, BACKGROUND))
+        self.assertFalse(self.shadowed(self.far, BACKGROUND), "past 4 pixels")
+
+    def test_a_reload_changes_the_radius(self):
+        self.configure("shadows floating\nshadow_blur_radius 20\n")
+        self.assertTrue(self.shadowed(self.far, BACKGROUND))
+        self.configure("shadows floating\n")
+        self.assertTrue(self.shadowed(self.far, BACKGROUND), "8 pixels without the line")
+        self.configure("shadows floating\nshadow_blur_radius 0\n")
+        self.assertFalse(self.shadowed(self.near, BACKGROUND))
+
+
+class ShadowOutputsTest(ShadowHelpers):
+    CONFIG = "shadows active\n" + NO_BORDER
+    OUTPUTS = 2
+
+    def outputs(self):
+        """The first output, which tests/capture sees, and the one right of it."""
+        left, right = sorted(self.connect().request(GET_OUTPUTS), key=lambda o: o["rect"]["x"])
+        self.assertEqual(left["rect"]["x"], 0)
+        return left, right
+
+    def test_the_shadow_follows_focus_to_another_monitor(self):
+        left, right = self.outputs()
+        self.command(self.connect(), f"focus output {left['name']}")
+        self.open("test.here")
+        self.command(self.connect(), f"focus output {right['name']}")
+        self.assertEqual(self.casting(), set(), "an empty monitor has the focus")
+        self.open("test.there")
+        self.assertEqual(self.casting(), {"test.there"})
+        self.command(self.connect(), f"focus output {left['name']}")
+        self.assertEqual(self.casting(), {"test.here"})
+
+    def test_a_tiles_shadow_stays_on_its_monitor(self):
+        left, right = self.outputs()
+        self.command(self.connect(), f"focus output {right['name']}")
+        there = self.open("test.there")
+        x, y, w, h = self.rect(there)
+        self.assertEqual(x, left["rect"]["width"], "it's at its monitor's left edge")
+        self.assertEqual(self.casting(), {"test.there"})
+        self.assertFalse(self.shadowed((x - 2, y + h // 2), BACKGROUND))
 
 
 if __name__ == "__main__":
