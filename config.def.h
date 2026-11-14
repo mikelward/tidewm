@@ -61,8 +61,13 @@ static const float dim_inactive            = 0;
  * as its Hyprland config's (effects.h). */
 static const int fade_duration             = 0;
 
-/* Whether a floating window casts a soft shadow; tide's does (effects.h) */
-static const int shadows                   = 0;
+/* Which windows cast a soft shadow (effects.h): ShadowsNone,
+ * ShadowsFloating, each floating one, as tide's, ShadowsActive, the
+ * focused one, or ShadowsAll */
+static const int shadows                   = ShadowsNone;
+
+/* How far a shadow reaches past its window, in pixels, up to 100 */
+static const int shadow_blur_radius        = 8;
 
 static const Rule rules[] = {
 	/* app_id             title       workspace     isfloating   monitor */

@@ -404,6 +404,9 @@ ipc_json_window(Client *c)
 	 * is fading to dimmed (effects.h) */
 	json_object_object_add(obj, "dim", json_object_new_boolean(!c->nodim));
 	json_object_object_add(obj, "dimmed", json_object_new_boolean(c->dim && c->dim_to > 0));
+	/* tidewm's own: whether it casts a shadow now (effects.h) */
+	json_object_object_add(obj, "shadow", json_object_new_boolean(c->shadow
+			&& c->shadow->node.enabled && c->scene->node.enabled));
 	/* tidewm's own, tide's SPEC §6.3: over the window area, the bar showing */
 	json_object_object_add(obj, "maximized", json_object_new_boolean(c->ismaximized));
 	/* tidewm's own, tide's SPEC §6.7: hidden until it's focused */

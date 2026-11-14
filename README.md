@@ -250,8 +250,12 @@ A window's menus and tooltips aren't dimmed.
 
 With `fade_duration 300` in the config file, a window fades in over 300
 milliseconds as it opens, and the dim fades as focus moves, as in tide's
-Hyprland config. With `shadows enable`, a floating window casts a soft
-shadow, which clicks go through. Both are off in `config.h` as it comes.
+Hyprland config. With `shadows floating`, each floating window casts a
+soft shadow, which clicks go through; with `shadows active`, only the
+focused window does, tiled or floating, its shadow over the tiles beside
+it; with `shadows all`, every window does. `shadow_blur_radius` says how
+far a shadow reaches, 8 pixels without it. Both are off in `config.h` as
+it comes.
 
 ### X11 at a fractional scale
 

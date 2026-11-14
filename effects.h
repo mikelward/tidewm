@@ -2,8 +2,9 @@
  * See LICENSE and NOTICE for copyright and license details.
  *
  * Effects, tidewm's own, as tide's Hyprland config has them: a window
- * fades in as it opens, the dim (dim.h) fades as focus moves, and a
- * floating window casts a soft shadow. A fade takes the config file's
+ * fades in as it opens, the dim (dim.h) fades as focus moves, and windows
+ * cast a soft shadow: each floating one, the focused one, or all, as the
+ * config file's shadows says. A fade takes the config file's
  * fade_duration, config.h's without the line, easing out; 0 makes it
  * instant. A window that opens dimmed, as one the focus guard holds, has
  * its dim fade in with it. Fades step as each frame is drawn, so an app's commit, which
@@ -12,18 +13,30 @@
  *
  * The shadow is one image, cut in nine: its corners drawn as they are,
  * and its edges stretched along the window's sides. Clicks go through it.
+ * It reaches shadow_blur_radius past the window, as Hyprland's range.
+ *
+ * A floating window's shadow is under it, in its own tree, so it falls on
+ * what the window is over. Tiles touch, so a tile's can only fall on its
+ * neighbors, or on the wallpaper where the layout leaves some. It lies
+ * flat with the tiles: the focused tile's over them all, as if that tile
+ * were raised, as Hyprland draws it last, and every other tile's under
+ * them all, so it shows only on the wallpaper. Either is kept within its
+ * monitor's window area, off the bar and the next monitor.
  */
 
-#define SHADOW_RANGE 8 /* pixels past the window's edge, as Hyprland's range */
 #define SHADOW_ALPHA 0x44 /* its darkest, at the edge, out of 255 */
 
-/* The shadow's image: black, premultiplied, round a window one pixel wide */
+/* The shadow's image: black, premultiplied, round a window one pixel
+ * wide, range pixels past it each way */
 typedef struct {
 	struct wlr_buffer base;
-	uint32_t pixels[(2 * SHADOW_RANGE + 1) * (2 * SHADOW_RANGE + 1)];
+	int range;
+	uint32_t pixels[];
 } ShadowImage;
 
-static ShadowImage *shadow_image;
+static ShadowImage *shadow_image; /* for the range last asked for */
+/* Tiles' shadows: under every tile, and the focused one's over them */
+static struct wlr_scene_tree *shadow_under, *shadow_over;
 
 static void dim_step(Client *c, int64_t now, int *more);
 static void dim_apply(Client *c);
@@ -45,7 +58,7 @@ shadow_image_access(struct wlr_buffer *buffer, uint32_t flags, void **data,
 		return false;
 	*data = s->pixels;
 	*format = DRM_FORMAT_ARGB8888;
-	*stride = (2 * SHADOW_RANGE + 1) * sizeof(uint32_t);
+	*stride = (2 * s->range + 1) * sizeof(uint32_t);
 	return true;
 }
 
@@ -67,15 +80,33 @@ fx_no_input(struct wlr_scene_buffer *buffer, double *sx, double *sy)
 	return false;
 }
 
-/* Draws the shadow's image: each pixel as dark as it's near the window,
- * fading as the square of its distance's share of the range, to nothing
- * at the range, as Hyprland's render_power 2 */
-static void
-fx_init(void)
+/* How far a shadow reaches: the config file's shadow_blur_radius, or
+ * config.h's */
+static int
+shadow_range(void)
 {
-	const int r = SHADOW_RANGE, size = 2 * SHADOW_RANGE + 1;
+	int r = settings && settings->shadow_blur_radius >= 0
+			? settings->shadow_blur_radius : shadow_blur_radius;
+	return MAX(0, MIN(r, 100));
+}
+
+/* The shadow's image for a range of r, drawn when r changes: each pixel
+ * as dark as it's near the window, fading as the square of its distance's
+ * share of the range, to nothing at the range, as Hyprland's
+ * render_power 2. The one before is freed once the last window's shadow
+ * lets it go. */
+static ShadowImage *
+shadow_image_for(int r)
+{
+	const int size = 2 * r + 1;
 	int x, y;
-	shadow_image = ecalloc(1, sizeof(*shadow_image));
+	if (shadow_image && shadow_image->range == r)
+		return shadow_image;
+	if (shadow_image)
+		wlr_buffer_drop(&shadow_image->base);
+	shadow_image = ecalloc(1, sizeof(*shadow_image)
+			+ (size_t)size * size * sizeof(shadow_image->pixels[0]));
+	shadow_image->range = r;
 	wlr_buffer_init(&shadow_image->base, &shadow_image_impl, size, size);
 	for (y = 0; y < size; y++) {
 		for (x = 0; x < size; x++) {
@@ -86,6 +117,18 @@ fx_init(void)
 			shadow_image->pixels[y * size + x] = a << 24;
 		}
 	}
+	return shadow_image;
+}
+
+/* The trees tiles' shadows are in, either side of the tiles, and outside
+ * layers[], so nothing looks for a window in them */
+static void
+fx_init(void)
+{
+	shadow_under = wlr_scene_tree_create(&scene->tree);
+	wlr_scene_node_place_below(&shadow_under->node, &layers[LyrTile]->node);
+	shadow_over = wlr_scene_tree_create(&scene->tree);
+	wlr_scene_node_place_above(&shadow_over->node, &layers[LyrTile]->node);
 }
 
 static void
@@ -149,6 +192,15 @@ fx_opacity(struct wlr_scene_node *node, Client *c, float a)
 		fx_opacity(child, c, a);
 }
 
+/* Shows c, and its shadow where that's outside its tree, at opacity a */
+static void
+fx_fade(Client *c, float a)
+{
+	fx_opacity(&c->scene->node, c, a);
+	if (c->shadow && c->shadow->node.parent != c->scene)
+		fx_opacity(&c->shadow->node, c, a);
+}
+
 /* c, just mapped, fades in, unless fades are instant */
 static void
 fade_in(Client *c)
@@ -158,7 +210,7 @@ fade_in(Client *c)
 	c->fade_start = fx_now();
 	c->fading_in = 1;
 	c->fade_now = 0;
-	fx_opacity(&c->scene->node, c, 0);
+	fx_fade(c, 0);
 	dim_apply(c);
 	wlr_output_schedule_frame(c->mon->wlr_output);
 }
@@ -175,7 +227,7 @@ fade_step(Client *c, int64_t now, int *more)
 	else
 		*more = 1;
 	c->fade_now = (float)p;
-	fx_opacity(&c->scene->node, c, (float)p);
+	fx_fade(c, (float)p);
 	dim_apply(c);
 }
 
@@ -196,7 +248,8 @@ fx_frame(Monitor *m)
 	}
 }
 
-/* Gives c its shadow, off, under its surface and borders */
+/* Gives c its shadow, off, under its surface and borders, with no image
+ * until it shows */
 static void
 shadow_attach(Client *c)
 {
@@ -204,29 +257,74 @@ shadow_attach(Client *c)
 	c->shadow = wlr_scene_tree_create(c->scene);
 	wlr_scene_node_lower_to_bottom(&c->shadow->node);
 	for (i = 0; i < 8; i++) {
-		c->shadow_part[i] = wlr_scene_buffer_create(c->shadow, &shadow_image->base);
+		c->shadow_part[i] = wlr_scene_buffer_create(c->shadow, NULL);
 		c->shadow_part[i]->point_accepts_input = fx_no_input;
 		/* Stretched, an edge's one pixel is its own, not blended with
 		 * the corners beside it */
 		wlr_scene_buffer_set_filter_mode(c->shadow_part[i], WLR_SCALE_FILTER_NEAREST);
 	}
+	c->shadow_range = 0;
 	wlr_scene_node_set_enabled(&c->shadow->node, 0);
 }
 
-/* Whether c casts a shadow: floating, over what's under it, but not
- * covering its monitor */
+/* Takes c's shadow away, as c unmaps: a tile's is outside c's tree, so
+ * it doesn't go with it */
+static void
+shadow_detach(Client *c)
+{
+	if (c->shadow)
+		wlr_scene_node_destroy(&c->shadow->node);
+	c->shadow = NULL;
+	c->shadow_range = 0;
+}
+
+/* Which windows cast a shadow: the config file's shadows, or config.h's */
+static int
+shadow_mode(void)
+{
+	return settings && settings->shadows >= 0 ? settings->shadows : shadows;
+}
+
+/* Whether c casts a shadow: floating, focused, or whatever it is, as
+ * shadows says, but not covering its monitor */
 static int
 shadow_wanted(Client *c)
 {
-	int on = settings && settings->shadows >= 0 ? settings->shadows : shadows;
-	return on && c->isfloating && !c->isfullscreen && !c->ismaximized;
+	int mode = shadow_mode();
+	if (c->isfullscreen || c->ismaximized)
+		return 0;
+	return mode == ShadowsAll || (mode == ShadowsFloating && c->isfloating)
+			|| (mode == ShadowsActive && c == focused_client);
 }
 
-/* Shows c's shadow, or not, round it as it is now */
+/* Whether c is a tile: placed by its monitor's layout, touching its
+ * neighbors, not over them as a floating window is, or as any window is
+ * in the floating layout */
+static int
+shadow_tiled(Client *c)
+{
+	return !c->isfloating && c->mon && c->mon->lt[c->mon->sellt]->arrange;
+}
+
+/* Whether a maximized window covers c, a tile, on its monitor */
+static int
+shadow_covered(Client *c)
+{
+	Client *o;
+	wl_list_for_each(o, &clients, link)
+		if (o != c && VISIBLEON(o, c->mon) && o->ismaximized && !o->isfloating
+				&& !o->isfullscreen)
+			return 1;
+	return 0;
+}
+
+/* Shows c's shadow, or not, round it as it is now: under it in its own
+ * tree, or for a tile over the tiles if it's focused and under them if
+ * not, within its monitor's window area */
 static void
 shadow_update(Client *c)
 {
-	const int r = SHADOW_RANGE, w = c->geom.width, h = c->geom.height;
+	const int r = shadow_range(), w = c->geom.width, h = c->geom.height;
 	/* Each part: where it is in the image, then round the window */
 	const struct { int sx, sy, sw, sh, x, y, w, h; } parts[8] = {
 		{ 0, 0, r, r, -r, -r, r, r },             /* top left */
@@ -238,23 +336,59 @@ shadow_update(Client *c)
 		{ r, r + 1, 1, r, 0, h, w, r },           /* bottom */
 		{ r + 1, r + 1, r, r, w, h, r, r },       /* bottom right */
 	};
-	int i, on;
+	struct wlr_scene_tree *parent = c->scene;
+	struct wlr_box area = {0};
+	int i, on, tiled;
 	if (!c->shadow)
 		return;
-	/* A size of 0 would be the image's own */
-	on = shadow_wanted(c) && w > 0 && h > 0;
+	tiled = shadow_tiled(c);
+	if (tiled) {
+		parent = c == focused_client && !shadow_covered(c) ? shadow_over : shadow_under;
+		/* The window area, from the window's corner, as the parts are */
+		area = c->mon->w;
+		area.x -= c->scene->node.x;
+		area.y -= c->scene->node.y;
+	}
+	/* A size of 0 would be the image's own. Outside c's tree, the shadow
+	 * shows and hides with c. */
+	on = shadow_wanted(c) && r > 0 && w > 0 && h > 0
+			&& (!tiled || c->scene->node.enabled);
 	wlr_scene_node_set_enabled(&c->shadow->node, on);
 	if (!on)
 		return;
+	if (c->shadow->node.parent != parent) {
+		wlr_scene_node_reparent(&c->shadow->node, parent);
+		if (parent == c->scene)
+			wlr_scene_node_lower_to_bottom(&c->shadow->node);
+	}
+	wlr_scene_node_set_position(&c->shadow->node, tiled ? c->scene->node.x : 0,
+			tiled ? c->scene->node.y : 0);
+	if (c->shadow_range != r) {
+		struct wlr_buffer *image = &shadow_image_for(r)->base;
+		for (i = 0; i < 8; i++)
+			wlr_scene_buffer_set_buffer(c->shadow_part[i], image);
+		c->shadow_range = r;
+	}
 	for (i = 0; i < 8; i++) {
-		struct wlr_fbox src = { parts[i].sx, parts[i].sy, parts[i].sw, parts[i].sh };
+		struct wlr_box box = { parts[i].x, parts[i].y, parts[i].w, parts[i].h }, cut = box;
+		struct wlr_fbox src;
+		int shown = !tiled || wlr_box_intersection(&cut, &box, &area);
+		wlr_scene_node_set_enabled(&c->shadow_part[i]->node, shown);
+		if (!shown)
+			continue;
+		/* A corner is cut as the part is; an edge's one pixel, stretched
+		 * along the window's side, is the same however long */
+		src.x = parts[i].sx + (parts[i].sw == box.width ? cut.x - box.x : 0);
+		src.y = parts[i].sy + (parts[i].sh == box.height ? cut.y - box.y : 0);
+		src.width = parts[i].sw == box.width ? cut.width : parts[i].sw;
+		src.height = parts[i].sh == box.height ? cut.height : parts[i].sh;
 		wlr_scene_buffer_set_source_box(c->shadow_part[i], &src);
-		wlr_scene_buffer_set_dest_size(c->shadow_part[i], parts[i].w, parts[i].h);
-		wlr_scene_node_set_position(&c->shadow_part[i]->node, parts[i].x, parts[i].y);
+		wlr_scene_buffer_set_dest_size(c->shadow_part[i], cut.width, cut.height);
+		wlr_scene_node_set_position(&c->shadow_part[i]->node, cut.x, cut.y);
 	}
 }
 
-/* Every window's shadow, after the settings change */
+/* Every window's shadow, after the settings change or focus moves */
 static void
 shadow_update_all(void)
 {
