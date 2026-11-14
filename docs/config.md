@@ -12,7 +12,8 @@ The first of these that's given:
 2. `$XDG_CONFIG_HOME/tidewm/config`;
 3. `~/.config/tidewm/config`.
 
-Without the file, `config.h`'s keys, buttons and rules work, as in dwl.
+Without the file, `config.h`'s keys, buttons and rules work, as in dwl,
+at startup or after a `reload`.
 A file `-c` names that isn't there at startup is an error, on stderr and
 in `GET_CONFIG`'s `errors`, and tidewm starts the same way.
 Once a file that binds a key at its top level is loaded, its bindings are
@@ -36,32 +37,37 @@ supported yet. In an `input` or `output` line, a name or value may be in
 | Setting | Does |
 |---|---|
 | `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
-| `include PATH` | As sway's: reads each file `PATH` matches, a word or text in `"` that may be a pattern such as `tide-*.conf`, in order, as if its lines were here, so a shell can keep settings of its own in a file the config takes in. `~/` is your home, and a relative path is from the directory of the file the line is in. A file that isn't there, or a pattern nothing matches, includes nothing. Variables set before it hold in it, and those it sets hold after. Only at the top level: a mode or input block an included file opens closes in it. Includes nest 10 deep at most. `reload` reads them again, and an error in one names that file |
+| `include PATH` | As sway's: reads each file `PATH` matches, a word or text in `"` that may be a pattern such as `tide-*.conf`, in order, as if its lines were here, so a shell can keep settings of its own in a file the config takes in. `~/` is your home, and a relative path is from the directory of the file the line is in. A file that isn't there, or a pattern nothing matches, includes nothing. Variables set before it hold in it, and those it sets hold after. A mode or input block an included file opens closes in it. Includes nest 10 deep at most. `reload` reads them again, and an error in one names that file |
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
 | `bindcode KEYS COMMANDS` | As sway's: `bindsym`, with the key as its keycode, as below |
-| `rebind NAME KEYS...`, `rebind NAME none` | tidewm's own: gives the binding `bindsym --name NAME` named these keys in place of the ones it has, or none, so a shell's keyboard shortcuts can change one ([Named bindings](#named-bindings)). Only at the top level |
-| `bindswitch [--locked] [--desc TEXT] SWITCH:STATE COMMANDS` | As sway's: a switch turning on, off or either (`lid:on`, `lid:off`, `lid:toggle`, and `tablet:` likewise) runs `COMMANDS`; on the lock screen, only a `--locked` one. Not in a mode. `bindswitch lid:on output eDP-1 disable` and `bindswitch --locked lid:off output eDP-1 enable` turn a laptop's panel off while its lid is closed, and its windows move over; like sway, it does so whether or not another output is on |
+| `rebind NAME KEYS...`, `rebind NAME none` | tidewm's own: gives the binding `bindsym --name NAME` named these keys in place of the ones it has, or none, so a shell's keyboard shortcuts can change one ([Named bindings](#named-bindings)) |
+| `bindswitch [--locked] [--desc TEXT] SWITCH:STATE COMMANDS` | As sway's: a switch turning on, off or either (`lid:on`, `lid:off`, `lid:toggle`, and `tablet:` likewise) runs `COMMANDS`; on the lock screen, only a `--locked` one. `bindswitch lid:on output eDP-1 disable` and `bindswitch --locked lid:off output eDP-1 enable` turn a laptop's panel off while its lid is closed, and its windows move over; like sway, it does so whether or not another output is on |
 | `for_window [CRITERIA] COMMANDS` | Runs `COMMANDS` on each new window `CRITERIA` match, as below |
 | `output NAME SETTINGS` | Sets up the output called `NAME`, or every output for `*`, as below |
 | `input NAME SETTING VALUE` | Sets up the input devices `NAME` names, as below; `input NAME {` … `}` takes a setting a line |
-| `mode NAME {` … `}` | A submap: the `bindsym` lines inside are in force while `NAME` is the mode, and the top level's aren't. `NAME` is a word, or text in `"`, without `;`, which ends a command; opening a mode again adds to it |
-| `single_window MIN_ASPECT WIDTH` | tidewm's own, tide's SPEC §1: a lone tiled window, in any layout, is centered at `WIDTH` of the window area, from 0.1 to 1, when the area is at least `MIN_ASPECT` as wide as it's high, from 0 to 100. Of several lines, the one with the largest `MIN_ASPECT` the area reaches wins, and none means the whole width. The file's lines replace `config.h`'s `single_window`, which is 80% from 2.1 and 60% from 3.2, as tide's |
+| `mode NAME {` … `}` | A submap: the `bindsym` and `bindcode` lines inside are in force while `NAME` is the mode, and the top level's aren't. `NAME` is a word, or text in `"`, without `;`, which ends a command; opening a mode again adds to it |
+| `single_window MIN_ASPECT WIDTH` | tidewm's own, tide's SPEC §6.1: a lone tiled window, in any layout, is centered at `WIDTH` of the window area, from 0.1 to 1, when the area is at least `MIN_ASPECT` as wide as it's high, from 0 to 100. Of several lines, the one with the largest `MIN_ASPECT` the area reaches wins, and none means the whole width. The file's lines replace `config.h`'s `single_window`, which is 80% from 2.1 and 60% from 3.2, as tide's |
 | `default_layout normal\|ultrawide LAYOUT` | tidewm's own, tide's SPEC §6.1: the layout a workspace's new part on a monitor starts in, `tile`, `threecol`, `twocol` or `monocle`, below `ultrawide_aspect` or from it. Without the lines, `threecol` from it and `config.h`'s monitor rule's below. A part already made keeps its layout |
 | `ultrawide_aspect N` | tidewm's own: how wide a monitor must be for its height, from 0.1 to 100, for its new parts to start in `default_layout ultrawide`'s layout; 2.1 without it |
 | `layout_defaults LAYOUT [mfact F] [nmaster N]` | tidewm's own: the `mfact`, from 0.1 to 0.9, and `nmaster`, up to 100, from 0 for `tile` and 1 for the others, that `tile`, `threecol` or `twocol` starts with. A later line for a layout adds to an earlier one. Without one, `threecol` starts at 0.5 with one master, `twocol` at 0.72 with two, and `tile` as `config.h`'s monitor rule has it. A `reload` that changes them starts every layout of every part from them again, each part keeping its layout, as a reload of tide's layouts does on Hyprland; one that doesn't leaves them as they are |
 | `layout_cycle LAYOUT ...` | tidewm's own, tide's Layouts page's cycle: the layouts `layout next` and `prev` go through, in order and round, each of `tile`, `threecol` and `twocol` at most once. `tile threecol twocol` without it |
 | `new_window end\|top\|next\|master` | tidewm's own: where a new tiled window goes, at the `end` of the stack, its `top`, just after the masters, `next` after the focused window, or as the `master`. `end` without it, so the master stays put |
-| `dim_inactive STRENGTH` | tidewm's own, tide's SPEC §6.2: dims every window but the focused one, from 0, none, to 1, black; tide's is 0.07. Without the line, `config.h`'s `dim_inactive`, 0 as it comes. A monitor showing one window, or a fullscreen one, doesn't dim, and nor do picture-in-picture, video, by the app's content type, and a window `dim disable` exempts ([`ipc.md`](ipc.md)) |
-| `fade_duration MILLISECONDS` | tidewm's own: how long a window takes to fade in as it opens, and the dim to fade as focus moves, from 0, instant, to 3600000; tide's is 300, as its Hyprland config's. Without the line, `config.h`'s `fade_duration`, 0 as it comes |
-| `shadows disable\|floating\|active\|all` | tidewm's own: which windows cast a soft shadow, which clicks go through. `floating`, each floating window, as tide's Hyprland config has it; `active`, only the focused window, tiled or floating; `all`, every window; `disable`, none. `enable` means `floating`, as it did before there was a choice. A fullscreen or maximized window casts none. A floating window's shadow is under it, on whatever it's over. Tiles touch, so the focused tile's shadow lies over its neighbors, and with `all` another tile's is under them, showing only on the wallpaper where the layout leaves some; a tile's stays within its monitor's window area. Without the line, `config.h`'s `shadows`, none as it comes. Shadows follow focus, and a reload changes every window's, at once |
+| `dim_inactive STRENGTH` | tidewm's own, tide's SPEC §6.2: dims every window but the focused one, by a translucent black layer that clicks go through, from 0, none, to 1, black; tide's is 0.07. Without the line, `config.h`'s `dim_inactive`, 0 as it comes. A monitor showing one window, or a fullscreen one, doesn't dim, and nor do picture-in-picture, video, by the app's content type, and a window `dim disable` exempts ([`ipc.md`](ipc.md)). A window's menus and tooltips aren't dimmed |
+| `fade_duration MILLISECONDS` | tidewm's own: how long a window takes to fade in as it opens, and dimming to fade as focus moves, from 0, instant, to 3600000; tide's is 300, as its Hyprland config's. Without the line, `config.h`'s `fade_duration`, 0 as it comes |
+| `shadows disable\|floating\|active\|all` | tidewm's own: which windows cast a soft shadow, which clicks go through. `floating`, each floating window; `active`, only the focused window, tiled or floating, as tide's `tidewm/tide.conf` and its Hyprland config have it (tide's SPEC §6.2); `all`, every window; `disable`, none. `enable` means `floating`, as it did before there was a choice. A fullscreen or maximized window casts none. A floating window's shadow is under it, on whatever it's over. Tiles touch, so the focused tile's shadow lies over its neighbors, and with `all` another tile's is under them, showing only on the wallpaper where the layout leaves some; a tile's stays within its monitor's window area. Without the line, `config.h`'s `shadows`, none as it comes. Shadows follow focus, and a reload changes every window's, at once |
 | `shadow_blur_radius PIXELS` | tidewm's own: how far a shadow reaches past its window, from 0, which draws none, to 100. Without the line, `config.h`'s `shadow_blur_radius`, 8 as it comes, as tide's Hyprland config has it. A reload changes every window's at once |
-| `xwayland_scaling enable\|disable` | tidewm's own, tide's SPEC §17: with `disable`, as Hyprland's `xwayland:force_zero_scaling`, X11 windows are in their outputs' own pixels, so they're sharp at a fractional scale, and an app that scales itself, as by `GDK_SCALE`, `QT_SCALE_FACTOR` or `Xft.dpi`, is the size it would be scaled, while one that doesn't is small. `enable`, as without the line, scales them, as sway does, so they're blurry at a fractional scale. A reload changes it at once |
+| `xwayland_scaling enable\|disable` | tidewm's own, tide's SPEC §17: with `disable`, as Hyprland's `xwayland:force_zero_scaling`, X11 windows are in their outputs' own pixels, so they're sharp at a fractional scale, and an app that scales itself, as by `GDK_SCALE`, `QT_SCALE_FACTOR` or `Xft.dpi`, is the size it would be scaled, while one that doesn't is small. Xwayland then sees each output at its own pixels, placed by its place in the layout spread by the largest scale, so none overlap, and its screen, RandR and clicks match. `enable`, as without the line, scales them, as sway does, so they're blurry at a fractional scale. A reload changes it at once |
 | `default_border none\|pixel [N]` | As sway's, but for every window, tiled and floating, as tidewm has no title bars and no `default_floating_border`: `none`, or a border `N` pixels wide, from 0 to 100, `config.h`'s `borderpx`, 1, without `N` or without the line. Its color is its `client.CLASS` line's, below. A fullscreen window has none. A reload changes every window's at once; tide's is `none`, as dimming shows which window is focused |
 | `client.focused\|focused_inactive\|unfocused\|urgent BORDER BACKGROUND TEXT [INDICATOR [CHILD_BORDER]]` | As sway's: the color of a window's border, by its class, each color `#RRGGBB` or `#RRGGBBAA`, the `#` optional. tidewm draws only the border round the window, sway's `CHILD_BORDER`, which is `BACKGROUND` without one, as in sway; it has no title bar and no indicator, so `BORDER`, `TEXT` and `INDICATOR` need only be colors. `focused` is the focused window; `urgent`, one asking for attention, focused or not; `focused_inactive`, a window that isn't focused but had focus last of those its monitor shows, where focus goes as you go to that monitor; `unfocused`, the rest. Without a class's line, its color is `config.h`'s: `focuscolor`, blue, `urgentcolor`, red, and `bordercolor`, gray, for `unfocused`; `focused_inactive` is then as `unfocused`, its line's or `config.h`'s. A reload changes every window's at once. `client.focused_tab_title` is read the same and ignored, tidewm having no tabs, and `client.background` and `client.placeholder` are ignored, as in sway |
 | `resize_grab PIXELS` | tidewm's own, tide's `resize_grab`: how many pixels either side of the master/stack edge a plain left press drags it from, from 0 to 32; `0` turns the drag off. 4 without it, `config.h`'s `resize_grab` ([The mouse](#the-mouse)) |
 | `floating_modifier MOD [normal\|inverse]`, `floating_modifier none` | As sway's: holding `MOD`, the left button drags a floating window and the right one resizes it, or the other way round with `inverse` ([The mouse](#the-mouse)) |
 | `focus_guard enable\|disable` | tidewm's own: turns the focus guard on or off, as below |
 | `focus_guard grant_seconds S`, `focus_guard prompt_seconds S` | How long a grant holds, 10 by default, and how soon after a key press a polkit prompt may take focus, 2 by default, in seconds, more than 0 and at most a day |
+
+sway's `exec` and `exec_always` aren't settings: a line with either is an
+error. A command to start with tidewm goes in its `-s`
+([README](../README.md#running-tidewm)); `exec` is still a command, for a
+binding or a rule.
 
 `KEYS` is modifiers and a key, joined by `+`, as `Mod4+Shift+Return`:
 
@@ -247,6 +253,9 @@ level's. An `input` or `output` block in a mode, which can't hold one,
 goes the same way, to its own `}`, and the mode stays open after it. A
 load, `reload` included, starts at the top level.
 
+A mode holds only `bindsym` and `bindcode` lines, and `set`: any other
+setting in one is an error, and is left out.
+
 ```
 bindsym $mod+r mode "resize"
 mode "resize" {
@@ -286,7 +295,6 @@ for_window [class="^Steam$"] move to workspace games
 for_window [title="Picture-in-Picture"] floating enable; move to output right
 ```
 
-`for_window` can't be in a mode.
 
 ## Outputs
 
@@ -498,8 +506,8 @@ Each error names the file, the line and what's wrong, as
 `/path/to/config:12: no setting is called bindgesture`.
 
 - **At startup**, tidewm writes the errors to stderr and leaves those
-  lines out: the rest of the file loads, with its keys and the commands
-  it starts, so a session still comes up to fix it in. A keymap XKB can't
+  lines out: the rest of the file loads, with its keys, so a session
+  still comes up to fix it in. A keymap XKB can't
   make would leave the keyboard typing nothing, so then every `xkb_`
   line is left out, and the keyboards type in the environment's layout
   (`XKB_DEFAULT_LAYOUT`), or XKB's own.
@@ -522,14 +530,9 @@ fails is written to stderr, with the binding's keys.
 
 ## Over the IPC
 
-| Request | Gives |
-|---|---|
-| `reload` (a command) | Reads the file again; fails with its errors and keeps what was loaded. Without the file, goes back to `config.h`'s keys. Either way, it sends a `workspace` event with `"change": "reload"`, as i3 does |
-| `GET_CONFIG` (type 9) | `config`, the loaded file's text (`""` with `config.h`'s keys), and tidewm's own `path`, where it looks, and `errors`, the last load's |
-| `GET_VERSION` | Its `loaded_config_file_name` is the loaded file, or `""` |
-| `mode NAME` (a command) | Makes `NAME` the mode, or `default` the top level; fails for a mode the file hasn't |
-| `GET_BINDING_MODES` (type 8) | Each mode's name, `default` first |
-| `GET_BINDING_STATE` (type 12) | `{"name": ...}`, the mode now |
-| `GET_INPUTS` (type 100) | Each input device, its identifier and settings |
-| `input NAME SETTING VALUE` (a command) | Sets that on the devices `NAME` names, until a reload |
-| The `mode` event | `{"change": NAME, "pango_markup": false}`, when the mode changes |
+[`ipc.md`](ipc.md) has what the IPC says of the file: the `reload`,
+`mode` and `input` commands ([Commands](ipc.md#commands)); `GET_CONFIG`,
+`GET_VERSION`'s `loaded_config_file_name`, `GET_BINDING_MODES`,
+`GET_BINDING_STATE`, `GET_BINDINGS`, `GET_NAMED_BINDINGS` and
+`GET_INPUTS` ([Requests](ipc.md#requests)); and the `mode` event, and the
+`workspace` event that follows each `reload` ([Events](ipc.md#events)).

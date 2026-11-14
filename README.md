@@ -1,64 +1,43 @@
-# dwl - dwm for Wayland
+# tidewm
 
-Join us on our [Discord server]  
-Or Matrix: [#dwl-official:matrix.org]  
-Or on our IRC channel: [#dwl on Libera Chat]
+tidewm is a Wayland compositor for tide, forked from [dwl], the compact,
+hackable compositor based on [wlroots]. It carries tide's workspaces,
+which span every monitor, sway's config syntax and sway's IPC. Like dwl,
+it's configured by `config.h` when it's built; it also reads a config
+file in sway's syntax at startup.
 
-dwl is a compact, hackable compositor for [Wayland] based on [wlroots]. It is
-intended to fill the same space in the Wayland world that [dwm] does in X11,
-primarily in terms of functionality, and secondarily in terms of
-philosophy. Like [dwm], dwl is:
+## Getting started
 
-- Easy to understand, hack on, and extend with patches
-- One C source file configurable via `config.h`
-- Tied to as few external dependencies as possible
+### Building tidewm
+`main` builds against the latest release of [wlroots], 0.20, as
+`config.mk` names it (`wlroots-0.20`). To build a release rather than
+`main`, check out its tag ([tidewm's releases](#tidewms-releases)).
 
-## Getting Started:
-
-### Latest semi-stable [release]
-This is probably where you want to start. This builds against the [wlroots]
-versions currently shipping in major distributions. If your
-distribution's `wlroots` version is older, use an earlier dwl [release].
-The `wlroots` version against which a given `dwl` release builds is specified
-with each release on the [release] page
-
-### Development branch [main]
-Active development progresses on the `main` branch. The `main` branch is built
-against the latest release of [wlroots]. PRs should target this branch unless they
-depend on functionality that is not in the current release of `wlroots`.
-
-### Preview branch [wlroots-next]
-The `wlroots-next` branch is built against the git version of [wlroots], which
-is unstable and changes frequently. PRs requiring functionality from the git
-version of `wlroots` should target this branch.
-
-### Building dwl
-dwl has the following dependencies:
+tidewm has the following dependencies:
 - json-c (for tidewm's IPC)
 - PCRE2 (for `for_window` rules' patterns)
 - libinput
 - wayland
-- wlroots (compiled with the libinput backend)
+- wlroots 0.20 (compiled with the libinput backend)
 - xkbcommon
 - wayland-protocols (compile-time only)
 - pkg-config (compile-time only)
 
-dwl has the following additional dependencies if XWayland support is enabled:
+tidewm has the following additional dependencies if XWayland support is enabled:
 - libxcb
 - libxcb-wm
 - wlroots (compiled with X11 support)
 - Xwayland (runtime only)
 
 Install these (and their `-devel` versions if your distro has separate
-development packages) and run `make`. If you wish to build against a released
-version of wlroots (*you probably do*), use a [release] or a [0.x branch]. If
-you want to use the unstable development `main` branch, you need to use the git
-version of [wlroots].
+development packages) and run `make`. The first `make` copies
+`config.def.h` to `config.h`, which is yours to edit.
 
 To enable XWayland, you should uncomment its flags in `config.mk`.
 
-`make test` also needs python3, and wtype for the tests that press keys; built
-with XWayland, its X11 tests need Xwayland. A test that lacks one of these
+`make test` also needs python3, wtype for the tests that press keys, and
+wlr-randr for the tests that read and change outputs; built with
+XWayland, its X11 tests need Xwayland. A test that lacks one of these
 skips, except in CI, where it fails.
 
 `make install` puts the binary in `$(PREFIX)/bin` as `tidewm`, so it never
@@ -82,28 +61,53 @@ the tag it was built from. Upstream dwl's own `v0.x` tags stay as they are.
 ## Configuration
 
 tidewm reads a config file in sway's syntax, the one `-c FILE` names, or
-`$XDG_CONFIG_HOME/tidewm/config`, usually `~/.config/tidewm/config`, at startup and again on `reload`, with no
-restart: keys, the mouse, window rules, outputs, input devices, layouts
-and the rest ([Config file](#config-file), and
-[`docs/config.md`](docs/config.md) for what it takes). `config.h`, read
-when tidewm is built, as in [dwm], holds the defaults the file doesn't
-set, and the keys, buttons and rules in force without a file.
+`$XDG_CONFIG_HOME/tidewm/config`, usually `~/.config/tidewm/config`, at
+startup and again on `reload`, with no restart.
+[`docs/config.md`](docs/config.md) says what it takes:
 
-As in the [dwm] community, we encourage users to share patches they have
-created. Check out the [dwl-patches] repository!
+- key bindings and [modes](docs/config.md#modes) (`bindsym`, `bindcode`,
+  `mode`), and [named bindings](docs/config.md#named-bindings) a shell
+  can give other keys (`bindsym --name`, `rebind`);
+- switches, such as a laptop's lid (`bindswitch`);
+- [the mouse](docs/config.md#the-mouse)'s drags and button bindings
+  (`floating_modifier`, `bindsym --whole-window`, `resize_grab`);
+- [window rules](docs/config.md#window-rules) (`for_window`);
+- [outputs](docs/config.md#outputs), named by connector or by what they
+  are, and placed beside each other as Hyprland's monitor rules place
+  them (`output`);
+- [input devices](docs/config.md#input) (`input`);
+- layouts, a lone window's width and where a new window goes
+  (`default_layout`, `ultrawide_aspect`, `layout_defaults`,
+  `layout_cycle`, `single_window`, `new_window`);
+- dimming inactive windows, fades, shadows and borders (`dim_inactive`,
+  `fade_duration`, `shadows`, `shadow_blur_radius`, `default_border`,
+  `client.focused` and the other classes);
+- X11 at a fractional scale (`xwayland_scaling`) and
+  [the focus guard](docs/config.md#the-focus-guard) (`focus_guard`);
+- variables, and other files it includes, such as a shell's own settings
+  (`set`, `include`).
 
-## Running dwl
+`config.h`, read when tidewm is built, as in [dwm], holds the defaults the
+file doesn't set, and the keys, buttons and rules in force without a file.
+Once the file is loaded, its bindings replace `config.h`'s keys if it binds
+any key at its top level, its rules replace `config.h`'s rules, and once it
+says what the mouse does, its buttons replace `config.h`'s. sway's `exec`
+and `exec_always` aren't settings: a command to start with tidewm goes in
+`-s` ([Running tidewm](#running-tidewm)).
 
-dwl can be run on any of the backends supported by wlroots. This means you can
+## Running tidewm
+
+tidewm can be run on any of the backends supported by wlroots. This means you can
 run it as a separate window inside either an X11 or Wayland session, as well as
 directly from a VT console. Depending on your distro's setup, you may need to
-add your user to the `video` and `input` groups before you can run dwl on a
+add your user to the `video` and `input` groups before you can run tidewm on a
 VT. If you are using `elogind` or `systemd-logind` you need to install polkit;
 otherwise you need to add yourself in the `seat` group and enable/start the
 seatd daemon.
 
-When dwl is run with no arguments, it will launch the server and begin handling
-any shortcuts configured in `config.h`. There is no status bar or other
+When tidewm is run with no arguments, it will launch the server and begin
+handling the config file's keys, or without one, the shortcuts configured
+in `config.h`. There is no status bar or other
 decoration initially; these are instead clients that can be run within the
 Wayland session. Do note that the default background color is grey. This can be
 modified in `config.h`.
@@ -112,63 +116,47 @@ If you would like to run a script or command automatically at startup, you can
 specify the command using the `-s` option. This command will be executed as a
 shell command using `/bin/sh -c`.  It serves a similar function to `.xinitrc`,
 but differs in that the display server will not shut down when this process
-terminates. Instead, dwl will send this process a SIGTERM at shutdown and wait
+terminates. Instead, tidewm will send this process a SIGTERM at shutdown and wait
 for it to terminate (if it hasn't already). This makes it ideal for execing into
 a user service manager like [s6], [anopa], [runit], [dinit], or [`systemd
 --user`].
 
-Note: The `-s` command is run as a *child process* of dwl, which means that it
-does not have the ability to affect the environment of dwl or of any processes
+Note: The `-s` command is run as a *child process* of tidewm, which means that it
+does not have the ability to affect the environment of tidewm or of any processes
 that it spawns. If you need to set environment variables that affect the entire
-dwl session, these must be set prior to running dwl. For example, Wayland
+tidewm session, these must be set prior to running tidewm. For example, Wayland
 requires a valid `XDG_RUNTIME_DIR`, which is usually set up by a session manager
 such as `elogind` or `systemd-logind`.  If your system doesn't do this
-automatically, you will need to configure it prior to launching `dwl`, e.g.:
+automatically, you will need to configure it prior to launching `tidewm`, e.g.:
 
     export XDG_RUNTIME_DIR=/tmp/xdg-runtime-$(id -u)
     mkdir -p $XDG_RUNTIME_DIR
-    dwl
+    tidewm
 
 ### Status information
 
 Information about selected layouts, current window title, app-id, and the
 current workspace is written to the stdin of the `-s` command (see
-the `STATUS INFORMATION` section in `_dwl_(1)`).  This information can be used to
+the `STATUS INFORMATION` section in _tidewm_(1)).  This information can be used to
 populate an external status bar with a script that parses the
-information. Failing to read this information will cause dwl to block, so if you
+information. Failing to read this information will cause tidewm to block, so if you
 do want to run a startup command that does not consume the status information,
 you can close standard input with the `<&-` shell redirection, for example:
 
-    dwl -s 'foot --server <&-'
+    tidewm -s 'foot --server <&-'
 
 If your startup command is a shell script, you can achieve the same inside the
 script with the line
 
     exec <&-
 
-To get a list of status bars that work with dwl consult our [wiki].
-
-### Config file
-
-tidewm also reads a config file in sway's syntax, from `-c FILE` or
-`~/.config/tidewm/config`, and again on `reload`: key bindings and modes, named bindings a shell can give other keys,
-the mouse's drags and button bindings, window rules, outputs, named by connector or by what they are and placed
-beside each other as Hyprland's monitor rules place them, input devices,
-and other files it includes, as a shell's own settings. Once it's loaded, its bindings replace
-`config.h`'s keys and its rules `config.h`'s rules, and once it says what
-the mouse does, `config.h`'s buttons.
-[`docs/config.md`](docs/config.md) says what it takes.
+dwl's [wiki] lists status bars that read this information.
 
 ### Focus guard
 
 With `focus_guard enable` in the config file, or `focus_guard` in
-`config.h`, a new window takes focus only when you asked for it: a grant
-over the IPC names its app, or it's from the app you're in. The rest open
-unfocused and urgent, as tide's SPEC §14 has it. An app's activation
-marks its window urgent, unless a grant names it. A window opens on the
-workspace it was launched from: one that opens after you've moved on is
-there, unfocused, and that workspace turns urgent.
-[`docs/config.md`](docs/config.md) says how.
+`config.h`, a new window takes focus only when you asked for it, as tide's
+SPEC §14 has it ([`docs/config.md`](docs/config.md#the-focus-guard)).
 
 ### The pointer
 
@@ -210,78 +198,39 @@ lock end it too.
 ### A lone window
 
 A tiled window alone on its monitor is centered at 80% of the window
-area's width on an ultrawide, at least 2.1 times as wide as it's high,
-and 60% from 3.2, in any layout, as tide's SPEC §1 has it. Below that it
-has the whole width. The config file's `single_window` lines change the
-widths and where they start.
-
-Dragging a lone window's left or right side sets its width, which stays
-centered, for that workspace on that monitor; `single_width reset` gives
-the rules back.
-
-The config file can also say which layout a workspace starts in on a
-monitor, by its aspect, where ultrawide begins, the `mfact` and `nmaster`
-each layout starts with, and where a new window goes, as tide's Layouts
-page sets them ([`docs/config.md`](docs/config.md)).
+area's width from an aspect of 2.1, and 60% from 3.2, as tide's SPEC §6.1
+has it ([`docs/config.md`](docs/config.md), `single_window`).
 
 ### Dragging the master/stack edge
 
-A left press on the edge between the masters and the stack, within 4
-pixels either side, drags it, as tide's SPEC §6.6 has it. A resize drag, as Super and the
-right button with `floating_modifier Mod4`, or `config.h`'s Alt, drags a
-tile's nearest edge from anywhere on it. A press over a floating window, a layer surface
-or a popup goes to it as usual, as does one on a monitor that isn't
-focused or under a fullscreen or maximized window. The config file's
-`resize_grab` sets how wide the grab is, and `0` turns it off
+A left press within 4 pixels of the edge between the masters and the
+stack drags it, as tide's SPEC §6.6 has it
 ([`docs/config.md`](docs/config.md#the-mouse)).
 
-### Dimming
+### Dimming inactive windows
 
-With `dim_inactive 0.07` in the config file, or a `dim_inactive` above 0
-in `config.h`, every window but the focused one is dimmed, by a
-translucent black layer that clicks go through, as tide's SPEC §6.2 has
-it. A monitor showing one window, or a fullscreen one, has nothing to
-tell apart, so it doesn't dim. Nor do picture-in-picture, video, by the
-app's content type (wp-content-type-v1), and a window the `dim disable`
-command exempts, as a `for_window` rule can for a screen share's preview.
-A window's menus and tooltips aren't dimmed.
+With `dim_inactive 0.07` in the config file, every window but the focused
+one is dimmed, as tide's SPEC §6.2 has it
+([`docs/config.md`](docs/config.md), `dim_inactive`).
 
 ### Fades and shadows
 
-With `fade_duration 300` in the config file, a window fades in over 300
-milliseconds as it opens, and the dim fades as focus moves, as in tide's
-Hyprland config. With `shadows floating`, each floating window casts a
-soft shadow, which clicks go through; with `shadows active`, only the
-focused window does, tiled or floating, its shadow over the tiles beside
-it; with `shadows all`, every window does. `shadow_blur_radius` says how
-far a shadow reaches, 8 pixels without it. Both are off in `config.h` as
-it comes.
+With `fade_duration 300` and `shadows active` in the config file, a window
+fades in as it opens, and the focused one casts a soft shadow, as in
+tide's `tidewm/tide.conf` ([`docs/config.md`](docs/config.md),
+`fade_duration` and `shadows`).
 
 ### Border colors
 
-A window's border, `default_border`'s, has its class's color, set as in
-sway: `client.focused`, `client.focused_inactive`, `client.unfocused` and
-`client.urgent`, each with a border, a background and a text color, then
-an indicator and a child border if you like. tidewm draws only the border
-round the window, which is the child border, or the background without
-one, as in sway; the rest need only be colors. `focused_inactive` is the
-window focus goes to as you go to a monitor that doesn't have it. Without
-a class's line its color is `config.h`'s: blue for the focused window, red
-for an urgent one and gray for the rest.
+A window's border has its class's color, set by sway's `client.focused`
+and its other classes ([`docs/config.md`](docs/config.md), `client.*`).
 
 ### X11 at a fractional scale
 
 With `xwayland_scaling disable` in the config file, X11 windows are in
-their outputs' own pixels, as Hyprland's `xwayland:force_zero_scaling`
-has them and tide's SPEC §17 asks: an X11 window is configured, and
-shown, one of its pixels to one of the output's, so it's sharp at a
-fractional scale. An app that scales itself, as by `GDK_SCALE`,
-`QT_SCALE_FACTOR` or `Xft.dpi`, is then the size it would be scaled; one
-that doesn't is small. Xwayland then sees each output at its own pixels,
-placed by its place in the layout spread by the largest scale, so none
-overlap, and its screen, RandR and clicks match. By default,
-`xwayland_scaling enable`, X11 windows are scaled, as in sway, and blurry
-at a fractional scale. A reload changes it at once.
+their outputs' own pixels, so they're sharp at a fractional scale, as
+tide's SPEC §17 asks ([`docs/config.md`](docs/config.md),
+`xwayland_scaling`).
 
 ### The lock
 
@@ -316,8 +265,9 @@ their app.
 
 ### Minimized windows
 
-The IPC's `minimize` command hides a window, as tide's SPEC §6.7 has it:
-it leaves the layout, and focus goes to the window you were in before.
+The IPC's `minimize` command hides a window, for tide's minimized windows
+(its SPEC §6.7): it leaves the layout, and focus goes to the window on
+the focused monitor you were in before it.
 It stays on its workspace, which stays while it waits, and focusing it,
 as tide's shell does from its tray, a grant or `focus`, brings it back.
 Nothing else minimizes a window: an app's own request does nothing.
@@ -357,24 +307,33 @@ Certain IDEs don't display correctly unless an environmental variable for Java A
 indicates that the WM is nonreparenting.
 
 For some Java AWT-based IDEs, such as Xilinx Vivado and Microchip MPLAB X, the
-following environment variable needs to be set before running the IDE or dwl:
+following environment variable needs to be set before running the IDE or tidewm:
 
     export _JAVA_AWT_WM_NONREPARENTING=1
 
 ## Replacements for X applications
 
-You can find a [list of useful resources on our wiki].
+You can find a [list of useful resources on dwl's wiki].
 
 ## Background
 
+tidewm began as [dwl], which is meant, like [dwm], to be:
+
+- Easy to understand, hack on, and extend with patches
+- One C source file configurable via `config.h`
+- Tied to as few external dependencies as possible
+
 dwl is not meant to provide every feature under the sun. Instead, like [dwm], it
 sticks to features which are necessary, simple, and straightforward to implement
-given the base on which it is built. Implemented default features are:
+given the base on which it is built. tidewm adds what tide needs, in files
+of its own (`ipc.h`, `workspace.h`, `settings.h` and the rest, included
+from `dwl.c` as `client.h` is), so a merge from upstream dwl touches few
+lines. The features it has from dwl are:
 
-- Any features provided by [dwm]/Xlib: simple window borders, tags, keybindings,
-  client rules, mouse move/resize. Providing a built-in status bar is an
-  exception to this goal, to avoid dependencies on font rendering and/or drawing
-  libraries when an external bar could work well.
+- Any features provided by [dwm]/Xlib: simple window borders, workspaces in
+  place of tags, keybindings, client rules, mouse move/resize. Providing a
+  built-in status bar is an exception to this goal, to avoid dependencies on
+  font rendering and/or drawing libraries when an external bar could work well.
 - Configurable multi-monitor layout support, including position and rotation
 - Configurable HiDPI/multi-DPI support
 - Idle-inhibit protocol which lets applications such as mpv disable idle
@@ -387,16 +346,6 @@ given the base on which it is built. Implemented default features are:
 - Layer shell popups (used by Waybar)
 - Damage tracking provided by scenegraph API
 
-Given the Wayland architecture, dwl has to implement features from [dwm] **and**
-the xorg-server. Because of this, it is impossible to maintain the original
-project goal of 2000 SLOC and have a reasonably complete compositor with
-features comparable to [dwm]. However, this does not mean that the code will grow
-indiscriminately. We will try to keep the code as small as possible.
-
-Features under consideration (possibly as patches) are:
-
-- Protocols made trivial by wlroots
-
 Feature *non-goals* for the main codebase include:
 
 - Client-side decoration (any more than is necessary to tell the clients not to)
@@ -406,13 +355,15 @@ Feature *non-goals* for the main codebase include:
 
 ## Acknowledgements
 
-dwl began by extending the TinyWL example provided (CC0) by the sway/wlroots
+tidewm is dwl, with tide's additions. dwl began by extending the TinyWL
+example provided (CC0) by the sway/wlroots
 developers. This was made possible in many cases by looking at how sway
 accomplished something, then trying to do the same in as suckless a way as
-possible.
+possible. dwl's patches are in [dwl-patches]; tidewm's `movestack` command
+follows one of them.
 
 Many thanks to suckless.org and the [dwm] developers and community for the
-inspiration, and to the various contributors to the project, including:
+inspiration, and to the various contributors to dwl, including:
 
 - **Devin J. Pohly for creating and nurturing the fledgling project**
 - Alexander Courtis for the XWayland implementation
@@ -420,28 +371,19 @@ inspiration, and to the various contributors to the project, including:
   and for helping to keep the project running
 - Stivvo for output management and fullscreen support, and patch maintenance
 
-Also, thanks to our current lead developers:
+Also, thanks to dwl's current lead developers:
 
 - @thanatos
 - @guidocella
 
-[wlroots]: https://gitlab.freedesktop.org/wlroots
+[dwl]: https://codeberg.org/dwl/dwl
 [dwm]: https://dwm.suckless.org/
 [`systemd --user`]: https://wiki.archlinux.org/title/Systemd/User
-[#dwl on Libera Chat]: https://web.libera.chat/?channels=#dwl
-[0.7-rc1]: https://codeberg.org/dwl/dwl/releases/tag/v0.7-rc1
-[0.x branch]: https://codeberg.org/dwl/dwl/branches
 [anopa]: https://jjacky.com/anopa/
 [dinit]: https://davmac.org/projects/dinit/
 [dwl-patches]: https://codeberg.org/dwl/dwl-patches
-[list of useful resources on our wiki]: https://codeberg.org/dwl/dwl/wiki/Home#migrating-from-x
-[main]: https://codeberg.org/dwl/dwl/src/branch/main
-[wlroots-next]: https://codeberg.org/dwl/dwl/src/branch/wlroots-next
-[release]: https://codeberg.org/dwl/dwl/releases
+[list of useful resources on dwl's wiki]: https://codeberg.org/dwl/dwl/wiki/Home#migrating-from-x
 [runit]: http://smarden.org/runit/faq.html#userservices
 [s6]: https://skarnet.org/software/s6/
 [wlroots]: https://gitlab.freedesktop.org/wlroots/wlroots/
 [wiki]: https://codeberg.org/dwl/dwl/wiki/Home#compatible-status-bars
-[Discord server]: https://discord.gg/jJxZnrGPWN
-[Wayland]: https://wayland.freedesktop.org/
-[#dwl-official:matrix.org]: https://matrix.to/#/#dwl-official:matrix.org
