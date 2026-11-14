@@ -48,7 +48,7 @@ the magic, or over 4 MiB, closes that connection only.
 | 4 | `GET_TREE` | The root; its active outputs, each with `GET_OUTPUTS`' fields, as in sway's tree, where nwg-displays reads them; every workspace under each output; and in each the windows of that monitor's part, in `nodes` (tiled) and `floating_nodes` |
 | 7 | `GET_VERSION` | `human_readable`, `variant` (`"tidewm"`), `major`, `minor`, `patch`, `loaded_config_file_name` (the loaded config file, or `""`) |
 | 8 | `GET_BINDING_MODES` | Each binding mode's name, `default` first ([`config.md`](config.md)) |
-| 9 | `GET_CONFIG` | `config`, the loaded config file's text; `included_configs`, as sway's, each file its `include` lines read, as `path` and `raw_config`; and tidewm's own `path` and `errors` ([`config.md`](config.md)) |
+| 9 | `GET_CONFIG` | `config`, the loaded config file's text (`""` without one, with `config.h`'s keys); `included_configs`, as sway's, each file its `include` lines read, as `path` and `raw_config`; and tidewm's own `path` and `errors` ([`config.md`](config.md)) |
 | 10 | `SEND_TICK` | `{"success": true}`, after sending the payload in a `tick` event |
 | 12 | `GET_BINDING_STATE` | `{"name": ...}`, the binding mode now |
 | 100 | `GET_INPUTS` | Each input device, in the order they came: `identifier` (as [`config.md`](config.md)'s input lines name it), tidewm's own `hyprland_name` (the name Hyprland would give it, which those lines take too), `name`, `vendor`, `product`, `type` (`keyboard`, `pointer` or `touchpad`); a pointer's or touchpad's `scroll_factor`; a keyboard's `xkb_layout_names`, `xkb_active_layout_index`, `xkb_active_layout_name`, `repeat_delay` and `repeat_rate`; and a libinput device's `libinput` settings, as sway names them |
@@ -91,7 +91,7 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `send_shortcut MODS+KEY` | tidewm's own, as Hyprland's `sendshortcut`: sends the window a press and release of `KEY`, such as `ctrl+v`, with the modifiers `ctrl`, `shift`, `alt` or `super` held, whether or not it's focused, as tide's picker pastes. `KEY` is a key name, ignoring case, sent as the key that gives it on the keyboard's layout now, at its lowest level, so a shifted one, as `plus` on a US keyboard, wants `shift` too; focus stays where it was. It fails while the screen is locked |
 | `exec COMMAND` | Runs the rest of the payload, `;` and all, with `/bin/sh -c`, in a session of its own. sway ends it at an unquoted `;`; tidewm leaves the shell to read its own quotes |
 | `reload` | Reads the config file again ([`config.md`](config.md)); fails with its errors, keeping what was loaded |
-| `mode NAME` | Makes the config file's mode `NAME`'s bindings the ones in force; `mode default` goes back to the top level. `NAME` may be in `"` |
+| `mode NAME` | Makes the config file's mode `NAME`'s bindings the ones in force; `mode default` goes back to the top level. `NAME` may be in `"`. It fails for a mode the file hasn't |
 | `output NAME SETTINGS` | Sets the output `NAME`'s, or every output's for `*`, mode, scale, position, transform, adaptive sync, power, or `enable` or `disable`, as the config file's output lines do ([`config.md`](config.md)), until a reload. It takes what nwg-displays sends, as sway does |
 | `output NAME power on\|off\|toggle` | As sway's, alone, or `dpms`, its old name: turns the output, or every one for `*`, off as an idle daemon does over wlr-output-power-management, keeping its windows and place, or on again. A disabled output stays off, and the command fails for it alone. `GET_OUTPUTS`'s `power` says which are on |
 | `input NAME SETTING VALUE` | Sets one setting, such as `xkb_layout` or `tap`, on the input devices `NAME` names, as the config file's input lines do ([`config.md`](config.md)), until a reload. It fails for a name no device has |
@@ -101,10 +101,10 @@ with criteria picking another: `[con_id=N]`, a container's `id`.
 | `floating enable\|disable\|toggle` | Floats or tiles the window. A fullscreen window is left as it is, and the command fails. Floated, it goes where one of its app's floating windows last opened, moved or was resized to, as tide's SPEC §6.4 has it, unless a `for_window` rule floats it as it opens, which puts it in the middle |
 | `fullscreen [enable\|disable\|toggle]` | Makes the window fullscreen or not; alone, it toggles. A window the focus guard holds goes fullscreen once it has focus ([`config.md`](config.md)), and until then its request counts as made, so `disable` or `toggle` takes it back. Another window on its workspace taking focus on that monitor ends it, as it ends a maximize, unless that's its dialog |
 | `maximize [enable\|disable\|toggle]` | tidewm's own, tide's SPEC §6.3: makes the window cover its monitor's window area, above the other tiles, which stay where they are, with the bar still showing; alone, it toggles. It lasts until it's turned off, the window closes, or another window on its workspace takes focus on that monitor (not a dialog of it). An app's own request maximizes it too. Fullscreen covers it while it lasts, and a floating window gets its place back after |
-| `minimize [enable\|disable\|toggle]` | tidewm's own, tide's SPEC §6.7: hides the window, which leaves the layout, and focus on it goes to the top window left on the focused monitor; alone, it toggles. It keeps its workspace, output and states, so a workspace with one stays while it waits, and the window may be moved or closed meanwhile. Focusing it by any means, `focus`, a grant or a key, brings it back first, as `minimize disable` does: it joins the end of its part's stack, as an arriving window does. An app's own minimize request does nothing |
+| `minimize [enable\|disable\|toggle]` | tidewm's own, tide's SPEC §6.7: hides the window, which leaves the layout, and focus on it goes to the window on the focused monitor you were in before it; alone, it toggles. It keeps its workspace, output and states, so a workspace with one stays while it waits, and the window may be moved or closed meanwhile. Focusing it by any means, `focus`, a grant or a key, brings it back first, as `minimize disable` does: it joins the end of its part's stack, as an arriving window does. An app's own minimize request does nothing |
 | `keep_open enable\|disable\|toggle` | tidewm's own, for tide's pinned windows (its SPEC §6.5): `kill`, from a key or here, leaves the window open, and says so with a `close_refused` event, for a shell to say why. While the keyboard is in it, or a popup of it, its `--kept-open` bindings count ([`config.md`](config.md)). It's kept open on the workspace it's on: on any other, however it got there, by a command, a key, its parent or a switch it's sticky for, it isn't, as its container says. Minimized, it's still kept open. A window that maps again is a new one, not kept open. A `keep_open` window event says when the command changes it. The window's own close button still closes it |
 | `layout tile\|threecol\|twocol\|monocle\|floating\|toggle\|next\|prev` | tidewm's own: the layout of the current workspace's part on the focused monitor, from `config.h`'s `layouts`, or back to the previous one, or the next or previous in the cycle, as tide's Super+. and Super+, go: `tile`, `threecol`, `twocol` and round, or the config file's `layout_cycle` ([`config.md`](config.md)). From `monocle`, the cycle goes on from the layout before it, as tide's does; from another layout it hasn't, to its first, or its last for `prev`. The names are tide's: `threecol` centers the master with a stack either side, and `twocol` puts the masters side by side with the rest stacked on the right. Each part keeps its own layouts, and each layout its own `mfact` and `nmaster` (below) |
-| `resize grow\|shrink width\|height\|left\|right\|up\|down [N [px\|ppt]] [or N [px\|ppt]]` | As sway's, for tide's resize mode: grows or shrinks the window by `N`, 10 without it, its unit after it or joined to it, as `10px`. A floating window takes pixels, `px` or no unit, keeping its center on the axis for `width` or `height` (`horizontal` and `vertical` say the same), or moving the side named; it fails with only `ppt`. A tile's width is its column's share of the window area, as `mfact` sets it, in percentage points, `ppt` or no unit, or pixels of the window area: a master's grows the masters' column, and a stack window's the stack's, between 0.1 and 0.9; `left` and `right` say `width`. A tile's height is its stack's equal share, so `height`, `up` and `down` fail for one, as they do for a window fullscreen or maximized, a tile on a workspace that isn't shown, whose split isn't the monitor's now, or a window that can't go further |
+| `resize grow\|shrink width\|height\|left\|right\|up\|down [N [px\|ppt]] [or N [px\|ppt]]` | As sway's, for a resize mode such as [`config.md`](config.md#modes)'s: grows or shrinks the window by `N`, 10 without it, its unit after it or joined to it, as `10px`. A floating window takes pixels, `px` or no unit, keeping its center on the axis for `width` or `height` (`horizontal` and `vertical` say the same), or moving the side named; it fails with only `ppt`. A tile's width is its column's share of the window area, as `mfact` sets it, in percentage points, `ppt` or no unit, or pixels of the window area: a master's grows the masters' column, and a stack window's the stack's, between 0.1 and 0.9; `left` and `right` say `width`. A tile's height is its stack's equal share, so `height`, `up` and `down` fail for one, as they do for a window fullscreen or maximized, a tile on a workspace that isn't shown, whose split isn't the monitor's now, or a window that can't go further |
 | `nmaster N\|+N\|-N` | tidewm's own: how many windows the master area holds on the focused monitor |
 | `mfact F\|+F\|-F` | tidewm's own: the master area's share of the focused monitor's width, from 0.1 to 0.9. Only a finite number will do |
 | `single_width F\|reset` | tidewm's own, tide's `layoutmsg single`: a lone tiled window's width, from 0.1 to 1 of the focused monitor's window area, for the current workspace there, in place of the config file's `single_window` lines, or back to them with `reset`. Dragging a lone window's side sets it too ([`config.md`](config.md#the-mouse)) |
@@ -130,8 +130,11 @@ there its own `mfact` and `nmaster`, as in tide (its SPEC §6.1). The
 `layout`, `mfact` and `nmaster` commands set them for the current
 workspace's part on the focused monitor, and a workspace switch gives each
 monitor its part of the new one; a disabled monitor takes its part once
-it's enabled. A part starts from its monitor's aspect: `threecol` from 2.1
-wide (21:9 and wider), otherwise the layout of `config.h`'s monitor rule.
+it's enabled. A part starts in the config file's `default_layout` for its
+monitor's aspect: its `ultrawide` layout from `ultrawide_aspect`, 2.1 by
+default (21:9 and wider), and its `normal` one below. Without those lines,
+that's `threecol` from there, and the layout of `config.h`'s monitor rule
+below ([`config.md`](config.md)).
 A part is kept by output name, so a monitor plugged in again finds it, and
 a workspace that goes takes its parts with it: one made again starts
 afresh.
@@ -152,10 +155,12 @@ picked.
 
 ### Windows
 
-A new window joins the end of its monitor's stack, so the master stays
-put, as in tide. A window moved in from another workspace or monitor, or
-tiled again after floating, counts as new. `zoom` makes a window the
-master.
+A new tiled window goes where the config file's `new_window` says
+([`config.md`](config.md)): by default at the end of its monitor's stack,
+so the master stays put, as in tide (its SPEC §6.1). A window moved in from
+another workspace or monitor, tiled again after floating, or brought back
+from minimized joins the end, whatever `new_window` says. `zoom` makes a
+window the master.
 
 With the focus guard ([`config.md`](config.md)), a new window no grant
 let in opens unfocused, with `urgent` true and an `urgent` event. A

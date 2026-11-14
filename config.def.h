@@ -39,7 +39,7 @@ static const char *const portal_classes[] = {
 
 /* A lone tiled window's width, as a fraction of the window area, by how
  * wide the area is for its height: the rule with the largest min_aspect
- * the area reaches wins, and none means the whole width. tide's SPEC §1:
+ * the area reaches wins, and none means the whole width. tide's SPEC §6.1:
  * 80% on an ultrawide, the whole width on 16:9 or 16:10. */
 static const SingleRule single_window[] = {
 	/* min_aspect   width */

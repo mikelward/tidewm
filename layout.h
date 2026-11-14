@@ -156,7 +156,7 @@ lt_single_box(Monitor *m)
 }
 
 /* Places m's tiled window, if it's alone, centered at its single-window
- * width, in any layout, as tide's geometry does (tide's SPEC §1). Returns
+ * width, in any layout, as tide's geometry does (tide's SPEC §6.1). Returns
  * whether it was alone, so the layout needn't place it. */
 static int
 lt_single(Monitor *m)
