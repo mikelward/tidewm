@@ -229,6 +229,8 @@ typedef struct {
 	int shadow_blur_radius; /* shadow_blur_radius PIXELS; -1: not given */
 	int resize_grab; /* resize_grab PIXELS; -1: not given */
 	int border; /* default_border none|pixel [N]: its width; -1: not given */
+	float colors[BorderClasses][4]; /* client.CLASS lines' border colors, premultiplied */
+	int has_color[BorderClasses]; /* whether the file has the class's line */
 	int xwayland_scaling; /* xwayland_scaling enable|disable; -1: not given */
 	int floating_mod; /* floating_modifier's modifiers, 0 for none; -1: not given */
 	int floating_inverse; /* floating_modifier's inverse: left resizes, right moves */
@@ -1837,6 +1839,65 @@ settings_border(Settings *s, char *rest, unsigned int line, struct json_object *
 	return 0;
 }
 
+/* A color as sway writes one, #RRGGBB or #RRGGBBAA, the # optional, into
+ * rgba, premultiplied as a scene rect takes it. Returns 0 if it isn't one. */
+static int
+settings_color(const char *arg, float rgba[static 4])
+{
+	uint32_t v;
+	size_t len, i;
+	float a;
+	if (*arg == '#')
+		arg++;
+	len = strlen(arg);
+	if (len != 6 && len != 8)
+		return 0;
+	for (i = 0; i < len; i++)
+		if (!isxdigit((unsigned char)arg[i]))
+			return 0;
+	v = (uint32_t)strtoul(arg, NULL, 16);
+	if (len == 6)
+		v = v << 8 | 0xff;
+	a = (float)(v & 0xff) / 255.0f;
+	rgba[0] = (float)(v >> 24 & 0xff) / 255.0f * a;
+	rgba[1] = (float)(v >> 16 & 0xff) / 255.0f * a;
+	rgba[2] = (float)(v >> 8 & 0xff) / 255.0f * a;
+	rgba[3] = a;
+	return 1;
+}
+
+/* A client.CLASS line, as sway's: border, background and text colors,
+ * then an indicator and a child_border if you like. tidewm draws only a
+ * border round the window, sway's child_border, which is the background
+ * color without one, as in sway; it has no title bar or indicator for the
+ * rest, which need only be colors. class is the BorderClass, or -1 for a
+ * class tidewm has nothing to draw with, as client.focused_tab_title. */
+static int
+settings_client_color(Settings *s, const char *name, int class, char *rest,
+		unsigned int line, struct json_object *errors)
+{
+	float colors[5][4];
+	size_t n = 0;
+	char *arg;
+	while (*rest && n < LENGTH(colors) && (arg = settings_arg(&rest))) {
+		if (!settings_color(arg, colors[n++])) {
+			settings_error(errors, line, "%s: %s isn't a color, which is #RRGGBB "
+					"or #RRGGBBAA", name, arg);
+			return 0;
+		}
+	}
+	if (n < 3 || *rest) {
+		settings_error(errors, line, "%s takes 3 to 5 colors: border, background, "
+				"text, indicator, child_border", name);
+		return 0;
+	}
+	if (class >= 0) {
+		memcpy(s->colors[class], colors[n > 4 ? 4 : 1], sizeof(s->colors[class]));
+		s->has_color[class] = 1;
+	}
+	return 1;
+}
+
 /* A resize_grab line: how many pixels either side of the master/stack
  * edge a press drags it from, from 0, none, to 32 */
 static int
@@ -2200,6 +2261,29 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 			} else {
 				ok &= settings_border(s, p, line, errors);
 			}
+		} else if (!strncasecmp(word, "client.", 7)) {
+			static const struct { const char *name; int class; } classes[] = {
+				{ "client.focused", BorderFocused },
+				{ "client.focused_inactive", BorderFocusedInactive },
+				{ "client.unfocused", BorderUnfocused },
+				{ "client.urgent", BorderUrgent },
+				{ "client.focused_tab_title", -1 },
+			};
+			size_t i;
+			for (i = 0; i < LENGTH(classes) && strcasecmp(word, classes[i].name); i++)
+				;
+			if (i < LENGTH(classes) && mode) {
+				settings_error(errors, line, "%s can't be in a mode", classes[i].name);
+				ok = 0;
+			} else if (i < LENGTH(classes)) {
+				ok &= settings_client_color(s, classes[i].name, classes[i].class,
+						p, line, errors);
+			} else if (strcasecmp(word, "client.background")
+					&& strcasecmp(word, "client.placeholder")) {
+				/* Those two sway ignores, whatever follows, and so does tidewm */
+				settings_error(errors, line, "no setting is called %s", word);
+				ok = 0;
+			}
 		} else if (!strcasecmp(word, "resize_grab")) {
 			if (mode) {
 				settings_error(errors, line, "resize_grab can't be in a mode");
@@ -2472,6 +2556,51 @@ border_update(void)
 		arrange(m);
 }
 
+/* A class's border color: its client.CLASS line's, or config.h's without
+ * one, where focused_inactive is as unfocused, its line's or config.h's. */
+static const float *
+border_class_color(int class)
+{
+	if (settings && settings->has_color[class])
+		return settings->colors[class];
+	switch (class) {
+	case BorderFocused:
+		return focuscolor;
+	case BorderUrgent:
+		return urgentcolor;
+	case BorderFocusedInactive:
+		return border_class_color(BorderUnfocused);
+	}
+	return bordercolor;
+}
+
+/* The color c's border has now: urgent while it's marked, focused while
+ * it's the window whose border says where the keyboard is (border_focus),
+ * focused_inactive while it's the one of those its monitor shows that had
+ * focus last, where focus goes as you go to that monitor, and unfocused
+ * otherwise. */
+static const float *
+border_color(Client *c)
+{
+	if (c->isurgent)
+		return border_class_color(BorderUrgent);
+	if (c == border_focus)
+		return border_class_color(BorderFocused);
+	if (c->mon && c == focustop(c->mon))
+		return border_class_color(BorderFocusedInactive);
+	return border_class_color(BorderUnfocused);
+}
+
+/* Colors every window's border as it is now: after focus moves, the
+ * windows shown change, or the settings do */
+static void
+border_recolor(void)
+{
+	Client *c;
+	wl_list_for_each(c, &clients, link)
+		client_set_border_color(c, border_color(c));
+}
+
 /* Reads path into *text. Returns 1, 0 if there's no such file, or -1 on
  * an error, which it adds to errors. */
 static int
@@ -2531,8 +2660,9 @@ settings_load(int partial)
 	/* Windows dim at the new strength, and cast shadows, or not, at once */
 	dim_update();
 	shadow_update_all();
-	/* Borders take the new width at once */
+	/* Borders take the new width and colors at once */
 	border_update();
+	border_recolor();
 	/* X11 windows scale, or not, at once; with no file, they scale */
 	x11_set_scaling(!settings || settings->xwayland_scaling != 0);
 	/* Outputs and inputs take the new lines at once; at startup, there are
