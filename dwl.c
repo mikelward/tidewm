@@ -107,6 +107,8 @@ enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrUnmanaged, LyrOver
 enum { AxisUp, AxisRight, AxisDown, AxisLeft };
 enum { ShadowsNone, ShadowsFloating, ShadowsActive, ShadowsAll }; /* which windows cast one (effects.h) */
 enum { FgFree, FgWaiting, FgPopup }; /* how the focus guard holds a window (focus.h) */
+enum { BorderFocused, BorderFocusedInactive, BorderUnfocused, BorderUrgent,
+	BorderClasses }; /* a border's color: sway's client.CLASS (settings.h) */
 
 typedef union {
 	int i;
@@ -482,6 +484,7 @@ static pid_t child_pid = -1;
 static int locked;
 static unsigned long urgent_count; /* windows marked urgent so far, for Client.urgent_seq */
 static Client *focused_client;
+static Client *border_focus; /* the window with the focused border (settings.h) */
 /* Focus moving now was asked for, by a click, a key, button or scroll
  * binding, a command or the lock: only then does an on-demand layer give
  * up the keyboard */
@@ -728,6 +731,7 @@ arrange(Monitor *m)
 	wl_list_for_each(c, &clients, link)
 		if (c->mon == m)
 			shadow_update(c);
+	border_recolor();
 	dim_update();
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
@@ -1795,6 +1799,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		if (old_c && !client_is_unmanaged(old_c)) {
 			wl_list_remove(&old_c->flink);
 			wl_list_insert(&fstack, &old_c->flink);
+			border_recolor();
 		}
 		return;
 	}
@@ -1821,7 +1826,8 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		if (!(old_l && old_l->layer_surface->current.keyboard_interactive == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE)
 				&& !(old_c && client_wants_focus(old_c))
 				&& !seat->drag)
-			client_set_border_color(c, focuscolor);
+			border_focus = c;
+		border_recolor();
 	}
 
 	/* If an overlay is focused, don't focus or activate the client,
@@ -1839,13 +1845,14 @@ focusclient(Client *c, LayerSurface *l, int lift)
 
 	if (focused_client && focused_client != c && !(c && client_is_unmanaged(c))) {
 		struct wlr_surface *s = client_surface(focused_client);
-		if (c)
-			client_set_border_color(focused_client, bordercolor);
+		if (c && border_focus == focused_client)
+			border_focus = NULL;
 		if (s && s->mapped)
 			client_activate_surface(s, 0);
 		focused_client = NULL;
 	}
 	printstatus();
+	border_recolor();
 	dim_update();
 	shadow_update_all();
 
@@ -2317,8 +2324,7 @@ mapnotify(struct wl_listener *listener, void *data)
 	/* The focus guard's say, before its border shows whether it's urgent */
 	grant_ws = fg_open(c);
 	for (i = 0; i < 4; i++) {
-		c->border[i] = wlr_scene_rect_create(c->scene, 0, 0,
-				c->isurgent ? urgentcolor : bordercolor);
+		c->border[i] = wlr_scene_rect_create(c->scene, 0, 0, border_color(c));
 		c->border[i]->node.data = c;
 	}
 	dim_attach(c);
@@ -3913,6 +3919,8 @@ unmapnotify(struct wl_listener *listener, void *data)
 		focused_client = NULL;
 		fg_closing = c; /* for setmon(), below */
 	}
+	if (c == border_focus)
+		border_focus = NULL;
 	/* Mapping again, it's maximized only if it asks again, and shown,
 	 * and kept open only if a shell says so again: it's a new window */
 	c->ismaximized = 0;
@@ -4147,9 +4155,7 @@ seturgent(Client *c, int urgent)
 	printstatus();
 	if (!surface || !surface->mapped)
 		return;
-	if (c->border[0])
-		client_set_border_color(c, urgent ? urgentcolor
-				: c == focused_client ? focuscolor : bordercolor);
+	border_recolor();
 	ipc_event_window(c, "urgent");
 	ws_update_urgency(c->ws);
 }

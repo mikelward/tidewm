@@ -257,6 +257,18 @@ it; with `shadows all`, every window does. `shadow_blur_radius` says how
 far a shadow reaches, 8 pixels without it. Both are off in `config.h` as
 it comes.
 
+### Border colors
+
+A window's border, `default_border`'s, has its class's color, set as in
+sway: `client.focused`, `client.focused_inactive`, `client.unfocused` and
+`client.urgent`, each with a border, a background and a text color, then
+an indicator and a child border if you like. tidewm draws only the border
+round the window, which is the child border, or the background without
+one, as in sway; the rest need only be colors. `focused_inactive` is the
+window focus goes to as you go to a monitor that doesn't have it. Without
+a class's line its color is `config.h`'s: blue for the focused window, red
+for an urgent one and gray for the rest.
+
 ### X11 at a fractional scale
 
 With `xwayland_scaling disable` in the config file, X11 windows are in
