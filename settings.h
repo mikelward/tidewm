@@ -2516,6 +2516,9 @@ settings_parse(char *text, struct json_object *errors, int partial)
 	s->floating_mod = -1;
 	settings_add_mode(s, "default");
 	settings_file = NULL;
+	/* $mod is Super until the config sets it, so a config that lost its
+	 * set line (an include gone missing) still binds its $mod keys */
+	settings_set(&vars, &nvars, "$mod", "Mod4", 0, errors);
 	ok = settings_parse_text(s, text, &vars, &nvars, 0, errors);
 	keymaps_ok = settings_check_keymaps(s, errors);
 	ok &= keymaps_ok;

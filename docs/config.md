@@ -42,7 +42,7 @@ supported yet. In an `input` or `output` line, a name or value may be in
 
 | Setting | Does |
 |---|---|
-| `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway |
+| `set $NAME VALUE` | Makes `$NAME` stand for the rest of the line in every later line. A name is letters, digits and `_`. Where names overlap, as `$w` and `$wide`, the longest that matches wins, as in sway. `$mod` is `Mod4`, Super, until a line sets it, so a config that lost its `set $mod` line keeps its `$mod` keys |
 | `include PATH` | As sway's: reads each file `PATH` matches, a word or text in `"` that may be a pattern such as `tide-*.conf`, in order, as if its lines were here, so a shell can keep settings of its own in a file the config takes in. `~/` is your home, and a relative path is from the directory of the file the line is in. A file that isn't there, or a pattern nothing matches, includes nothing. Variables set before it hold in it, and those it sets hold after. A mode or input block an included file opens closes in it. Includes nest 10 deep at most. `reload` reads them again, and an error in one names that file |
 | `bindsym KEYS COMMANDS` | Pressing `KEYS` runs `COMMANDS`, IPC commands separated by `;`. An `exec` takes the rest of the line, `;` and all, so it comes last |
 | `bindcode KEYS COMMANDS` | As sway's: `bindsym`, with the key as its keycode, as below |
