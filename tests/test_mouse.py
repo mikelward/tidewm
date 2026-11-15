@@ -165,6 +165,17 @@ class ConfigHButtonsTest(MouseTest):
         self.assertEqual(self.moved_by(window, "alt", "alt", "left"), (100, 50))
 
 
+class OnlyFileButtonsTest(MouseTest):
+    """With -k, a file that says nothing of the mouse has none of config.h's
+    buttons either."""
+    ARGS = ("-k",)
+    CONFIG = HOLD
+
+    def test_alt_doesnt_drag(self):
+        window = self.floating()
+        self.assertEqual(self.moved_by(window, "alt", "alt", "left"), (0, 0))
+
+
 class ReboundButtonTest(MouseTest):
     """A file whose only button binding a rebind takes away still said what
     the mouse does, so config.h's buttons stay out."""

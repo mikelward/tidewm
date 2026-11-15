@@ -32,6 +32,13 @@ wanting dwl's defaults says them itself. `config.h`'s buttons, Alt and a
 drag, stay until the file says what the mouse does, by a
 `floating_modifier` line or a button's binding ([The mouse](#the-mouse)).
 
+With `-k` on tidewm's command line, only the file's keys and buttons
+work, never `config.h`'s, whatever the file has: an error, no key that
+runs `exit`, no key at all, nothing said of the mouse, or no file. With
+no key binding in the file, no key does anything but switch VT. tidewm
+says so at startup. It's for a greeter: there, `config.h`'s terminal key
+would give anyone at the login screen a shell.
+
 ## Lines
 
 Each line is one setting. Blank lines, and lines starting with `#`, are
@@ -142,7 +149,7 @@ bindsym --locked XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
 ```
 
 Ctrl+Alt+F1…F12 switch to that VT whatever the file binds, locked or not,
-as in sway: a file that lost its keys still leaves a way out. A binding of
+as in sway, and under `-k`: a file that lost its keys still leaves a way out. A binding of
 your own on one of them comes first.
 
 ## Named bindings

@@ -261,9 +261,13 @@ static char settings_path[PATH_MAX];
 /* The file being read, for its errors: an included one, or NULL for the
  * config file */
 static const char *settings_file;
-static Settings *settings; /* NULL: config.h's keys */
+static Settings *settings; /* NULL: config.h's keys, or none under -k */
 static struct json_object *settings_errors; /* the last load's, as strings */
 static size_t settings_mode; /* the current mode, in settings->modes */
+/* -k: only the file's keys and buttons, never config.h's, whatever the
+ * file has, as for a greeter, where config.h's terminal key would give
+ * anyone a shell */
+static int settings_only;
 static int settings_apply_outputs(const OutputConfig *only);
 static int settings_enable_any_mode(struct wlr_output *wlr_output);
 static int settings_apply_inputs(const InputConfig *only);
@@ -2708,7 +2712,8 @@ settings_load(int partial)
  * way to find the line. A file that can't load at all, as one with a bad
  * keymap, is left out, and tidewm starts with config.h's keys. So does
  * one named with -c that isn't there, which is an error, as a file at
- * its default place not being there isn't: that one was asked for. */
+ * its default place not being there isn't: that one was asked for. Under
+ * -k, config.h's keys never work, file or none. */
 static void
 settings_init(const char *arg)
 {
@@ -2734,11 +2739,15 @@ settings_init(const char *arg)
 		fprintf(stderr, "tidewm: %s\n",
 				json_object_get_string(json_object_array_get_idx(settings_errors, i)));
 	if (!loaded || missing)
-		fprintf(stderr, "tidewm: not using %s: config.h's keys work instead\n", settings_path);
+		fprintf(stderr, "tidewm: not using %s%s\n", settings_path,
+				settings_only ? "" : ": config.h's keys work instead");
 	else if (nerrors)
 		fprintf(stderr, "tidewm: left out the lines above from %s; the rest is loaded\n",
 				settings_path);
-	if (loaded && settings && !settings_keys())
+	if (settings_only)
+		fprintf(stderr, "tidewm: config.h's keys and buttons are off (-k), so only "
+				"%s's work\n", settings_path);
+	else if (loaded && settings && !settings_keys())
 		fprintf(stderr, "tidewm: %s binds no key, so config.h's keys work with it\n",
 				settings_path);
 	else if (settings_safety())
@@ -2885,11 +2894,14 @@ settings_run_binding(uint32_t mods, uint32_t code, xkb_keysym_t sym, int release
  * there are, as in sway. A file with none, as when every bindsym line
  * failed or sits in an include that's gone, keeps config.h's, so there are
  * always keys to fix it with. In a mode of the file's, its keys are the
- * mode's, as config.h has none. */
+ * mode's, as config.h has none. Under -k, the file's are all there are,
+ * none at all with no file. */
 static int
 settings_keys(void)
 {
 	size_t j;
+	if (settings_only)
+		return 1;
 	if (!settings)
 		return 0;
 	if (settings_mode)
@@ -2927,12 +2939,13 @@ settings_quits(const char *command)
  * binds no key that quits, as one with a line or an include left out may
  * have lost the keys it meant to give. Quit, a terminal and the launcher
  * always keep a key (tide's SPEC §16), so a session can always be fixed
- * from and left. Only once settings_keys() has left config.h's out. */
+ * from and left. Only once settings_keys() has left config.h's out, and
+ * never under -k, whose greeter config.h's terminal would give a shell. */
 static int
 settings_safety(void)
 {
 	size_t j;
-	if (!settings || settings_mode)
+	if (settings_only || !settings || settings_mode)
 		return 0;
 	if (json_object_array_length(settings_errors))
 		return 1;
@@ -2949,11 +2962,13 @@ settings_safety(void)
 /* Whether the loaded file says what the mouse does, by a floating_modifier
  * line or a --whole-window binding in any mode: then config.h's buttons
  * and scrolls are left out, as its keys are, and the file's are all there
- * are, as in sway. */
+ * are, as in sway. Under -k, they always are. */
 static int
 settings_mouse(void)
 {
 	size_t i, j;
+	if (settings_only)
+		return 1;
 	if (!settings)
 		return 0;
 	if (settings->floating_mod >= 0)

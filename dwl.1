@@ -9,6 +9,7 @@
 .Op Fl v
 .Op Fl d
 .Op Fl c Ar config file
+.Op Fl k
 .Op Fl s Ar startup command
 .Sh DESCRIPTION
 .Nm
@@ -41,6 +42,14 @@ or
 .Pa ~/.config/tidewm/config .
 Once the file is loaded, its key bindings replace the ones below,
 if it binds any key at its top level.
+.Pp
+When given the
+.Fl k
+option,
+.Nm
+uses only the config file's keys and buttons, never the ones below,
+whatever the file has, as a greeter needs.
+Ctrl-Alt-F1 to F12 still switch VT.
 .Pp
 When given the
 .Fl s

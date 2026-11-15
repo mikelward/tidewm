@@ -92,7 +92,10 @@ startup and again on `reload`, with no restart.
 file doesn't set, and the keys, buttons and rules in force without a file.
 Once the file is loaded, its bindings replace `config.h`'s keys if it binds
 any key at its top level, its rules replace `config.h`'s rules, and once it
-says what the mouse does, its buttons replace `config.h`'s. sway's `exec`
+says what the mouse does, its buttons replace `config.h`'s. With `-k`, as a
+greeter needs, the file's keys and buttons are all there are, whatever it
+has, and `config.h`'s never work
+([Where it is](docs/config.md#where-it-is)). sway's `exec`
 and `exec_always` aren't settings: a command to start with tidewm goes in
 `-s` ([Running tidewm](#running-tidewm)).
 
