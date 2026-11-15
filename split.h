@@ -13,8 +13,14 @@
  * equal, and twocol's masters share their side equally, so there's no
  * edge between them.
  *
- * Anything over the edge takes the press as usual: a floating window, a
- * layer surface, as the bar, a notification or a popup of one, or a
+ * A shadow across an edge is part of its zone, as far as it reaches. With
+ * shadows active, that's the focused tile's, on its neighbor's side of
+ * the edge and only beside that tile; with shadows all, both sides, down
+ * the whole edge. A lone window's shadow drags its width likewise.
+ * resize_grab 0 still turns the drag off.
+ *
+ * Anything over the edge takes the press as usual: a floating window or
+ * its resize zone (floating.h), a layer surface, as the bar, a notification or a popup of one, or a
  * window's popup. So does a press on a monitor that isn't focused, under
  * a fullscreen or maximized window, or while a popup grabs the pointer,
  * as a menu does, or a focus grab holds: then a press outside it closes
@@ -34,6 +40,9 @@ typedef struct {
 	           * EdgeCenter: a side of threecol's centered master;
 	           * EdgeLone: a side of a lone window */
 	int right; /* EdgeCenter, EdgeLone: the right side */
+	/* A shadow across it (split_shadows): how far it reaches left and
+	 * right of the edge, from top to bottom */
+	int before, after, top, bottom;
 } SplitEdge;
 
 /* The drag on, while cursor_mode is CurEdge */
@@ -54,6 +63,10 @@ split_grab(void)
 {
 	return settings && settings->resize_grab >= 0 ? settings->resize_grab : resize_grab;
 }
+
+static int shadow_mode(void);
+static int shadow_range(void);
+static int fl_reach(void);
 
 /* m's edges as its layout places its tiles now, into out, which holds 2.
  * Returns how many. */
@@ -108,6 +121,34 @@ split_edges(Monitor *m, SplitEdge *out)
 	return 0;
 }
 
+/* Notes the shadow that falls across each of m's n edges, which widens
+ * its zone: every tile's with shadows all, or with shadows active the
+ * focused tile's, out from its own sides and beside it */
+static void
+split_shadows(Monitor *m, SplitEdge *edges, int n)
+{
+	int mode = shadow_mode(), r = shadow_range(), i;
+	Client *c = focused_client;
+	if (r <= 0 || (mode != ShadowsActive && mode != ShadowsAll))
+		return;
+	if (mode == ShadowsActive && (!c || c->isfloating || !VISIBLEON(c, m)))
+		return;
+	for (i = 0; i < n; i++) {
+		if (mode == ShadowsAll) {
+			edges[i].before = edges[i].after = r;
+			edges[i].top = m->w.y;
+			edges[i].bottom = m->w.y + m->w.height;
+			continue;
+		}
+		if (edges[i].x == c->geom.x)
+			edges[i].before = r;
+		if (edges[i].x == c->geom.x + c->geom.width)
+			edges[i].after = r;
+		edges[i].top = c->geom.y - r;
+		edges[i].bottom = c->geom.y + c->geom.height + r;
+	}
+}
+
 /* Whether m shows a fullscreen or maximized window, which covers its edges */
 static int
 split_covered(Monitor *m)
@@ -129,7 +170,7 @@ split_edge_at(double x, double y, SplitEdge *found)
 	struct wlr_surface *surface = NULL;
 	Client *c = NULL, *f;
 	LayerSurface *l = NULL;
-	int grab = split_grab(), n, i;
+	int grab = split_grab(), reach = fl_reach(), before, after, n, i;
 	/* A popup's pointer grab, a menu's, or a focus grab: a press outside
 	 * it closes it */
 	if (grab <= 0 || locked || !m || m != selmon || !m->lt_settled || seat->drag
@@ -139,9 +180,16 @@ split_edge_at(double x, double y, SplitEdge *found)
 	if (y < m->w.y || y >= m->w.y + m->w.height || split_covered(m))
 		return NULL;
 	n = split_edges(m, edges);
-	for (i = 0; i < n; i++)
-		if (x >= edges[i].x - grab && x < edges[i].x + grab)
+	split_shadows(m, edges, n);
+	for (i = 0; i < n; i++) {
+		before = after = grab;
+		if (y >= edges[i].top && y < edges[i].bottom) {
+			before = MAX(grab, edges[i].before);
+			after = MAX(grab, edges[i].after);
+		}
+		if (x >= edges[i].x - before && x < edges[i].x + after)
 			break;
+	}
 	if (i == n)
 		return NULL;
 	/* What's over the tiles there takes the press: a layer surface or its
@@ -150,10 +198,12 @@ split_edge_at(double x, double y, SplitEdge *found)
 	if (l || (c && (c->isfloating || client_is_unmanaged(c)
 			|| wlr_surface_get_root_surface(surface) != client_surface(c))))
 		return NULL;
-	/* A floating window's border, which isn't a surface */
+	/* A floating window's border, which isn't a surface, and the zone
+	 * round it that resizes it */
 	wl_list_for_each(f, &clients, link)
-		if (VISIBLEON(f, m) && f->isfloating && x >= f->geom.x && y >= f->geom.y
-				&& x < f->geom.x + f->geom.width && y < f->geom.y + f->geom.height)
+		if (VISIBLEON(f, m) && f->isfloating && x >= f->geom.x - reach
+				&& y >= f->geom.y - reach && x < f->geom.x + f->geom.width + reach
+				&& y < f->geom.y + f->geom.height + reach)
 			return NULL;
 	*found = edges[i];
 	return m;

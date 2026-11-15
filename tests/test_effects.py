@@ -362,20 +362,25 @@ class TileShadowTest(ShadowHelpers):
         self.assertTrue(self.shadowed((x - 10, y), WINDOW))
         self.assertFalse(self.shadowed((x - 20, y), WINDOW), "past 20 pixels")
 
-    def test_a_click_goes_through_a_tiles_shadow(self):
-        # A shadow wide enough to click clear of the edge between the two,
-        # which a press drags: the second's is over the first there, and
-        # the click is the first's
+    def test_a_click_goes_through_a_tiles_shadow_away_from_the_edge(self):
+        # A third tile, under the second: its shadow is over the second,
+        # where there's no edge to drag, and a click there is the second's.
+        # A press on a shadow across the master/stack edge drags the edge
+        # (test_shadow_drag.py).
         self.configure("shadows active\nshadow_blur_radius 100\n")
-        x, y = self.in_first[0] - 50, self.in_first[1]
+        third = self.open("test.third")
+        tx, ty, tw, th = self.rect(third)
+        self.assertEqual(self.rect(self.second)[1] + self.rect(self.second)[3], ty,
+                         "the third is under the second")
+        x, y = tx + tw // 2, ty - 50
         self.assertTrue(self.shadowed((x, y), WINDOW))
         area = self.connect().request(GET_OUTPUTS)[0]["rect"]
         subprocess.run([os.path.join(ROOT, "tests", "pointer"), "move", str(x), str(y),
                         str(area["width"]), str(area["height"]), "click"],
                        env=self.wm.env, check=True, timeout=TIMEOUT)
         self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "focus"
-                            and e["container"]["id"] == self.first)
-        self.assertEqual(self.casting(), {"test.first"})
+                            and e["container"]["id"] == self.second)
+        self.assertEqual(self.casting(), {"test.second"})
 
 
 class WallpaperShadowTest(ShadowHelpers):
