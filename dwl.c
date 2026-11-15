@@ -3287,8 +3287,23 @@ int
 runbinding(uint32_t mods, uint32_t code, xkb_keysym_t sym)
 {
 	const Key *key;
-	if (settings_keys())
-		return settings_run_binding(mods, code, sym, 0);
+	if (settings_keys()) {
+		if (settings_run_binding(mods, code, sym, 0))
+			return 1;
+		/* Then config.h's keys to quit, a terminal and the launcher,
+		 * while the file has an error or binds no key that quits. A
+		 * release binding of the file's this key armed keeps it */
+		if (locked || !settings_safety()
+				|| (settings_tap.armed && settings_tap.keycode + 8 == code)
+				|| !(key = keybinding(mods, sym))
+				|| !(key->func == quit || (key->func == spawn
+				&& (key->arg.v == termcmd || key->arg.v == menucmd))))
+			return 0;
+		focus_asked++;
+		key->func(&key->arg);
+		focus_asked--;
+		return 1;
+	}
 	/* config.h's keys are all off on the lock screen */
 	if (locked || !(key = keybinding(mods, sym)))
 		return 0;

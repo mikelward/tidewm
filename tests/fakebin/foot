@@ -1,0 +1,2 @@
+#!/bin/sh
+# Stands in for config.h's terminal in tests: opens nothing
