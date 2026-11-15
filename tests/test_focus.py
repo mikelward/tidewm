@@ -848,6 +848,100 @@ class HeldCloseTest(CloseHelpers):
         self.assertEqual((self.state(held), self.focused()), ((False, True), [first]))
 
 
+class MinimizeHelpers(CloseHelpers):
+    """Minimizing the window you're in moves focus as closing it does,
+    but only to a window on its own monitor, as tide's SPEC §6.7 has it."""
+
+    def minimize(self, con_id):
+        self.command(self.connect(), f"[con_id={con_id}] minimize enable")
+        self.ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "minimize"
+                            and e["container"]["id"] == con_id)
+
+
+class MinimizeTest(MinimizeHelpers):
+    # A lone window half the width, centered, leaves room either side
+    CONFIG = ('for_window [app_id="^test.float$"] floating enable\n'
+              "single_window 0 0.5\n")
+    OUTPUTS = 2
+
+    def test_minimizing_focuses_the_window_that_moves_in_under_the_pointer(self):
+        first, _ = self.open("test.first")
+        second, _ = self.open("test.second")
+        third, _ = self.open("test.third")
+        self.focus(first)
+        self.focus(third)
+        self.point_into(third)  # where second grows into
+        self.minimize(third)
+        self.assertEqual(self.focused(), [second])  # not first, the most recent
+
+    def test_over_another_outputs_empty_space_the_most_recent_window_takes_focus(self):
+        self.command(self.connect(), "focus output HEADLESS-2")
+        there, _ = self.open("test.there")
+        self.command(self.connect(), "focus output HEADLESS-1")
+        first, _ = self.open("test.first")
+        second, _ = self.open("test.second")
+        self.focus(first)
+        self.focus(second)
+        rect = self.windows()[there]["rect"]
+        self.assertEqual(self.windows()[there]["output"], "HEADLESS-2")
+        self.assertGreater(rect["x"] - self.output_rect("HEADLESS-2")["x"], 1)
+        self.point((self.output_rect("HEADLESS-2")["x"] + rect["x"]) // 2,
+                   rect["y"] + rect["height"] // 2)  # beside there, the lone window
+        self.minimize(second)
+        self.assertEqual(self.focused(), [first])  # not there, nor nothing
+
+    def test_a_window_under_the_pointer_on_another_output_doesnt_take_focus(self):
+        self.command(self.connect(), "focus output HEADLESS-2")
+        there, _ = self.open("test.there")
+        self.command(self.connect(), "focus output HEADLESS-1")
+        first, _ = self.open("test.first")
+        second, _ = self.open("test.second")
+        self.focus(first)
+        self.focus(second)
+        self.assertEqual(self.windows()[there]["output"], "HEADLESS-2")
+        self.point_into(there)
+        self.minimize(second)
+        self.assertEqual(self.focused(), [first])  # not there, though it's under the pointer
+
+    def test_a_floating_window_reaching_onto_another_output_doesnt_take_focus_there(self):
+        self.command(self.connect(), "focus output HEADLESS-1")
+        first, _ = self.open("test.first")
+        floating, _ = self.open("test.float", size="300x200")
+        one, two = self.output_rect("HEADLESS-1"), self.output_rect("HEADLESS-2")
+        rect = self.windows()[floating]["rect"]
+        # 100 pixels of it left on HEADLESS-1, at the edge HEADLESS-2 is by
+        if two["x"] < one["x"]:
+            x, there = one["x"] + 100 - rect["width"], one["x"] - 50
+            self.command(self.connect(), f"[con_id={floating}] move left {rect['x'] - x} px")
+        else:
+            x, there = one["x"] + one["width"] - 100, one["x"] + one["width"] + 50
+            self.command(self.connect(), f"[con_id={floating}] move right {x - rect['x']} px")
+        rect = self.windows()[floating]["rect"]
+        self.assertEqual((rect["x"], self.windows()[floating]["output"]), (x, "HEADLESS-1"))
+        second, _ = self.open("test.second")
+        self.focus(first)
+        self.focus(second)
+        self.point(there, rect["y"] + rect["height"] // 2)  # its part on HEADLESS-2
+        self.minimize(second)
+        self.assertEqual(self.focused(), [first])  # not floating, though it's under the pointer
+
+    def output_rect(self, name):
+        output, = [o for o in self.connect().request(GET_OUTPUTS) if o["name"] == name]
+        return output["rect"]
+
+
+class HeldMinimizeTest(MinimizeHelpers):
+    def test_a_held_window_under_the_pointer_waits_when_the_focused_one_is_minimized(self):
+        self.grant("test.first")
+        first, _ = self.open("test.first")
+        self.grant("test.second")
+        second, _ = self.open("test.second")
+        held, _ = self.open("test.held")
+        self.point_into(held)
+        self.minimize(second)
+        self.assertEqual((self.state(held), self.focused()), ((False, True), [first]))
+
+
 class FocusedActivationTest(GuardTest):
     def test_the_focused_windows_activation_uses_its_grant(self):
         self.grant("test.app")

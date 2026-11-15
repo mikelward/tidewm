@@ -740,34 +740,39 @@ fg_focused(Client *c)
 	fg_cancel();
 }
 
-/* The window to focus as fg_closing, the window you were in, closes, as
- * tide's SPEC §14.2 and Hyprland's input:focus_on_close cursor have it:
- * the window under the pointer, once the windows left have moved in.
- * Its place is its geometry, which arrange() has set though the window
- * hasn't drawn at its new size yet. Like Hyprland, it looks past layer
- * surfaces, such as a notification, at the windows under them. The
- * pointer stays where it is. Otherwise the most recent window, as dwl
- * has it: when nothing is under the pointer, or the window there is one
- * the guard holds, which waits for you to go to it (TODO.md's *A held
- * window waits for you*), or the one closing is a dialog, whose parent
- * takes focus back. */
+/* The window to focus as gone, the window you were in, closes or is
+ * minimized, as tide's SPEC §6.7 and §14.2 and Hyprland's
+ * input:focus_on_close cursor have it: the window under the pointer, once
+ * the windows left have moved in. Its place is its geometry, which
+ * arrange() has set though the window hasn't drawn at its new size yet.
+ * Like Hyprland, it looks past layer surfaces, such as a notification, at
+ * the windows under them. The pointer stays where it is. Otherwise the
+ * most recent window, as dwl has it: when nothing is under the pointer,
+ * or the window there is one the guard holds, which waits for you to go
+ * to it (TODO.md's *A held window waits for you*), or the one going is a
+ * dialog, whose parent takes focus back. Unless only is NULL, also when
+ * the pointer is on a monitor other than only, or the window under it is
+ * on one: a floating window may reach onto another monitor. A minimize
+ * passes its window's monitor, as tide's SPEC §6.7 has it; a close
+ * passes NULL. */
 static Client *
-fg_after_close(void)
+fg_after_leaving(Client *gone, Monitor *only)
 {
 	static const int lyrs[] = {LyrFS, LyrFloat, LyrTile}; /* topmost first */
 	struct wlr_scene_node *node;
 	Client *c;
 	size_t i;
-	if (!fg_closing || client_get_parent(fg_closing))
+	if (!gone || client_get_parent(gone)
+			|| (only && xytomon(cursor->x, cursor->y) != only))
 		return focustop(selmon);
 	for (i = 0; i < LENGTH(lyrs); i++) {
 		wl_list_for_each_reverse(node, &layers[lyrs[i]]->children, link) {
 			if (!node->enabled || node->type != WLR_SCENE_NODE_TREE
-					|| !(c = node->data) || c == fg_closing
+					|| !(c = node->data) || c == gone
 					|| client_is_unmanaged(c) || !VISIBLEON(c, c->mon)
 					|| !wlr_box_contains_point(&c->geom, cursor->x, cursor->y))
 				continue;
-			return c->held ? focustop(selmon) : c;
+			return c->held || (only && c->mon != only) ? focustop(selmon) : c;
 		}
 	}
 	return focustop(selmon);

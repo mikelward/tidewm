@@ -2639,9 +2639,11 @@ setmaximized(Client *c, int maximized)
 /* Minimizes c, or brings it back, as tide's SPEC §6.7 has it. A minimized
  * window keeps its workspace, monitor and states, so a workspace with one
  * stays while it waits, but it isn't shown, laid out or focused: focus on
- * it goes to the window on the focused monitor you were in before it, the
- * top of the focus stack (focustop). Brought back, it
- * joins the end of its part's stack, as a window that arrives does.
+ * it goes as it does when the window you're in closes, to the window
+ * under the pointer once the rest have moved in, though only one on its
+ * own monitor, or else the one on the focused monitor you were in before
+ * it (fg_after_leaving). Brought back,
+ * it joins the end of its part's stack, as a window that arrives does.
  * Focusing it brings it back (focusclient). An app's own minimize request
  * does nothing. */
 void
@@ -2659,8 +2661,10 @@ setminimized(Client *c, int minimized)
 	}
 	if (c->mon)
 		arrange(c->mon);
+	/* The window you were in going, the one under the pointer on its
+	 * monitor (focus.h) */
 	if (minimized && c == focused_client)
-		focusclient(focustop(selmon), NULL, 1);
+		focusclient(fg_after_leaving(c, c->mon), NULL, 1);
 	printstatus();
 	ipc_event_window(c, "minimize");
 }
@@ -3502,7 +3506,7 @@ setmon(Client *c, Monitor *m, Workspace *ws)
 		ipc_event_window(c, "move");
 	}
 	/* The window you were in closing, the one under the pointer (focus.h) */
-	focusclient(!m && c == fg_closing ? fg_after_close() : focustop(selmon), NULL, 1);
+	focusclient(!m && c == fg_closing ? fg_after_leaving(c, NULL) : focustop(selmon), NULL, 1);
 }
 
 void
