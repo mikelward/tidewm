@@ -23,7 +23,8 @@ keys, and tidewm says so at startup, so there are always keys to fix it
 with. A file that binds keys but has an error, or binds no key that runs
 `exit`, keeps `config.h`'s keys to quit, open a terminal and the launcher
 (Alt+Shift+q, Ctrl+Alt+BackSpace, Alt+Shift+Return and Alt+p in
-`config.def.h`) under its own, as one with a line or an include left out
+`config.def.h`, the terminal `xdg-terminal-exec`'s before `config.h`'s,
+which may not be installed) under its own, as one with a line or an include left out
 may have lost the keys it meant to give; its own binding of those keys
 wins, and tidewm says so at startup. Its
 `for_window` lines all the rules, and `config.h`'s are left out, so a file

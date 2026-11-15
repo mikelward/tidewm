@@ -3300,7 +3300,21 @@ runbinding(uint32_t mods, uint32_t code, xkb_keysym_t sym)
 				&& (key->arg.v == termcmd || key->arg.v == menucmd))))
 			return 0;
 		focus_asked++;
-		key->func(&key->arg);
+		if (key->func == spawn && key->arg.v == termcmd) {
+			/* The terminal you have, xdg-terminal-exec's, before
+			 * config.h's whole command, which may not be installed */
+			size_t n = 0, i;
+			const char *term[4 + 32 + 1] = { "/bin/sh", "-c",
+				"xdg-terminal-exec || exec \"$@\"", "sh" };
+			while (termcmd[n] && n < 32)
+				n++;
+			for (i = 0; i < n; i++)
+				term[4 + i] = termcmd[i];
+			term[4 + n] = NULL;
+			spawn(&(Arg){.v = term});
+		} else {
+			key->func(&key->arg);
+		}
 		focus_asked--;
 		return 1;
 	}

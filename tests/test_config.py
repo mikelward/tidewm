@@ -898,7 +898,7 @@ class NoKeysAtStartTest(KeysTest):
         self.assertEqual(self.shown(ipc), "keyed", "Alt+2 is no longer a key")
 
 
-# A foot that does nothing, so config.h's terminal key opens no real one
+# A foot and an xdg-terminal-exec that do nothing, so the terminal key opens no real one
 FAKE_BIN = os.path.join(ROOT, "tests", "fakebin")
 
 
@@ -998,6 +998,59 @@ class KeysToFixWithKeptOpenQuitTest(KeysToFixWithHelpers):
 
     def test_a_key_that_quits_only_in_a_window_kept_open_isnt_one(self):
         self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+
+
+class KeysToFixWithXdgTerminalTest(KeysToFixWithHelpers):
+    """The fallback terminal is xdg-terminal-exec's, which says it ran."""
+    CONFIG = "bindsym Print nop\n"
+
+    def setUp(self):
+        self.bin = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.bin)
+        self.ran = os.path.join(self.bin, "ran")
+        os.mkfifo(self.ran)
+        terminal = os.path.join(self.bin, "xdg-terminal-exec")
+        with open(terminal, "w") as f:
+            f.write(f"#!/bin/sh\necho terminal > {shlex.quote(self.ran)}\n")
+        os.chmod(terminal, 0o755)
+        self.ENV = {"PATH": f"{self.bin}:{FAKE_BIN}:{os.environ['PATH']}"}
+        super().setUp()
+
+    def test_the_terminal_key_opens_xdg_terminal_execs(self):
+        fd = os.open(self.ran, os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, fd)
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+        self.assertTrue(select.select([fd], [], [], TIMEOUT)[0], "no terminal ran")
+        self.assertEqual(os.read(fd, 100), b"terminal\n")
+
+
+class KeysToFixWithConfigTerminalTest(KeysToFixWithHelpers):
+    """Without xdg-terminal-exec, the fallback terminal is config.h's
+    command whole: config.def.h's foot, here a stand-in that says the
+    arguments it was given."""
+    CONFIG = "bindsym Print nop\n"
+
+    def setUp(self):
+        self.bin = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.bin)
+        self.ran = os.path.join(self.bin, "ran")
+        os.mkfifo(self.ran)
+        for name, script in (("xdg-terminal-exec", "exit 1"),
+                             ("foot", f"echo foot \"$#\" > {shlex.quote(self.ran)}")):
+            path = os.path.join(self.bin, name)
+            with open(path, "w") as f:
+                f.write(f"#!/bin/sh\n{script}\n")
+            os.chmod(path, 0o755)
+        self.ENV = {"PATH": f"{self.bin}:{os.environ['PATH']}"}
+        super().setUp()
+
+    def test_without_xdg_terminal_exec_config_hs_terminal_opens(self):
+        fd = os.open(self.ran, os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, fd)
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+        self.assertTrue(select.select([fd], [], [], TIMEOUT)[0], "no terminal ran")
+        # config.def.h's terminal is foot with no arguments
+        self.assertEqual(os.read(fd, 100), b"foot 0\n")
 
 
 class KeysToFixWithLinkedConfigTest(KeysToFixWithHelpers):
