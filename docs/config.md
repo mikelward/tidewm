@@ -54,12 +54,12 @@ supported yet. In an `input` or `output` line, a name or value may be in
 | `new_window end\|top\|next\|master` | tidewm's own: where a new tiled window goes, at the `end` of the stack, its `top`, just after the masters, `next` after the focused window, or as the `master`. `end` without it, so the master stays put |
 | `dim_inactive STRENGTH` | tidewm's own, tide's SPEC §6.2: dims every window but the focused one, by a translucent black layer that clicks go through, from 0, none, to 1, black; tide's is 0.07. Without the line, `config.h`'s `dim_inactive`, 0 as it comes. A monitor showing one window, or a fullscreen one, doesn't dim, and nor do picture-in-picture, video, by the app's content type, and a window `dim disable` exempts ([`ipc.md`](ipc.md)). A window's menus and tooltips aren't dimmed |
 | `fade_duration MILLISECONDS` | tidewm's own: how long a window takes to fade in as it opens, and dimming to fade as focus moves, from 0, instant, to 3600000; tide's is 300, as its Hyprland config's. Without the line, `config.h`'s `fade_duration`, 0 as it comes |
-| `shadows disable\|floating\|active\|all` | tidewm's own: which windows cast a soft shadow, which clicks go through. `floating`, each floating window; `active`, only the focused window, tiled or floating, as tide's `tidewm/tide.conf` and its Hyprland config have it (tide's SPEC §6.2); `all`, every window; `disable`, none. `enable` means `floating`, as it did before there was a choice. A fullscreen or maximized window casts none. A floating window's shadow is under it, on whatever it's over. Tiles touch, so the focused tile's shadow lies over its neighbors, and with `all` another tile's is under them, showing only on the wallpaper where the layout leaves some; a tile's stays within its monitor's window area. Without the line, `config.h`'s `shadows`, none as it comes. Shadows follow focus, and a reload changes every window's, at once |
+| `shadows disable\|floating\|active\|all` | tidewm's own: which windows cast a soft shadow. Clicks go through it, except where a press on it resizes ([The mouse](#the-mouse)). `floating`, each floating window; `active`, only the focused window, tiled or floating, as tide's `tidewm/tide.conf` and its Hyprland config have it (tide's SPEC §6.2); `all`, every window; `disable`, none. `enable` means `floating`, as it did before there was a choice. A fullscreen or maximized window casts none. A floating window's shadow is under it, on whatever it's over. Tiles touch, so the focused tile's shadow lies over its neighbors, and with `all` another tile's is under them, showing only on the wallpaper where the layout leaves some; a tile's stays within its monitor's window area. Without the line, `config.h`'s `shadows`, none as it comes. Shadows follow focus, and a reload changes every window's, at once |
 | `shadow_blur_radius PIXELS` | tidewm's own: how far a shadow reaches past its window, from 0, which draws none, to 100. Without the line, `config.h`'s `shadow_blur_radius`, 8 as it comes, as tide's Hyprland config has it. A reload changes every window's at once |
 | `xwayland_scaling enable\|disable` | tidewm's own, tide's SPEC §17: with `disable`, as Hyprland's `xwayland:force_zero_scaling`, X11 windows are in their outputs' own pixels, so they're sharp at a fractional scale, and an app that scales itself, as by `GDK_SCALE`, `QT_SCALE_FACTOR` or `Xft.dpi`, is the size it would be scaled, while one that doesn't is small. Xwayland then sees each output at its own pixels, placed by its place in the layout spread by the largest scale, so none overlap, and its screen, RandR and clicks match. `enable`, as without the line, scales them, as sway does, so they're blurry at a fractional scale. A reload changes it at once |
 | `default_border none\|pixel [N]` | As sway's, but for every window, tiled and floating, as tidewm has no title bars and no `default_floating_border`: `none`, or a border `N` pixels wide, from 0 to 100, `config.h`'s `borderpx`, 1, without `N` or without the line. Its color is its `client.CLASS` line's, below. A fullscreen window has none. A reload changes every window's at once; tide's is `none`, as dimming shows which window is focused |
 | `client.focused\|focused_inactive\|unfocused\|urgent BORDER BACKGROUND TEXT [INDICATOR [CHILD_BORDER]]` | As sway's: the color of a window's border, by its class, each color `#RRGGBB` or `#RRGGBBAA`, the `#` optional. tidewm draws only the border round the window, sway's `CHILD_BORDER`, which is `BACKGROUND` without one, as in sway; it has no title bar and no indicator, so `BORDER`, `TEXT` and `INDICATOR` need only be colors. `focused` is the focused window; `urgent`, one asking for attention, focused or not; `focused_inactive`, a window that isn't focused but had focus last of those its monitor shows, where focus goes as you go to that monitor; `unfocused`, the rest. Without a class's line, its color is `config.h`'s: `focuscolor`, blue, `urgentcolor`, red, and `bordercolor`, gray, for `unfocused`; `focused_inactive` is then as `unfocused`, its line's or `config.h`'s. A reload changes every window's at once. `client.focused_tab_title` is read the same and ignored, tidewm having no tabs, and `client.background` and `client.placeholder` are ignored, as in sway |
-| `resize_grab PIXELS` | tidewm's own, tide's `resize_grab`: how many pixels either side of the master/stack edge a plain left press drags it from, from 0 to 32; `0` turns the drag off. 4 without it, `config.h`'s `resize_grab` ([The mouse](#the-mouse)) |
+| `resize_grab PIXELS` | tidewm's own, tide's `resize_grab`: how many pixels either side of the master/stack edge a plain left press drags it from, from 0 to 32; `0` turns the drag off. A shadow across the edge drags it too. 4 without it, `config.h`'s `resize_grab` ([The mouse](#the-mouse)) |
 | `floating_modifier MOD [normal\|inverse]`, `floating_modifier none` | As sway's: holding `MOD`, the left button drags a floating window and the right one resizes it, or the other way round with `inverse` ([The mouse](#the-mouse)) |
 | `focus_guard enable\|disable` | tidewm's own: turns the focus guard on or off, as below |
 | `focus_guard grant_seconds S`, `focus_guard prompt_seconds S` | How long a grant holds, 10 by default, and how soon after a key press a polkit prompt may take focus, 2 by default, in seconds, more than 0 and at most a day |
@@ -205,6 +205,24 @@ move it among the tiles. A tiled window's resize drags its master/stack
 edge nearest the pointer instead, as below, and only one with no edge,
 as in `monocle`, floats.
 
+With no modifier, a left press on a floating window's shadow drags the
+edge or corner it's beside, as tide's SPEC §6.4 has it, until the button
+comes up. The pointer shows a resize cursor there.
+
+- **The zone** is just outside the window, as far out as the shadow
+  reaches, `shadow_blur_radius` pixels. With `shadows disable`, or a
+  `shadow_blur_radius` of 0, it's 8 pixels.
+- **A window that casts no shadow** now, as an unfocused one with
+  `shadows active`, has the same zone.
+- **A press inside the window** always reaches the app. One in the zone
+  focuses the window, and never reaches what's under the zone.
+- **The press goes to what's over the zone**: another floating window, a
+  bar, a notification or another top or overlay layer surface, a popup,
+  or a fullscreen window or its dialog. So it does while a menu grabs
+  the pointer or a focus grab holds.
+- **In the floating layout**, only a window floated by a rule, a key or
+  a command has the zone.
+
 With no modifier, a left press within `resize_grab` pixels, 4 by default,
 either side of the edge between the masters and the stack drags it, as
 tide's SPEC §6.6 has it: the edge follows the pointer until the button
@@ -219,12 +237,21 @@ see neither the press nor the drag.
   centered. The width is its workspace's own on that monitor, in place of
   the `single_window` lines, whenever that workspace is down to one
   window there, until `single_width reset` ([`ipc.md`](ipc.md)).
+- **A shadow across the edge** is part of the zone, as far as it
+  reaches. With `shadows active`, that's the focused tile's, on its
+  neighbor's side of the edge and only beside that tile. With
+  `shadows all`, it's both sides, down the whole edge. A lone window's
+  shadow drags its width the same way. `resize_grab 0` still turns the
+  drag off.
+- **Focus doesn't follow the pointer** into a shadow's zone, a tile's
+  or a floating window's, so the shadow stays where it is to be dragged.
+  Focus moves once the pointer is past it.
 - **There's no edge** between a stack's rows, which are always equal,
   between `twocol`'s masters, which share their side equally, or in
   `monocle`.
-- **The press goes to what's there**, as usual, over a floating window,
-  a layer surface, such as a notification or a bar's popover, or a
-  window's popup; on a monitor that isn't focused; under a fullscreen or
+- **The press goes to what's there**, as usual, over a floating window
+  or its resize zone, a layer surface, such as a notification or a bar's
+  popover, or a window's popup; on a monitor that isn't focused; under a fullscreen or
   maximized window; and while a menu grabs the pointer or a focus grab
   holds, so a click outside it closes it.
 

@@ -100,7 +100,8 @@
 #define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = ecalloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
 
 /* enums */
-enum { CurNormal, CurPressed, CurMove, CurResize, CurEdge }; /* cursor; CurEdge: split.h's drag */
+enum { CurNormal, CurPressed, CurMove, CurResize, CurEdge, CurBorder }; /* cursor; CurEdge: split.h's
+	drag; CurBorder: floating.h's */
 enum { XDGShell, LayerShell, X11 }; /* client types */
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrUnmanaged, LyrOverlay,
 	LyrIMPopup, LyrBlock, NUM_LAYERS }; /* scene layers */
@@ -861,13 +862,15 @@ buttonpress(struct wl_listener *listener, void *data)
 	unsigned int drag;
 	SplitEdge edge;
 	Monitor *edge_mon;
+	Client *zone;
+	int sides = 0, plain;
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 
 	switch (event->state) {
 	case WL_POINTER_BUTTON_STATE_PRESSED:
-		/* A second button while the edge is dragged goes nowhere */
-		if (cursor_mode == CurEdge)
+		/* A second button while an edge is dragged goes nowhere */
+		if (cursor_mode == CurEdge || cursor_mode == CurBorder)
 			return;
 		/* A click is you moving on, from whatever a grant was for */
 		fg_click();
@@ -875,14 +878,23 @@ buttonpress(struct wl_listener *listener, void *data)
 		settings_tap_over();
 		keyboard = wlr_seat_get_keyboard(seat);
 		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
+		plain = event->button == BTN_LEFT && !CLEANMASK(mods);
+		/* A floating window's resize zone, round it */
+		zone = plain ? fl_zone_at(cursor->x, cursor->y, &sides) : NULL;
 		/* The master/stack edge, on the monitor focused before the press */
-		edge_mon = event->button == BTN_LEFT && !CLEANMASK(mods)
-				? split_edge_at(cursor->x, cursor->y, &edge) : NULL;
+		edge_mon = plain && !zone ? split_edge_at(cursor->x, cursor->y, &edge) : NULL;
 		cursor_mode = CurPressed;
 		selmon = xytomon(cursor->x, cursor->y);
 		ipc_output_focus();
 		if (locked)
 			break;
+		if (zone) {
+			focus_asked++;
+			focusclient(zone, NULL, 1);
+			focus_asked--;
+			fl_start(zone, sides, cursor->x, cursor->y);
+			return;
+		}
 		if (edge_mon) {
 			split_start(edge_mon, &edge, cursor->x);
 			return;
@@ -2737,6 +2749,7 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 	struct wlr_surface *surface = NULL;
 	struct wlr_pointer_constraint_v1 *constraint;
 	SplitEdge edge;
+	int sides = 0;
 
 	/* Find the client under the pointer and send the event along. */
 	xytonode(cursor->x, cursor->y, &surface, &c, &l, &sx, &sy);
@@ -2816,6 +2829,17 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 		return;
 	} else if (cursor_mode == CurEdge) {
 		split_follow(cursor->x);
+		return;
+	} else if (cursor_mode == CurBorder) {
+		fl_follow(cursor->x, cursor->y);
+		return;
+	}
+
+	/* Round a floating window, the pointer is its resize zone's, not
+	 * what's under it, and shows which way it resizes */
+	if (cursor_mode == CurNormal && fl_zone_at(cursor->x, cursor->y, &sides)) {
+		wlr_seat_pointer_clear_focus(seat);
+		wlr_cursor_set_xcursor(cursor, cursor_mgr, fl_cursor(sides));
 		return;
 	}
 

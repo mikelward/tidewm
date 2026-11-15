@@ -208,7 +208,14 @@ has it ([`docs/config.md`](docs/config.md), `single_window`).
 ### Dragging the master/stack edge
 
 A left press within 4 pixels of the edge between the masters and the
-stack drags it, as tide's SPEC §6.6 has it
+stack, or on a shadow across it, drags it, as tide's SPEC §6.6 has it
+([`docs/config.md`](docs/config.md#the-mouse)).
+
+### Resizing a floating window by its shadow
+
+A left press on a floating window's shadow drags the edge or corner it's
+beside, as tide's SPEC §6.4 has it. With shadows off, the zone is the
+8 pixels just outside the window
 ([`docs/config.md`](docs/config.md#the-mouse)).
 
 ### Dimming inactive windows
