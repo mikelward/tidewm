@@ -622,6 +622,14 @@ lands with a test.
 5. **The rest of sway's**: touchscreens, drawing tablets,
    wlr-foreign-toplevel-management for taskbars and docks, adaptive sync
    and tearing control, and a scratchpad.
+6. **Decide: is a missing include an error?** Today an `include` of a
+   file that isn't there includes nothing and says nothing, as sway's
+   does, which hid tide.conf going missing from a linked config. Making a
+   named file (not a pattern) an error would name the cause, and keep the
+   keys to fix it with, but an optional file, such as a default `include
+   local.conf` a machine may not have, would then need a pattern
+   (`local.con[f]`) or a way to mark it optional. tidesway decides with
+   tidewm. Undecided (maintainer, 2026-11-15).
 
 Deferred: tide's launcher and notifications hidden from capture (Decided,
 above).
