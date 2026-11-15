@@ -271,6 +271,7 @@ static void fg_arm(void);
 static void dim_update(void);
 static void shadow_update_all(void);
 static int settings_keys(void);
+static int settings_safety(void);
 static void settings_group_register(KeyboardGroup *group);
 static void settings_free_input(InputConfig *ic);
 /* A release binding's key, while it's down and no other key has been */
@@ -2737,6 +2738,9 @@ settings_init(const char *arg)
 	if (loaded && settings && !settings_keys())
 		fprintf(stderr, "tidewm: %s binds no key, so config.h's keys work with it\n",
 				settings_path);
+	else if (settings_safety())
+		fprintf(stderr, "tidewm: config.h's keys to quit, open a terminal and the "
+				"launcher work too, as %s may have lost its own\n", settings_path);
 }
 
 /* The reload command: rereads the file. On errors, keeps what was loaded,
@@ -2891,6 +2895,52 @@ settings_keys(void)
 		if (!settings->modes[0].bindings[j].button)
 			return 1;
 	return 0;
+}
+
+/* Whether a binding's command quits: a command in its list is exit, in any
+ * case, with no criteria, as ipc_run_command reads it, the list split as
+ * ipc_next_command splits it, so exec's shell gets the rest, an exit in it
+ * included, and a ; in double quotes splits nothing. */
+static int
+settings_quits(const char *command)
+{
+	char *copy = strdup(command), *rest = copy, *cmd, *end;
+	int quits = 0;
+	if (!copy)
+		return 0;
+	while (!quits && (cmd = ipc_next_command(&rest))) {
+		cmd += strspn(cmd, " \t\n");
+		for (end = cmd + strlen(cmd); end > cmd && isspace((unsigned char)end[-1]); end--)
+			;
+		*end = '\0';
+		quits = !strcasecmp(cmd, "exit");
+	}
+	free(copy);
+	return quits;
+}
+
+/* Whether config.h's keys to quit, open a terminal and the launcher work
+ * under the loaded file's own, at its top level: while it has an error or
+ * binds no key that quits, as one with a line or an include left out may
+ * have lost the keys it meant to give. Quit, a terminal and the launcher
+ * always keep a key (tide's SPEC §16), so a session can always be fixed
+ * from and left. Only once settings_keys() has left config.h's out. */
+static int
+settings_safety(void)
+{
+	size_t j;
+	if (!settings || settings_mode)
+		return 0;
+	if (json_object_array_length(settings_errors))
+		return 1;
+	for (j = 0; j < settings->modes[0].nbindings; j++)
+		/* A --kept-open one quits only in a window kept open */
+		if (!settings->modes[0].bindings[j].button
+				&& !settings->modes[0].bindings[j].kept_open
+				&& settings->modes[0].bindings[j].command
+				&& settings_quits(settings->modes[0].bindings[j].command))
+			return 0;
+	return 1;
 }
 
 /* Whether the loaded file says what the mouse does, by a floating_modifier

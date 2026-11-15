@@ -4,11 +4,13 @@ and again by reload (docs/config.md)."""
 import os
 import select
 import shlex
+import shutil
 import subprocess
+import tempfile
 import unittest
 
-from harness import (EVENT_BINDING, EVENT_MODE, EVENT_WORKSPACE, GET_BINDING_MODES,
-                     GET_BINDING_STATE, GET_BINDINGS, GET_CONFIG, GET_NAMED_BINDINGS,
+from harness import (EVENT_BINDING, EVENT_MODE, EVENT_WINDOW, EVENT_WORKSPACE,
+                     GET_BINDING_MODES, GET_BINDING_STATE, GET_BINDINGS, GET_CONFIG, GET_NAMED_BINDINGS,
                      GET_VERSION, ROOT, RUN_COMMAND, TIMEOUT, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
@@ -894,6 +896,131 @@ class NoKeysAtStartTest(KeysTest):
         self.alt("2")
         self.alt("x")
         self.assertEqual(self.shown(ipc), "keyed", "Alt+2 is no longer a key")
+
+
+# A foot that does nothing, so config.h's terminal key opens no real one
+FAKE_BIN = os.path.join(ROOT, "tests", "fakebin")
+
+
+class KeysToFixWithHelpers(TidewmTest):
+    """Quit, a terminal and the launcher always keep a key (tide's SPEC
+    §16): config.h's, under the file's own, while it has an error or binds
+    no key that quits, as one with a line or an include left out may have
+    lost them. A window that says each key it gets shows whether
+    Alt+Shift+Return was taken: the next key it gets is z if so."""
+    ENV = {"PATH": f"{FAKE_BIN}:{os.environ['PATH']}"}
+
+    def setUp(self):
+        super().setUp()
+        # The headless backend has no keyboard: the tests' is the seat's
+        keyboard = subprocess.Popen([KEYBOARD, "0"], env=dict(self.wm.env, XKB_LAYOUT="us"),
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.wm.clients.append(keyboard)
+        self.addCleanup(keyboard.stdout.close)
+        self.addCleanup(keyboard.stdin.close)
+        self.assertTrue(select.select([keyboard.stdout], [], [], TIMEOUT)[0], "no keyboard")
+        self.assertEqual(keyboard.stdout.readline(), b"switched\n")
+
+    def first_key_after_alt_shift_return(self):
+        ipc = self.connect()
+        ipc.subscribe("window")
+        client = self.wm.open_window("test.keys", "test.keys", stdout=True, keys=True)
+        ipc.next_event(EVENT_WINDOW, lambda e: e["change"] == "focus"
+                       and e["container"]["app_id"] == "test.keys")
+        self.assertTrue(select.select([client.stdout], [], [], TIMEOUT)[0], "it said nothing")
+        self.assertEqual(client.stdout.readline(), b"typing\n")
+        self.press("-M", "alt", "-M", "shift", "-k", "Return", "-m", "shift", "-m", "alt")
+        self.press("-k", "z")
+        self.assertTrue(select.select([client.stdout], [], [], TIMEOUT)[0], "no key came")
+        return client.stdout.readline()
+
+
+class KeysToFixWithAfterAnErrorTest(KeysToFixWithHelpers):
+    CONFIG = "bindsym Print nop\nbindsym --frobnicate Mod4+t nop\nbindsym Mod4+Shift+e exit\n"
+
+    def test_a_file_with_an_error_keeps_config_hs_terminal_key(self):
+        self.assertIn("config.h's keys to quit, open a terminal and the launcher work too",
+                      self.wm.output())
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+
+
+class KeysToFixWithNoQuitTest(KeysToFixWithHelpers):
+    CONFIG = "bindsym Print nop\n"
+
+    def test_a_file_that_binds_no_key_that_quits_keeps_them(self):
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+
+
+class KeysToFixWithWholeFileTest(KeysToFixWithHelpers):
+    CONFIG = "bindsym Print nop\nbindsym Mod4+Shift+e exit\n"
+
+    def test_a_whole_file_that_quits_has_its_own_keys_alone(self):
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key shift+alt+Return\n")
+
+
+class KeysToFixWithOwnBindingTest(KeysToFixWithHelpers):
+    CONFIG = "bindsym Print nop\nbindsym Mod1+Shift+Return nop mine\n"
+
+    def test_the_files_own_binding_of_the_keys_wins(self):
+        ipc = self.connect()
+        ipc.subscribe("binding")
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+        self.assertEqual(ipc.next_event(EVENT_BINDING)["binding"]["command"], "nop mine")
+
+
+class KeysToFixWithReleaseBindingTest(KeysToFixWithHelpers):
+    CONFIG = "bindsym Print nop\nbindsym --release Mod1+Shift+Return nop released\n"
+
+    def test_the_files_release_binding_of_the_keys_wins(self):
+        ipc = self.connect()
+        ipc.subscribe("binding")
+        # The window sees a release binding's keys, as in sway
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key shift+alt+Return\n")
+        self.assertEqual(ipc.next_event(EVENT_BINDING)["binding"]["command"], "nop released")
+
+
+class KeysToFixWithQuitInAListTest(KeysToFixWithHelpers):
+    CONFIG = "bindsym Print nop\nbindsym Mod4+Shift+e nop leaving; EXIT\n"
+
+    def test_a_key_that_quits_in_a_list_or_in_capitals_is_one(self):
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key shift+alt+Return\n")
+
+
+class KeysToFixWithShellExitTest(KeysToFixWithHelpers):
+    CONFIG = 'bindsym Print nop\nbindsym Mod4+x exec true; exit\nbindsym Mod4+y workspace "a;exit"\n'
+
+    def test_an_exit_in_execs_shell_or_in_quotes_doesnt_quit(self):
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+
+
+class KeysToFixWithKeptOpenQuitTest(KeysToFixWithHelpers):
+    CONFIG = "bindsym Print nop\nbindsym --kept-open Mod4+Shift+e exit\n"
+
+    def test_a_key_that_quits_only_in_a_window_kept_open_isnt_one(self):
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+
+
+class KeysToFixWithLinkedConfigTest(KeysToFixWithHelpers):
+    """As tide's session has it: the config a link into a dotfiles checkout,
+    whose include of the file with most keys, beside the link, is gone."""
+
+    def setUp(self):
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base)
+        checkout = os.path.join(base, "checkout")
+        home = os.path.join(base, "home")
+        os.makedirs(checkout)
+        os.makedirs(home)
+        with open(os.path.join(checkout, "config"), "w") as f:
+            f.write("include tide.conf\nbindsym Print nop\n")
+        self.CONFIG_PATH = os.path.join(home, "config")
+        os.symlink(os.path.join(checkout, "config"), self.CONFIG_PATH)
+        super().setUp()
+
+    def test_a_linked_config_that_lost_its_include_keeps_them(self):
+        self.assertIn("config.h's keys to quit, open a terminal and the launcher work too",
+                      self.wm.output())
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
 
 
 class KeysOnlyInAModeTest(KeysTest):
