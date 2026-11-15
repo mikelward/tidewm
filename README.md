@@ -111,7 +111,8 @@ seatd daemon.
 
 When tidewm is run with no arguments, it will launch the server and begin
 handling the config file's keys, or without one, the shortcuts configured
-in `config.h`. There is no status bar or other
+in `config.h`. It writes its errors to stderr, along with each output
+connected and gone, and wlroots' errors; `-d` adds wlroots' debug log. There is no status bar or other
 decoration initially; these are instead clients that can be run within the
 Wayland session. Do note that the default background color is grey. This can be
 modified in `config.h`.

@@ -379,6 +379,10 @@ first, for what the file doesn't say, such as the layout. As in sway, an
 | `power on\|off` | In the `output` command, as sway's, turns an output that's on off, keeping its windows and place, as an idle daemon does, or on again. An output line takes it but leaves it, so every output starts on. `dpms` is its old name |
 | `scale_filter linear\|nearest\|smart` | Taken, as sway's, but left: tidewm always scales linearly, as `GET_OUTPUTS` says |
 
+stderr says when an output is connected, at startup or when it's plugged
+in, and when it's gone, so the journal shows whether a monitor came back,
+and says so if the renderer can't draw on one, which stays dark; without
+`-d`, wlroots logs only its errors.
 The lines apply when an output appears, at startup or when it's plugged
 in, and again on `reload`, when each output starts over from `config.h`'s
 monitor rule and its preferred mode, so a setting taken out of the file
