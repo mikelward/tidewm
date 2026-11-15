@@ -169,15 +169,18 @@ them, the default theme at 24 pixels, and apps get that size.
 
 ### Focus when a window closes
 
-Closing the window you're in focuses the window under the pointer, as
-tide's SPEC §14.2 and Hyprland's `input:focus_on_close cursor` have it,
-going by where the windows left are once they've moved into its space.
+Closing or minimizing the window you're in focuses the window under the
+pointer, as tide's SPEC §6.7 and §14.2 and Hyprland's
+`input:focus_on_close cursor` have it, going by where the windows left
+are once they've moved into its space.
 The pointer stays where it is. A layer surface over a window, such as a
 notification, doesn't count: the window under it takes focus. Focus goes
 to the window you were in before, as in dwl, when the pointer is over
-nothing, or over a window the focus guard holds, or when a dialog closes,
-which hands focus back to its parent. A window you weren't in closing
-moves no focus.
+nothing, such as the bar or empty space, or over a window the focus
+guard holds, or when the window going is a dialog, which hands focus
+back to its parent. A minimize also falls back when the pointer is on
+another monitor, whatever it's over. A window you weren't in closing,
+or being minimized, moves no focus.
 
 ### Notifications and the keyboard
 
@@ -267,8 +270,9 @@ their app.
 ### Minimized windows
 
 The IPC's `minimize` command hides a window, for tide's minimized windows
-(its SPEC §6.7): it leaves the layout, and focus goes to the window on
-the focused monitor you were in before it.
+(its SPEC §6.7): it leaves the layout, and focus goes where it goes
+when the window closes ([above](#focus-when-a-window-closes)), except
+that a window under the pointer on another monitor doesn't take it.
 It stays on its workspace, which stays while it waits, and focusing it,
 as tide's shell does from its tray, a grant or `focus`, brings it back.
 Nothing else minimizes a window: an app's own request does nothing.

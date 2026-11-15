@@ -1,6 +1,6 @@
 """Minimized windows (tide's SPEC §6.7): tidewm's own minimize command
-hides a window, which leaves the layout, focus going to the window you
-were in before. It stays on its workspace, which stays while it waits,
+hides a window, which leaves the layout, focus going where it goes as
+the window closes (test_focus.py's MinimizeTest). It stays on its workspace, which stays while it waits,
 and focusing it, by any means, brings it back, at the end of its part's
 stack."""
 
