@@ -963,6 +963,40 @@ class BlockInAModeAtStartTest(KeysTest):
         self.assertEqual(self.shown(ipc), "inside", "and the mode has the bindings after its blocks")
 
 
+class BlockInABadModeAtStartTest(KeysTest):
+    # A mode that can't open, inside another, holding a block of its own
+    CONFIG = ('mode "outer" {\n'
+              '    mode "inner" {\n'
+              '        input type:keyboard {\n'
+              '            repeat_rate 30\n'
+              '        }\n'
+              '    }\n'
+              '    bindsym Mod1+x workspace outer\n'
+              '}\n'
+              'bindsym Mod1+z workspace top\n')
+
+    def test_the_blocks_lines_go_with_it_to_its_own_close(self):
+        self.assertEqual(self.connect().request(GET_CONFIG)["errors"],
+                         [f"{self.wm.config_path}:2: mode outer is still open: modes don't nest"])
+        bindings = [(b["keys"], b["mode"]) for b in self.connect().request(GET_BINDINGS)]
+        self.assertEqual(bindings, [("Mod1+z", "default"), ("Mod1+x", "outer")],
+                         "the inner block's } closed outer")
+
+class EmptyLineInABadModeAtStartTest(KeysTest):
+    # A line that's only a variable set to nothing, in a mode that can't open
+    CONFIG = ('set $empty\n'
+              'mode "default" {\n'
+              '$empty\n'
+              '}\n'
+              'bindsym Mod1+x workspace keyed\n')
+
+    def test_it_goes_with_the_mode_and_the_rest_loads(self):
+        self.assertEqual(self.connect().request(GET_CONFIG)["errors"],
+                         [f"{self.wm.config_path}:2: default is the top level, not a mode to open"])
+        ipc = self.workspaces_ipc()
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed")
+
 class BadNamedLineAtStartTest(KeysTest):
     CONFIG = ("bindsym --name go Mod1+x workspace keyed\n"
               "bindsym --name go Mod1+NoSuchKey workspace other\n")
