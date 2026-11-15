@@ -163,6 +163,22 @@ class ConfigTest(KeysTest):
         self.alt("x")
         self.assertEqual(self.shown(ipc), "long")
 
+    def test_mod_is_super_unless_the_config_sets_it(self):
+        # A config whose set $mod is lost, with tide.conf say, keeps its keys
+        self.wm.write_config("bindsym $mod+x workspace super\n")
+        self.command(self.connect(), "reload")
+        self.assertEqual(self.connect().request(GET_CONFIG)["errors"], [])
+        ipc = self.workspaces_ipc()
+        self.press("-M", "logo", "-k", "x", "-m", "logo")
+        self.assertEqual(self.shown(ipc), "super")
+
+    def test_a_config_sets_mod_to_its_own(self):
+        self.wm.write_config("set $mod Mod1\nbindsym $mod+x workspace alt\n")
+        self.command(self.connect(), "reload")
+        ipc = self.workspaces_ipc()
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "alt")
+
     def test_reload_without_the_file_goes_back_to_config_h(self):
         os.remove(self.wm.config_path)
         self.command(self.connect(), "reload")
