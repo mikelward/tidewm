@@ -4442,9 +4442,11 @@ main(int argc, char *argv[])
 	char *startup_cmd = NULL, *config = NULL;
 	int c;
 
-	while ((c = getopt(argc, argv, "c:s:hdv")) != -1) {
+	while ((c = getopt(argc, argv, "c:ks:hdv")) != -1) {
 		if (c == 'c')
 			config = optarg;
+		else if (c == 'k')
+			settings_only = 1; /* settings.h */
 		else if (c == 's')
 			startup_cmd = optarg;
 		else if (c == 'd')
@@ -4467,5 +4469,5 @@ main(int argc, char *argv[])
 	return EXIT_SUCCESS;
 
 usage:
-	die("Usage: %s [-v] [-d] [-c config file] [-s startup command]", argv[0]);
+	die("Usage: %s [-v] [-d] [-c config file] [-k] [-s startup command]", argv[0]);
 }

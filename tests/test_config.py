@@ -938,6 +938,11 @@ class KeysToFixWithHelpers(TidewmTest):
         self.assertEqual(keyboard.stdout.readline(), b"switched\n")
 
     def first_key_after_alt_shift_return(self):
+        return self.first_key_after("-M", "alt", "-M", "shift", "-k", "Return",
+                                    "-m", "shift", "-m", "alt")
+
+    def first_key_after(self, *keys):
+        """The first key a window gets after wtype's keys, then z."""
         ipc = self.connect()
         ipc.subscribe("window")
         client = self.wm.open_window("test.keys", "test.keys", stdout=True, keys=True)
@@ -945,7 +950,7 @@ class KeysToFixWithHelpers(TidewmTest):
                        and e["container"]["app_id"] == "test.keys")
         self.assertTrue(select.select([client.stdout], [], [], TIMEOUT)[0], "it said nothing")
         self.assertEqual(client.stdout.readline(), b"typing\n")
-        self.press("-M", "alt", "-M", "shift", "-k", "Return", "-m", "shift", "-m", "alt")
+        self.press(*keys)
         self.press("-k", "z")
         self.assertTrue(select.select([client.stdout], [], [], TIMEOUT)[0], "no key came")
         return client.stdout.readline()
@@ -1090,6 +1095,72 @@ class KeysToFixWithLinkedConfigTest(KeysToFixWithHelpers):
         self.assertIn("config.h's keys to quit, open a terminal and the launcher work too",
                       self.wm.output())
         self.assertEqual(self.first_key_after_alt_shift_return(), b"key z\n")
+
+
+class OnlyFileKeysHelpers(KeysToFixWithHelpers):
+    """With -k, as tide's greeter starts tidewm, only the file's keys work:
+    none of config.h's, not even its keys to quit and open a terminal, so
+    no one at the login screen gets a shell. A window that says each key it
+    gets shows that config.h's keys reach it."""
+    ARGS = ("-k",)
+
+    def assert_config_h_keys_are_off(self):
+        output = self.wm.output()
+        self.assertIn("config.h's keys and buttons are off", output)
+        self.assertNotIn("work too", output)
+        self.assertNotIn("work with it", output)
+        self.assertEqual(self.first_key_after_alt_shift_return(), b"key shift+alt+Return\n",
+                         "config.h's terminal key")
+        self.assertEqual(self.first_key_after("-M", "alt", "-M", "shift", "-k", "q",
+                                              "-m", "shift", "-m", "alt"),
+                         b"key shift+alt+q\n", "config.h's quit key")
+        self.assertEqual(self.first_key_after("-M", "ctrl", "-M", "alt", "-k", "BackSpace",
+                                              "-m", "alt", "-m", "ctrl"),
+                         b"key ctrl+alt+BackSpace\n", "config.h's other quit key")
+        self.assertIsNone(self.wm.proc.poll(), "tidewm quit")
+
+
+class OnlyFileKeysAfterAnErrorTest(OnlyFileKeysHelpers):
+    CONFIG = "bindsym Print nop\nbindsym --frobnicate Mod4+t nop\nbindsym Mod4+Shift+e exit\n"
+
+    def test_a_file_with_an_error_has_none_of_config_hs_keys(self):
+        self.assert_config_h_keys_are_off()
+
+
+class OnlyFileKeysNoQuitTest(OnlyFileKeysHelpers):
+    # tide's greeter's
+    CONFIG = "bindsym XF86Tools nop\nfloating_modifier none\n"
+
+    def test_a_file_that_binds_no_key_that_quits_has_none_of_config_hs_keys(self):
+        self.assert_config_h_keys_are_off()
+
+
+class OnlyFileKeysNoKeysTest(OnlyFileKeysHelpers):
+    CONFIG = "bindsym --frobnicate Mod1+x workspace keyed\ndim_inactive 0.5\n"
+
+    def test_a_file_that_binds_no_key_has_no_keys(self):
+        self.assert_config_h_keys_are_off()
+        self.assertEqual(self.first_key_after("-M", "alt", "-k", "2", "-m", "alt"),
+                         b"key alt+2\n", "config.h's workspace key")
+
+
+class OnlyFileKeysNoFileTest(OnlyFileKeysHelpers):
+    CONFIG_PATH = "/nonexistent/tidewm/config"
+
+    def test_with_no_file_there_are_no_keys(self):
+        self.assertIn("not using /nonexistent/tidewm/config\n", self.wm.output())
+        self.assertNotIn("config.h's keys work instead", self.wm.output())
+        self.assert_config_h_keys_are_off()
+
+
+class OnlyFileKeysOwnKeysTest(KeysTest):
+    ARGS = ("-k",)
+    CONFIG = "bindsym Mod1+x workspace keyed\nfrobnicate\n"
+
+    def test_the_files_own_keys_work(self):
+        ipc = self.workspaces_ipc()
+        self.alt("x")
+        self.assertEqual(self.shown(ipc), "keyed")
 
 
 class KeysOnlyInAModeTest(KeysTest):

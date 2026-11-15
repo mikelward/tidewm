@@ -117,10 +117,10 @@ class Tidewm:
     more of its environment, over the rest. config_path
     is a file to name with -c as it is, there or not. prepare is
     called with the runtime directory before tidewm starts, to put there
-    what tidewm should find."""
+    what tidewm should find. args are more of its flags, as -k."""
 
     def __init__(self, outputs=1, config=None, config_arg=True, parent=None, on_x11=False,
-                 env=None, prepare=None, config_path=None):
+                 env=None, prepare=None, config_path=None, args=()):
         more_env = env or {}
         self.dir = tempfile.TemporaryDirectory(prefix="tidewm-test-")
         os.chmod(self.dir.name, 0o700)
@@ -141,6 +141,7 @@ class Tidewm:
                        WAYLAND_DISPLAY=os.path.join(parent.dir.name,
                                                     parent.env["WAYLAND_DISPLAY"]))
         env.update(more_env)
+        flags = list(args)
         args = []
         if config_arg:
             self.config_path = os.path.join(self.dir.name, "config")
@@ -161,7 +162,7 @@ class Tidewm:
             prepare(self.dir.name)
         self.log = open(os.path.join(self.dir.name, "tidewm.log"), "w+")
         fifo = os.open(ready, os.O_RDONLY | os.O_NONBLOCK)
-        self.proc = subprocess.Popen([TIDEWM, *args, "-s", startup], env=env,
+        self.proc = subprocess.Popen([TIDEWM, *flags, *args, "-s", startup], env=env,
                                      stdout=subprocess.DEVNULL, stderr=self.log)
         line = b""
         try:
@@ -271,18 +272,19 @@ class Tidewm:
 
 class TidewmTest(unittest.TestCase):
     """A test with its own tidewm. OUTPUTS says how many outputs it has;
-    CONFIG, CONFIG_ARG and CONFIG_PATH, its config file, and ENV, more of
-    its environment, as Tidewm takes them."""
+    CONFIG, CONFIG_ARG and CONFIG_PATH, its config file, ENV, more of its
+    environment, and ARGS, more of its flags, as Tidewm takes them."""
 
     OUTPUTS = 1
     CONFIG = None
     CONFIG_ARG = True
     ENV = None
     CONFIG_PATH = None
+    ARGS = ()
 
     def setUp(self):
         self.wm = Tidewm(self.OUTPUTS, self.CONFIG, self.CONFIG_ARG, env=self.ENV,
-                         config_path=self.CONFIG_PATH)
+                         config_path=self.CONFIG_PATH, args=self.ARGS)
         self.addCleanup(self.wm.stop)
 
     def need(self, ok, why):
