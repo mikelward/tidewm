@@ -265,6 +265,8 @@ opened. A `mode` line that fails, as with a flag tidewm's doesn't take,
 takes the lines to its `}` with it, so they're never read as the top
 level's. An `input` or `output` block in a mode, which can't hold one,
 goes the same way, to its own `}`, and the mode stays open after it. A
+block inside one of these goes with it, to its own `}`, so its `}`
+doesn't close the mode around them. A
 load, `reload` included, starts at the top level.
 
 A mode holds only `bindsym` and `bindcode` lines, and `set`: any other

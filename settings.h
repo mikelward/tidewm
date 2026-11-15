@@ -2133,11 +2133,17 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 		 * it: read as the top level's, its plain keys' bindings would
 		 * take those keys from every window. So is each line of an input
 		 * or output block a mode can't hold, whose } would close the mode
-		 * and leave the mode's later lines the top level's */
+		 * and leave the mode's later lines the top level's. skipping is
+		 * how many blocks deep the lines left out are, so a block inside
+		 * one goes with it, to its own }, which can't close the mode
+		 * around them either */
 		if (skipping) {
-			/* Its }, as the first word, as where a mode closes below */
+			/* A }, as the first word, as where a mode closes below */
 			if (*p == '}' && (!p[1] || isspace((unsigned char)p[1])))
-				skipping = 0;
+				skipping--;
+			/* A line of only an empty variable is empty now */
+			else if (*p && p[strlen(p) - 1] == '{')
+				skipping++;
 			free(expanded);
 			free(raw);
 			continue;
