@@ -67,7 +67,8 @@ startup and again on `reload`, with no restart.
 
 - key bindings and [modes](docs/config.md#modes) (`bindsym`, `bindcode`,
   `mode`), and [named bindings](docs/config.md#named-bindings) a shell
-  can give other keys (`bindsym --name`, `rebind`);
+  can give other keys, or a key where it has none (`bindsym --name`,
+  `bindsym --name NAME none`, `rebind`);
 - switches, such as a laptop's lid (`bindswitch`);
 - [the mouse](docs/config.md#the-mouse)'s drags and button bindings
   (`floating_modifier`, `bindsym --whole-window`, `resize_grab`);

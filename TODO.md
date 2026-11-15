@@ -21,6 +21,10 @@ lands with a test.
 
 ## Done
 
+- **Named bindings with no key**: `bindsym --name NAME none COMMANDS`
+  names a binding with no key, which `GET_NAMED_BINDINGS` lists with
+  none, for tide's Keyboard shortcuts to give one with `rebind`, as
+  Hyprland's tide names its unbound `next_attention` and `restore`.
 - **Focus on close** (#72): closing the window you're in focuses the
   window under the pointer once the rest have moved in, as tide's SPEC
   §14.2 and Hyprland's `input:focus_on_close cursor` have it, unless the

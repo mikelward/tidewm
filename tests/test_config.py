@@ -351,8 +351,42 @@ include tide-keys.conf
         self.assertIn("rebind gone: no binding is called gone, so it's skipped", self.wm.output())
         self.assertEqual(self.ran("y"), "a", "the rest of the file loads")
 
+    def test_a_name_with_no_keys_is_listed_and_runs_nothing(self):
+        """bindsym --name NAME none: named for a shell's keyboard shortcuts
+        to give it keys, with none until then."""
+        self.rebind('bindsym --name go_n --desc "Go to n" none workspace n\n')
+        self.assertEqual(next(b for b in self.connect().request(GET_NAMED_BINDINGS)
+                              if b["name"] == "go_n"), {
+            "name": "go_n", "type": "key", "keys": [], "default_keys": [],
+            "command": "workspace n", "mode": "default", "release": False, "locked": False,
+            "kept_open": False, "description": "Go to n"})
+        self.assertNotIn("go_n", [b["name"] for b in self.connect().request(GET_BINDINGS)])
+        self.assertEqual(self.ran("n"), "marker")
+
+    def test_rebind_gives_a_name_with_no_keys_its_keys(self):
+        self.rebind('bindsym --name go_n --desc "Go to n" --locked none workspace n\n'
+                    "rebind go_n Mod1+n\n")
+        self.assertEqual(self.ran("n"), "n")
+        self.assertEqual(self.named()["go_n"], (["Mod1+n"], []))
+        binding = next(b for b in self.connect().request(GET_BINDINGS) if b["name"] == "go_n")
+        self.assertEqual((binding["keys"], binding["description"], binding["locked"]),
+                         ("Mod1+n", "Go to n", True))
+
+    def test_a_line_with_no_keys_adds_none_to_a_name(self):
+        """The same command keeps the name's keys; another redefines it,
+        with none."""
+        self.rebind("bindsym --name go_a none workspace a\n"
+                    "bindsym --name go_b none workspace elsewhere\n")
+        self.assertEqual(self.ran("a"), "a")
+        self.assertEqual(self.named()["go_a"], (["Mod1+a"], ["Mod1+a"]))
+        self.assertEqual(self.ran("b"), "marker")
+        self.assertEqual(self.named()["go_b"], ([], []))
+
     def test_named_binding_errors(self):
         for text, error in [
+            ("bindsym none nop\n", ":1: bindsym none: a binding with no keys needs a --name"),
+            ("bindcode none nop\n", ":1: bindcode none: a binding with no keys needs a --name"),
+            ("bindsym --name x none\n", ":1: bindsym needs keys and a command"),
             ("bindsym --name Go Mod1+x nop\n", ":1: bindsym --name Go: a name is a lower-case letter"),
             ("bindsym --name Mod1+x nop\n", ":1: bindsym needs keys and a command"),
             ("bindsym --name\n", ":1: bindsym --name needs a name"),

@@ -113,7 +113,8 @@ press binding, as dwl's keys do. Flags, before the keys:
   rather than a key, over a window or the desktop ([The
   mouse](#the-mouse)).
 - **`--name NAME`:** tidewm's own: names the binding, so a `rebind`
-  line can give it other keys ([Named bindings](#named-bindings)).
+  line can give it other keys, and `none` for its keys gives it none
+  until then ([Named bindings](#named-bindings)).
 - **`--desc TEXT`:** tidewm's own, as Hyprland's `bindd`: says what the
   binding does, for a shell's list of keyboard shortcuts, as
   `bindsym --desc "Open a terminal" $mod+Return exec foot`. `TEXT` is a
@@ -153,19 +154,30 @@ includes tide's and binds tide's names to its own commands wins. A
 line's `--desc` is the name's, for all its keys; a redefined name has
 only its new lines'.
 
+`none` in place of the keys names a binding with no key, for a shell to
+give it one: `bindsym --name next_attention --desc "Go to the next window
+wanting attention" none exec ...`. Nothing runs it until a `rebind` line
+gives it keys. Its flags and commands are the name's as a line with keys
+gives them, but it adds no default key, so a name with only such lines
+has none. Only a named binding can have no keys, and a `bindcode` line
+can't.
+
 `rebind NAME KEYS...` gives it these keys in place of the ones it has,
 and `rebind NAME none` takes them all away. Like a `bindsym` line, a
 key a rebind gives takes it from the binding that had it. A name no line
 has given is written to stderr and skipped, as Hyprland's tide does, so
 a shell's file that outlives a name the config dropped doesn't stop it
 loading. The IPC's `GET_NAMED_BINDINGS` lists each name, with its
-default keys and its keys now ([`ipc.md`](ipc.md)).
+default keys and its keys now, either list empty for none
+([`ipc.md`](ipc.md)). `GET_BINDINGS` lists keys, so a name with none
+isn't there.
 
 ```
 set $mod Mod4
 bindsym --name terminal $mod+t exec foot
 bindsym --name float $mod+Shift+f floating toggle
 bindsym --name float $mod+Insert floating toggle
+bindsym --name lock none exec swaylock
 include tide-*.conf
 ```
 
@@ -174,9 +186,11 @@ with a shell's `tide-keys.conf` holding
 ```
 rebind terminal Mod4+Return
 rebind float none
+rebind lock Mod4+l
 ```
 
-has `Mod4+Return` open foot, and no key float a window.
+has `Mod4+Return` open foot, no key float a window, and `Mod4+l` lock
+the screen.
 
 ## The mouse
 

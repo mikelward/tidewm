@@ -719,9 +719,10 @@ settings_find_named(const Settings *s, const char *name)
 
 /* Registers combo as one of a named binding's keys: a new name, one more
  * line for a name already given the same command, mode and flags, or a
- * line that redefines the name. A line's desc, if it's not NULL, is the
- * name's; a redefined name has none but its new lines'. Returns its 1 +
- * index, or 0 on an error. */
+ * line that redefines the name. A NULL combo, a "none" line's, names it
+ * and gives it no key. A line's desc, if it's not NULL, is the name's; a
+ * redefined name has none but its new lines'. Returns its 1 + index, or 0
+ * on an error. */
 static size_t
 settings_add_named(Settings *s, size_t mode, const char *name, const char *combo,
 		BindingFlags f, const char *command, const char *desc, unsigned int line,
@@ -778,6 +779,8 @@ settings_add_named(Settings *s, size_t mode, const char *name, const char *combo
 		free(n->desc);
 		n->desc = settings_strdup(desc, strlen(desc));
 	}
+	if (!combo)
+		return (size_t)(n - s->named) + 1;
 	for (i = 0; i < n->ndefaults; i++)
 		if (!strcmp(n->defaults[i], combo))
 			return (size_t)(n - s->named) + 1;
@@ -790,7 +793,8 @@ settings_add_named(Settings *s, size_t mode, const char *name, const char *combo
 
 /* A bindsym line: "[FLAGS] KEYS COMMAND", in the mode; or with code, a
  * bindcode line, whose key is a keycode, and which takes no --name or
- * --whole-window. */
+ * --whole-window. A named line's KEYS can be "none", for a name with no
+ * key until a rebind line gives it one. */
 static int
 settings_add_binding(Settings *s, size_t mode, char *rest, int code, unsigned int line,
 		struct json_object *errors)
@@ -840,6 +844,16 @@ settings_add_binding(Settings *s, size_t mode, char *rest, int code, unsigned in
 	if (!*combo || !*rest) {
 		settings_error(errors, line, "%s needs keys and a command", what);
 		return 0;
+	}
+	/* No key, for a shell's keyboard shortcuts to give it one: only a
+	 * name can, as only a rebind line can give it a key */
+	if (!strcmp(combo, "none")) {
+		if (!name) {
+			settings_error(errors, line, "%s none: a binding with no keys needs a --name, "
+					"for a rebind line to give it some", what);
+			return 0;
+		}
+		return settings_add_named(s, mode, name, NULL, f, rest, desc, line, errors) != 0;
 	}
 	/* A named line's keys are checked before the name takes it, which can
 	 * redefine the name: a line with bad keys is left out, and leaves the
