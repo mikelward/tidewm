@@ -13,6 +13,7 @@ from harness import (CLIENT, EVENT_WINDOW, GET_CONFIG, GET_OUTPUTS, GET_WORKSPAC
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
 LAUNCHER = os.path.join(ROOT, "tests", "launcher")
+KEYBOARD = os.path.join(ROOT, "tests", "keyboard")
 
 
 class GuardTest(TidewmTest):
@@ -511,7 +512,7 @@ class RuleTest(GuardTest):
         self.assertEqual(self.focused(), [other])
 
 
-class NotificationTest(GuardTest):
+class NotificationBase(GuardTest):
     """A notification's click grants its app, which, if the grant lapses
     unused, brings up the app's most recent window (tide's SPEC §9). The
     lapse is short, so the tests focus their windows by id, not grants."""
@@ -540,6 +541,11 @@ class NotificationTest(GuardTest):
             return e["change"] == "focus" and e["container"]["id"] == con_id
         self.ipc.next_event(EVENT_WINDOW, record)
         return seen
+
+
+
+class NotificationTest(NotificationBase):
+    """NotificationBase's tests, at its short lapse."""
 
     def test_a_lapsed_notification_grant_brings_up_the_apps_most_recent_window(self):
         first, _ = self.open("test.a", "First")
@@ -584,17 +590,6 @@ class NotificationTest(GuardTest):
         self.grant("--or-recent test.y")
         self.assertEqual(self.focus_events_until(clock), [clock])
 
-    def test_a_notification_grant_you_moved_on_from_brings_nothing_up(self):
-        window, _ = self.open("test.a")
-        other, _ = self.open("test.x")
-        clock, _ = self.open("test.y")
-        self.focus(window)
-        self.focus(other)
-        self.grant("--or-recent test.a")
-        self.press("x")
-        self.grant("--or-recent test.y")
-        self.assertEqual(self.focus_events_until(clock), [clock])
-
     def test_an_app_with_no_window_gets_nothing_and_its_said(self):
         other, _ = self.open("test.x")
         self.focus(self.open("test.y")[0])
@@ -634,6 +629,39 @@ class NotificationTest(GuardTest):
         ]:
             self.assertIn(error, self.fails(command), command)
 
+
+
+class MovedOnNotificationTest(NotificationBase):
+    """A notification's grant you moved on from, by a key press, brings
+    nothing up. Its own class, for a grant that outlasts the press: wtype
+    can take longer than NotificationTest's 0.05 s to type, and the lapse
+    would win, rightly bringing the app up. It waits for the key to reach
+    the window you're in, so the press is known to come first."""
+
+    CONFIG = 'focus_guard enable\nfocus_guard grant_seconds 2\n'
+
+    def setUp(self):
+        super().setUp()
+        # The headless backend has no keyboard: the tests' is the seat's
+        keyboard = subprocess.Popen([KEYBOARD, "0"], env=dict(self.wm.env, XKB_LAYOUT="us"),
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.wm.clients.append(keyboard)
+        self.addCleanup(keyboard.stdout.close)
+        self.addCleanup(keyboard.stdin.close)
+        self.assertEqual(self.line(keyboard), b"switched\n")
+
+    def test_a_notification_grant_you_moved_on_from_brings_nothing_up(self):
+        window, _ = self.open("test.a")
+        other, typing = self.open("test.x", keys=True)
+        self.assertEqual(self.line(typing), b"typing\n")
+        clock, _ = self.open("test.y")
+        self.focus(window)
+        self.focus(other)
+        self.grant("--or-recent test.a")
+        self.press("x")
+        self.assertEqual(self.line(typing), b"key x\n")
+        self.grant("--or-recent test.y")
+        self.assertEqual(self.focus_events_until(clock), [clock])
 
 class ReloadedLapseTest(GuardTest):
     CONFIG = "focus_guard enable\nfocus_guard grant_seconds 30\n"
