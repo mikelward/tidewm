@@ -419,6 +419,21 @@ class UnpluggedTest(OutputsTest):
         return {name: o["active"] for name, o in self.outputs().items()}
 
 
+class UnpluggedSaysSoTest(UnpluggedTest):
+    """stderr, the journal's, says when an output comes and goes, as
+    wlroots logs only its errors."""
+
+    def test_an_output_says_it_connected_and_is_gone(self):
+        output = self.wm.output()
+        self.assertIn("tidewm: output WL-1 connected\n", output)
+        self.assertIn("tidewm: output WL-2 connected\n", output)
+        self.assertNotIn("is gone", output)
+        self.unplug()
+        output = self.wm.output()
+        self.assertIn("tidewm: output WL-2 is gone\n", output)
+        self.assertNotIn("tidewm: output WL-1 is gone", output)
+
+
 class DisabledByItsLineThenUnpluggedTest(UnpluggedTest):
     """A file saved while docked disables the laptop's own screen; then
     the other is unplugged."""

@@ -1083,6 +1083,7 @@ cleanupmon(struct wl_listener *listener, void *data)
 	LayerSurface *l, *tmp;
 	size_t i;
 
+	fprintf(stderr, "tidewm: output %s is gone\n", m->wlr_output->name);
 	/* Its part of the current workspace, for when it's plugged in again */
 	lt_unplug(m);
 	split_unplug(m);
@@ -1448,8 +1449,12 @@ createmon(struct wl_listener *listener, void *data)
 	OutputConfig oc, file;
 	int configured;
 
-	if (!wlr_output_init_render(wlr_output, alloc, drw))
+	fprintf(stderr, "tidewm: output %s connected\n", wlr_output->name);
+	if (!wlr_output_init_render(wlr_output, alloc, drw)) {
+		fprintf(stderr, "tidewm: output %s can't be drawn on, so it stays dark\n",
+				wlr_output->name);
 		return;
+	}
 
 	m = wlr_output->data = ecalloc(1, sizeof(*m));
 	m->wlr_output = wlr_output;
