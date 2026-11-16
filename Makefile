@@ -181,8 +181,9 @@ tests/input-method-unstable-v2-protocol.c:
 	$(WAYLAND_SCANNER) private-code \
 		protocols/input-method-unstable-v2.xml $@
 tests/ime: tests/ime.c tests/input-method-unstable-v2-client-protocol.h \
-		tests/input-method-unstable-v2-protocol.c
-	$(CC) tests/ime.c tests/input-method-unstable-v2-protocol.c -Itests \
+		tests/input-method-unstable-v2-protocol.c \
+		tests/virtual-keyboard-unstable-v1-client-protocol.h tests/virtual-keyboard-unstable-v1-protocol.c
+	$(CC) tests/ime.c tests/input-method-unstable-v2-protocol.c tests/virtual-keyboard-unstable-v1-protocol.c -Itests \
 		`$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
 tests/wlr-virtual-pointer-unstable-v1-client-protocol.h:

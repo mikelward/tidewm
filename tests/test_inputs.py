@@ -12,11 +12,12 @@ import shutil
 import subprocess
 import unittest
 
-from harness import (EVENT_INPUT, EVENT_WINDOW, GET_CONFIG, GET_INPUTS, GET_OUTPUTS,
+from harness import (EVENT_BINDING, EVENT_INPUT, EVENT_WINDOW, GET_CONFIG, GET_INPUTS, GET_OUTPUTS,
                      GET_VERSION, ROOT, RUN_COMMAND, TIMEOUT, Tidewm, TidewmTest)
 
 POINTER = os.path.join(ROOT, "tests", "pointer")
 KEYBOARD = os.path.join(ROOT, "tests", "keyboard")
+IME = os.path.join(ROOT, "tests", "ime")
 
 
 class InputTest(TidewmTest):
@@ -364,6 +365,78 @@ class InputMethodTest(NestedTest):
         self.assertEqual(self.line(ime), b"grabbed\n")
         self.parent.press("-k", "x")  # Escape, keycode 1, in the nested tidewm
         self.assertEqual(self.line(ime), b"key 1 1\n")
+
+
+class ForwardingInputMethodTest(NestedTest):
+    """An input method that sends back the keys it doesn't take, over a
+    virtual keyboard of its own, as fcitx5 does (tests/ime FORWARD=1).
+    tidewm gives an input method only a real keyboard's keys, so they're
+    the nested tidewm's: tests/keyboard's KEYS in the parent, with the
+    modifiers a keyboard sends after each, so Super_L is a Mod4 key as on a
+    real one. 125 is Super_L, 28 Return and 88 F12."""
+
+    CONFIG = """bindsym --release Super_L nop tap
+bindsym Mod4+Return nop return
+bindsym F12 nop done
+"""
+    FORWARD = "1"
+
+    def setUp(self):
+        super().setUp()
+        self.keyboard()
+        self.ime = None
+        if self.FORWARD is None:
+            return
+        # Unbuffered, so a line read leaves the rest for select to see
+        self.ime = subprocess.Popen([IME], env=dict(self.wm.env, FORWARD=self.FORWARD),
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, bufsize=0)
+        self.wm.clients.append(self.ime)
+        self.addCleanup(self.ime.stdout.close)
+        self.assertEqual(self.ime_line(), b"grabbed\n")
+
+    def ime_line(self):
+        self.assertTrue(select.select([self.ime.stdout], [], [], TIMEOUT)[0], "tests/ime said nothing")
+        return self.ime.stdout.readline()
+
+    def press(self, keys):
+        keyboard = subprocess.Popen([KEYBOARD, "0"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    env=dict(self.parent.env, XKB_LAYOUT="us", KEYS=keys))
+        self.addCleanup(keyboard.wait)
+        self.addCleanup(keyboard.stdin.close)
+        self.addCleanup(keyboard.stdout.close)
+        self.assertTrue(select.select([keyboard.stdout], [], [], TIMEOUT)[0], "tests/keyboard said nothing")
+        self.assertEqual(keyboard.stdout.readline(), b"switched\n")
+
+    def ran(self, keys):
+        """The commands of the bindings keys run: until F12's, pressed once
+        the input method's forwarded Super_L has come up, so what its keys
+        run comes before it"""
+        ipc = self.connect()
+        ipc.subscribe("binding")
+        self.press(keys)
+        if self.ime:
+            lines = []
+            while lines[-1:] != [b"forwarded 125 0\n"]:
+                lines.append(self.ime_line())
+            self.assertIn(b"key 125 1\n", lines, "the input method had Super")
+        self.press("88+ 88-")
+        ran = []
+        while ran[-1:] != ["nop done"]:
+            ran.append(ipc.next_event(EVENT_BINDING)["binding"]["command"])
+        return ran[:-1]
+
+    def test_super_and_a_key_runs_that_key_alone_not_the_super_tap_too(self):
+        self.assertEqual(self.ran("125+ 28+ 28- 125-"), ["nop return"])
+
+    def test_super_let_go_before_the_key_is_no_tap_either(self):
+        self.assertEqual(self.ran("125+ 28+ 125- 28-"), ["nop return"])
+
+    def test_a_super_tap_runs_its_binding_once(self):
+        self.assertEqual(self.ran("125+ 125-"), ["nop tap"])
+
+
+class NoInputMethodTest(ForwardingInputMethodTest):
+    FORWARD = None
 
 
 class NoConfigKeyboardTest(NestedTest):

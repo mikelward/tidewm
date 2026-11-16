@@ -11,3 +11,7 @@ tests/workspaces
 tests/locker
 tests/power
 tests/ime
+tests/capture
+tests/keyboard
+tests/launcher
+tests/pointer

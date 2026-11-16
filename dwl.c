@@ -2138,7 +2138,7 @@ keypress(struct wl_listener *listener, void *data)
 	uint32_t keycode = event->keycode + 8;
 	struct wlr_keyboard *kb = &group->wlr_group->keyboard;
 	xkb_layout_index_t layout = xkb_state_key_get_layout(kb->xkb_state, keycode);
-	int handled = 0;
+	int handled = 0, echo;
 
 	// Get the keysyms for level 0 (normal) and level 1 (shifted)
 	// Only one keysym for each level:
@@ -2150,10 +2150,20 @@ keypress(struct wl_listener *listener, void *data)
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 
+	/* A key an input method sends back over a virtual keyboard of its own,
+	 * as fcitx5 does with those it doesn't take, had its bindings when it
+	 * came from the real keyboard: it only goes to the client, so the Super
+	 * of Super+Return, handed back alone, isn't a Super tap too, and a tap
+	 * runs once */
+	echo = input_method_relay && keyboard_is_emulated_by_input_method(
+			group->virtual_keyboard, input_method_relay->input_method);
+
 	/* On _press_, attempt to process a compositor keybinding: on the lock
 	 * screen, only the config file's --locked ones. A release binding runs
 	 * when its key comes up, and the client sees both, as in sway. */
-	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+	if (echo) {
+		/* Its bindings ran, or didn't, on the real keyboard */
+	} else if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		/* You moving on, before a binding can grant anything */
 		fg_key();
 		settings_key_pressed(event->keycode, group->mods, group->keysyms);
@@ -2195,14 +2205,15 @@ keypress(struct wl_listener *listener, void *data)
 	 * method, which types into it, for the shell's polkit agent */
 	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED && !CONSUMED(event->keycode))
 		fg_delivered(seat->keyboard_state.focused_surface);
-	if (input_method_keyboard_grab_forward_key(group, event))
-		return;
-
+	/* Neither the client nor an input method gets the release of a
+	 * handled key-press: an input method would hand it back */
 	if (CONSUMED(event->keycode)) {
 		if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED)
 			consumed[event->keycode] = 0;
-		return; /* Don't pass to the client the release event of a handled key-press */
+		return;
 	}
+	if (input_method_keyboard_grab_forward_key(group, event))
+		return;
 	wlr_seat_set_keyboard(seat, &group->wlr_group->keyboard);
 	/* Pass unhandled keycodes along to the client. */
 	wlr_seat_keyboard_notify_key(seat, event->time_msec,
