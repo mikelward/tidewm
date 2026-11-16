@@ -7,9 +7,12 @@
  * so the keyboard stays until the test is done with it. It prints
  * "switched" once the compositor has had the switch. With KEY, a key's
  * code, it presses and releases that key after the switch: any code, as a
- * client may send one evdev has no key for.
+ * client may send one evdev has no key for. With KEYS, it sends each of
+ * its keys, CODE+ a press and CODE- a release, each followed by the
+ * modifiers its keymap gives the keys down then, as a keyboard's are
+ * after its key: so 125+ 28+ 28- 125- is Super+Return, Super_L a Mod4 key.
  *
- * Usage: XKB_LAYOUT=LAYOUTS [KEY=CODE] keyboard LAYOUT
+ * Usage: XKB_LAYOUT=LAYOUTS [KEY=CODE] [KEYS="CODE+ CODE- ..."] keyboard LAYOUT
  */
 #define _GNU_SOURCE /* memfd_create */
 #include <stdio.h>
@@ -53,9 +56,10 @@ static const struct wl_registry_listener registry_listener = {
 	.global_remove = registry_global_remove,
 };
 
-/* The keymap XKB makes of the layouts, in a file the compositor can map */
+/* The keymap XKB makes of the layouts, in a file the compositor can map;
+ * *made, the keymap itself, which the caller unrefs */
 static int
-keymap_file(const char *layouts, uint32_t *size)
+keymap_file(const char *layouts, uint32_t *size, struct xkb_keymap **made)
 {
 	struct xkb_rule_names names = {.layout = layouts};
 	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
@@ -72,9 +76,44 @@ keymap_file(const char *layouts, uint32_t *size)
 			|| write(fd, text, *size) != (ssize_t)*size)
 		die("can't write the keymap's file");
 	free(text);
-	xkb_keymap_unref(keymap);
+	*made = keymap;
 	xkb_context_unref(context);
 	return fd;
+}
+
+/* KEYS: each CODE+ or CODE-, then the modifiers it leaves */
+static void
+send_keys(struct zwp_virtual_keyboard_v1 *keyboard, struct xkb_keymap *keymap,
+		const char *keys, uint32_t group)
+{
+	struct xkb_state *state = xkb_state_new(keymap);
+	const char *p = keys;
+	char *end;
+	if (!state)
+		die("XKB can't make a state for the keymap");
+	xkb_state_update_mask(state, 0, 0, 0, 0, 0, group);
+	while (*p) {
+		uint32_t code;
+		int down;
+		while (*p == ' ')
+			p++;
+		if (!*p)
+			break;
+		code = (uint32_t)strtoul(p, &end, 10);
+		if (end == p || (*end != '+' && *end != '-'))
+			die("KEYS: each is a code, then + for a press or - for a release");
+		down = *end == '+';
+		p = end + 1;
+		zwp_virtual_keyboard_v1_key(keyboard, 0, code, down
+				? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED);
+		xkb_state_update_key(state, code + 8, down ? XKB_KEY_DOWN : XKB_KEY_UP);
+		zwp_virtual_keyboard_v1_modifiers(keyboard,
+				xkb_state_serialize_mods(state, XKB_STATE_MODS_DEPRESSED),
+				xkb_state_serialize_mods(state, XKB_STATE_MODS_LATCHED),
+				xkb_state_serialize_mods(state, XKB_STATE_MODS_LOCKED),
+				xkb_state_serialize_layout(state, XKB_STATE_LAYOUT_EFFECTIVE));
+	}
+	xkb_state_unref(state);
 }
 
 int
@@ -83,7 +122,8 @@ main(int argc, char *argv[])
 	struct wl_display *display;
 	struct wl_registry *registry;
 	struct zwp_virtual_keyboard_v1 *keyboard;
-	const char *layouts = getenv("XKB_LAYOUT"), *key = getenv("KEY");
+	const char *layouts = getenv("XKB_LAYOUT"), *key = getenv("KEY"), *keys = getenv("KEYS");
+	struct xkb_keymap *keymap;
 	char buf[64];
 	uint32_t size;
 	int fd;
@@ -99,7 +139,7 @@ main(int argc, char *argv[])
 	if (!manager || !seat)
 		die("the compositor lacks zwp_virtual_keyboard_manager_v1 or a seat");
 	keyboard = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(manager, seat);
-	fd = keymap_file(layouts, &size);
+	fd = keymap_file(layouts, &size, &keymap);
 	zwp_virtual_keyboard_v1_keymap(keyboard, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd, size);
 	close(fd);
 	/* No modifier down, and the layout as the group */
@@ -109,6 +149,9 @@ main(int argc, char *argv[])
 		zwp_virtual_keyboard_v1_key(keyboard, 0, code, WL_KEYBOARD_KEY_STATE_PRESSED);
 		zwp_virtual_keyboard_v1_key(keyboard, 0, code, WL_KEYBOARD_KEY_STATE_RELEASED);
 	}
+	if (keys)
+		send_keys(keyboard, keymap, keys, (uint32_t)atoi(argv[1]));
+	xkb_keymap_unref(keymap);
 	/* The compositor handles requests in order, so it has had them all
 	 * by the time it answers */
 	if (wl_display_roundtrip(display) < 0)
