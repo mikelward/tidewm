@@ -630,6 +630,16 @@ lands with a test.
    local.conf` a machine may not have, would then need a pattern
    (`local.con[f]`) or a way to mark it optional. tidesway decides with
    tidewm. Undecided (maintainer, 2026-11-15).
+7. **Session management**: xdg-session-management-v1 (wayland-protocols'
+   staging since 1.48), so an app that restarts, a browser updating say,
+   asks for each window's workspace back before it's shown. tide's shell
+   matches reopened windows by title meanwhile, and sends them once
+   they're shown (tide's SPEC.md §6.5). Remember a window's workspace,
+   floating geometry and minimized state under `~/.local/state`, as KWin
+   6.7.5 does its desktops. Also offer the draft's name,
+   `xx_session_manager_v1`, the only one Chromium speaks, behind its
+   `WaylandSessionManagement` feature (off by default, 2026-11). wlroots
+   has none yet (its MR 5321 is open); tidesway does it with tidewm.
 
 Deferred: tide's launcher and notifications hidden from capture (Decided,
 above).
