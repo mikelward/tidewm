@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Stands in for tidewm in tests/harness.py: TIDEWM=experiments/sway/tidewm-on-sway.
+
+It takes tidewm's arguments (-c CONFIG, -s STARTUP), writes a sway config
+that looks like tide (look.conf) and takes in the test's config, and runs
+the sway on PATH in its place. TIDE_SWAY_MODE says what runs with it:
+
+  helper (the default)  tidehelper.py proxies the socket and runs the
+                        startup command once it's up
+  stock                 sway alone: the startup command sees sway's socket
+"""
+
+import json
+import os
+import shlex
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from tidehelper import translate_config  # noqa: E402
+
+
+def main(argv):
+    config = startup = None
+    i = 0
+    while i < len(argv):
+        if argv[i] == "-c":
+            config, i = argv[i + 1], i + 2
+        elif argv[i] == "-s":
+            startup, i = argv[i + 1], i + 2
+        else:
+            sys.exit(f"tidewm-on-sway: unknown argument {argv[i]}")
+    if config is None:
+        config = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+                              "tidewm", "config")
+    mode = os.environ.get("TIDE_SWAY_MODE", "helper")
+    state = os.path.join(os.environ["XDG_RUNTIME_DIR"], "tide-sway")
+    os.makedirs(state, exist_ok=True)
+    translated = os.path.join(state, "translated.conf")
+    text = ""
+    if os.path.exists(config):
+        with open(config) as f:
+            text = f.read()
+    if mode == "helper":
+        with open(translated, "w") as f:
+            f.write(translate_config(text, {}))
+    else:
+        with open(translated, "w") as f:
+            f.write(text)
+    with open(os.path.join(state, "startup.sh"), "w") as f:
+        f.write((startup or "true") + "\n")
+    with open(os.path.join(state, "state.json"), "w") as f:
+        json.dump({"config": config, "startup": startup or "true",
+                   "translated": translated}, f)
+    if mode == "helper":
+        run = f"exec python3 {shlex.quote(os.path.join(HERE, 'tidehelper.py'))} {shlex.quote(state)}"
+    else:
+        run = f"exec sh {shlex.quote(os.path.join(state, 'startup.sh'))}"
+    base = os.path.join(state, "sway.conf")
+    with open(base, "w") as f:
+        with open(os.path.join(HERE, "look.conf")) as look:
+            f.write(look.read())
+        # the test's config, through the helper's translation in helper mode
+        f.write(f"include {translated}\n")
+        f.write(run + "\n")
+    sway = os.environ.get("SWAY", "sway")
+    os.execvp(sway, [sway, "-c", base])
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
