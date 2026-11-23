@@ -22,7 +22,7 @@ LAUNCHER = os.path.join(ROOT, "tests", "launcher")
 
 class LayerHelpers(TidewmTest):
     """Helpers, with no tests of their own."""
-    CONFIG = "bindsym Mod1+x focus next\n"
+    CONFIG = "bindsym Mod1+x focus next\nbindsym Mod1+Tab zoom next\n"
 
     def setUp(self):
         super().setUp()
@@ -155,6 +155,16 @@ class OnDemandTest(LayerHelpers):
         self.press("-M", "alt", "-k", "x", "-m", "alt")
         self.assertEqual(self.line(note), b"unfocused\n")
         self.assertEqual(self.focused(), [window["id"]])
+
+    def test_an_alt_tab_tap_takes_it(self):
+        # Zoom made as Alt comes up, after its binding ran
+        self.open("test.first")
+        second, _ = self.open("test.second")
+        note = self.notification()
+        self.typing_in(note)
+        self.press("-M", "alt", "-k", "Tab", "-m", "alt")
+        self.assertEqual(self.line(note), b"unfocused\n")
+        self.assertEqual(self.focused(), [second["id"]])
 
     def test_the_launcher_takes_it(self):
         self.open("test.first")
@@ -404,6 +414,25 @@ class GrabTest(LayerHelpers):
         self.assertEqual(self.line(center), b"cleared\n")
         self.assertEqual(self.line(center), b"unfocused\n")
         self.assertEqual(self.focused(), [window["id"]])
+
+    def test_an_alt_tab_tap_ends_it(self):
+        self.open("test.first")
+        second, _ = self.open("test.second")
+        center = self.center()
+        self.press("-M", "alt", "-k", "Tab", "-m", "alt")
+        self.assertEqual(self.line(center), b"cleared\n")
+        self.assertEqual(self.line(center), b"unfocused\n")
+        self.assertEqual(self.focused(), [second["id"]])
+
+    def test_escape_from_alt_tab_ends_it(self):
+        # Alt (56) held, Tab (15), Escape (1): focus back where it began
+        self.open("test.first")
+        second, _ = self.open("test.second")
+        center = self.center()
+        self.press("-M", "alt", "-k", "Tab", "-k", "Escape", "-m", "alt")
+        self.assertEqual(self.line(center), b"cleared\n")
+        self.assertEqual(self.line(center), b"unfocused\n")
+        self.assertEqual(self.focused(), [second["id"]])
 
     def test_the_launcher_ends_it(self):
         self.open("test.first")

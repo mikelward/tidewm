@@ -1424,6 +1424,16 @@ ipc_run_command(char *cmd, int *quit_after, Client *window)
 		ipc_zoom(target);
 		return ipc_json_success(1, NULL);
 	}
+	/* tidewm's own, tide's Alt+Tab: zoom by choosing the window first,
+	 * while the key's modifiers are held (cycle.h) */
+	if (!has_criteria && ipc_take(&cmd, "zoom")) {
+		if (strcasecmp(cmd, "next") && strcasecmp(cmd, "prev")) {
+			error = "Expected zoom [next|prev]";
+			goto parse_error;
+		}
+		cycle_zoom(tolower((unsigned char)*cmd) == 'n' ? +1 : -1);
+		return ipc_json_success(1, NULL);
+	}
 	/* tidewm's own: moves its own switch device, as if a switch such as
 	 * the lid had moved, which runs the config file's bindswitch lines */
 	if (!has_criteria && ipc_take(&cmd, "switch")) {

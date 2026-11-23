@@ -604,6 +604,7 @@ static struct wlr_xwayland *xwayland;
 #include "keepopen.h"
 
 #include "workspace.h"
+#include "cycle.h"
 #include "ipc.h"
 #include "settings.h"
 #include "layout.h"
@@ -1760,6 +1761,7 @@ void
 destroykeyboardgroup(struct wl_listener *listener, void *data)
 {
 	KeyboardGroup *group = wl_container_of(listener, group, destroy);
+	cycle_keyboard_gone(group); /* Alt+Tab's, held on it (cycle.h) */
 	wl_event_source_remove(group->key_repeat_source);
 	wl_list_remove(&group->key.link);
 	wl_list_remove(&group->modifiers.link);
@@ -2167,7 +2169,15 @@ keypress(struct wl_listener *listener, void *data)
 		/* You moving on, before a binding can grant anything */
 		fg_key();
 		settings_key_pressed(event->keycode, group->mods, group->keysyms);
-		for (int i = 0; i < 2; i++) {
+		/* Escape ends Alt+Tab's cycle with focus back (cycle.h) */
+		if (cycle_key(group->keysyms[0])) {
+			if (event->keycode <= KEY_MAX)
+				consumed[event->keycode] = 1;
+			handled = 1;
+		}
+		cycle_press_mods = group->mods;
+		cycle_press_group = group;
+		for (int i = 0; !handled && i < 2; i++) {
 			if (runbinding(group->mods, keycode, group->keysyms[i])) {
 				if (event->keycode <= KEY_MAX)
 					consumed[event->keycode] = 1;
@@ -2175,6 +2185,8 @@ keypress(struct wl_listener *listener, void *data)
 				break;
 			}
 		}
+		cycle_press_mods = 0;
+		cycle_press_group = NULL;
 		/* Ctrl+Alt+F1…F12 switch VT even where the config file binds
 		 * nothing to them, locked or not: a file that lost its keys
 		 * (see settings_init) can't leave you with no way out. A
@@ -2229,6 +2241,8 @@ keypressmod(struct wl_listener *listener, void *data)
 
 	/* A key, xkb_switch_layout or a client may have switched the layout */
 	settings_layout_check(group);
+	/* Alt+Tab's cycle ends as its modifiers come up (cycle.h) */
+	cycle_modifiers(group, wlr_keyboard_get_modifiers(&group->wlr_group->keyboard));
 	if (input_method_keyboard_grab_forward_modifiers(group))
 		return;
 
@@ -2249,9 +2263,13 @@ keyrepeat(void *data)
 	wl_event_source_timer_update(group->key_repeat_source,
 			1000 / group->wlr_group->keyboard.repeat_info.rate);
 
+	cycle_press_mods = group->mods;
+	cycle_press_group = group;
 	for (int i = 0; i < 2; i++)
 		if (runbinding(group->mods, group->keycode, group->keysyms[i]))
 			break;
+	cycle_press_mods = 0;
+	cycle_press_group = NULL;
 
 	return 0;
 }
@@ -3984,6 +4002,7 @@ unmapnotify(struct wl_listener *listener, void *data)
 	/* Called when the surface is unmapped, and should no longer be shown. */
 	Client *c = wl_container_of(listener, c, unmap);
 	Workspace *ws;
+	cycle_unmapped(c); /* Alt+Tab's cycle goes back to it no more */
 	if (c == grabc) {
 		cursor_mode = CurNormal;
 		grabc = NULL;
