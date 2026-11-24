@@ -66,6 +66,13 @@ xdg-shell-protocol.h:
 config.h:
 	cp config.def.h $@
 
+# A config.h from an older config.def.h, as an installer rebuilds over,
+# must still build: dwl.c beside it finds it first, and the rest here.
+check-old-config: dwl
+	tmp=`mktemp -d` && cp dwl.c $$tmp && cp tests/config-old.h $$tmp/config.h && \
+	$(CC) -fsyntax-only $$tmp/dwl.c $(DWLCFLAGS); \
+	status=$$?; rm -rf $$tmp; exit $$status
+
 # The tests run dwl on wlroots' headless backend, with tests/client for
 # windows, and check what it reports over the IPC.
 tests/xdg-shell-client-protocol.h:
@@ -228,7 +235,7 @@ tests/launcher: tests/launcher.c tests/wlr-layer-shell-unstable-v1-client-protoc
 		tests/hyprland-focus-grab-v1-protocol.c \
 		-Itests `$(PKG_CONFIG) --cflags wayland-client` $(DWLDEVCFLAGS) $(CFLAGS) \
 		$(LDFLAGS) `$(PKG_CONFIG) --libs wayland-client` -o $@
-test: dwl tests/client tests/workspaces tests/locker tests/power tests/ime tests/pointer tests/launcher \
+test: dwl check-old-config tests/client tests/workspaces tests/locker tests/power tests/ime tests/pointer tests/launcher \
 		tests/keyboard tests/capture \
 		$(XWAYLAND:-DXWAYLAND=tests/x11client)
 	python3 -m unittest discover -s tests -v

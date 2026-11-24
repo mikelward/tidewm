@@ -17,7 +17,8 @@
  * §6.4 has it: a plain left press just outside its edge or a corner,
  * as far out as the shadow reaches, drags that edge or corner until a
  * button comes up, and the pointer shows a resize cursor there. With
- * shadows off, or a shadow_blur_radius of 0, that's FL_GRAB pixels. A
+ * shadows off, a shadow_blur_radius of 0, or a shadow_color with no
+ * alpha, that's FL_GRAB pixels. A
  * window that casts no shadow now, as an unfocused one with shadows
  * active, has the same zone. A press inside the window is the app's, and
  * one in the zone never reaches what's under it. What's over the zone
