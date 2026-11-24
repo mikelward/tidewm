@@ -13,7 +13,9 @@
  *
  * The shadow is one image, cut in nine: its corners drawn as they are,
  * and its edges stretched along the window's sides. Clicks go through it.
- * It reaches shadow_blur_radius past the window, as Hyprland's range.
+ * It reaches shadow_blur_radius past the window, as Hyprland's range, in
+ * shadow_color, black at 0x44 as it comes; with an alpha of 0, there's
+ * none.
  *
  * A floating window's shadow is under it, in its own tree, so it falls on
  * what the window is over. Tiles touch, so a tile's can only fall on its
@@ -24,17 +26,23 @@
  * monitor's window area, off the bar and the next monitor.
  */
 
-#define SHADOW_ALPHA 0x44 /* its darkest, at the edge, out of 255 */
+/* The shadow's color without the config file's line: config.h's, or, as
+ * one copied from an older config.def.h has none, black at 0x44 */
+#ifndef SHADOW_COLOR
+#define SHADOW_COLOR 0x00000044
+#endif
+static const float shadowcolor[] = COLOR(SHADOW_COLOR);
 
-/* The shadow's image: black, premultiplied, round a window one pixel
+/* The shadow's image: its color, premultiplied, round a window one pixel
  * wide, range pixels past it each way */
 typedef struct {
 	struct wlr_buffer base;
 	int range;
+	float color[4]; /* premultiplied, as at the window's edge */
 	uint32_t pixels[];
 } ShadowImage;
 
-static ShadowImage *shadow_image; /* for the range last asked for */
+static ShadowImage *shadow_image; /* for the range and color last asked for */
 /* Tiles' shadows: under every tile, and the focused one's over them */
 static struct wlr_scene_tree *shadow_under, *shadow_over;
 
@@ -80,41 +88,74 @@ fx_no_input(struct wlr_scene_buffer *buffer, double *sx, double *sy)
 	return false;
 }
 
+/* The shadow's color, premultiplied: the config file's shadow_color, or
+ * config.h's SHADOW_COLOR */
+static void
+shadow_color(float rgba[static 4])
+{
+	int i;
+	if (settings && settings->has_shadow_color) {
+		memcpy(rgba, settings->shadow_color, 4 * sizeof(rgba[0]));
+		return;
+	}
+	for (i = 0; i < 3; i++)
+		rgba[i] = shadowcolor[i] * shadowcolor[3];
+	rgba[3] = shadowcolor[3];
+}
+
 /* How far a shadow reaches: the config file's shadow_blur_radius, or
- * config.h's */
+ * config.h's; nowhere if its color can't be seen */
 static int
 shadow_range(void)
 {
+	float color[4];
 	int r = settings && settings->shadow_blur_radius >= 0
 			? settings->shadow_blur_radius : shadow_blur_radius;
+	shadow_color(color);
+	if (color[3] <= 0)
+		return 0;
 	return MAX(0, MIN(r, 100));
 }
 
-/* The shadow's image for a range of r, drawn when r changes: each pixel
- * as dark as it's near the window, fading as the square of its distance's
- * share of the range, to nothing at the range, as Hyprland's
- * render_power 2. The one before is freed once the last window's shadow
- * lets it go. */
+/* One channel of the shadow's color, premultiplied, at strength s, of 1 */
+static uint32_t
+shadow_channel(float c, double s)
+{
+	return (uint32_t)lround(c * s * 255.0);
+}
+
+/* The shadow's image for a range of r, drawn when r or its color changes:
+ * each pixel as strong as it's near the window, fading as the square of
+ * its distance's share of the range, to nothing at the range, as
+ * Hyprland's render_power 2. The one before is freed once the last
+ * window's shadow lets it go. */
 static ShadowImage *
 shadow_image_for(int r)
 {
 	const int size = 2 * r + 1;
+	float color[4];
 	int x, y;
-	if (shadow_image && shadow_image->range == r)
+	shadow_color(color);
+	if (shadow_image && shadow_image->range == r
+			&& !memcmp(shadow_image->color, color, sizeof(color)))
 		return shadow_image;
 	if (shadow_image)
 		wlr_buffer_drop(&shadow_image->base);
 	shadow_image = ecalloc(1, sizeof(*shadow_image)
 			+ (size_t)size * size * sizeof(shadow_image->pixels[0]));
 	shadow_image->range = r;
+	memcpy(shadow_image->color, color, sizeof(color));
 	wlr_buffer_init(&shadow_image->base, &shadow_image_impl, size, size);
 	for (y = 0; y < size; y++) {
 		for (x = 0; x < size; x++) {
 			/* From the window's edge to the pixel's middle */
 			double dx = MAX(0.0, abs(x - r) - 0.5), dy = MAX(0.0, abs(y - r) - 0.5);
 			double t = 1.0 - sqrt(dx * dx + dy * dy) / r;
-			uint32_t a = x == r && y == r ? 0 : t > 0 ? (uint32_t)lround(SHADOW_ALPHA * t * t) : 0;
-			shadow_image->pixels[y * size + x] = a << 24;
+			double s = x == r && y == r ? 0 : t > 0 ? t * t : 0;
+			shadow_image->pixels[y * size + x] = shadow_channel(color[3], s) << 24
+					| shadow_channel(color[0], s) << 16
+					| shadow_channel(color[1], s) << 8
+					| shadow_channel(color[2], s);
 		}
 	}
 	return shadow_image;
@@ -263,7 +304,7 @@ shadow_attach(Client *c)
 		 * the corners beside it */
 		wlr_scene_buffer_set_filter_mode(c->shadow_part[i], WLR_SCALE_FILTER_NEAREST);
 	}
-	c->shadow_range = 0;
+	c->shadow_image = NULL;
 	wlr_scene_node_set_enabled(&c->shadow->node, 0);
 }
 
@@ -275,7 +316,7 @@ shadow_detach(Client *c)
 	if (c->shadow)
 		wlr_scene_node_destroy(&c->shadow->node);
 	c->shadow = NULL;
-	c->shadow_range = 0;
+	c->shadow_image = NULL;
 }
 
 /* Which windows cast a shadow: the config file's shadows, or config.h's */
@@ -363,11 +404,12 @@ shadow_update(Client *c)
 	}
 	wlr_scene_node_set_position(&c->shadow->node, tiled ? c->scene->node.x : 0,
 			tiled ? c->scene->node.y : 0);
-	if (c->shadow_range != r) {
-		struct wlr_buffer *image = &shadow_image_for(r)->base;
+	/* Its parts hold the image they show, so one drawn since, for a new
+	 * range or color, can't be at the same address */
+	if (c->shadow_image != shadow_image_for(r)) {
+		c->shadow_image = shadow_image;
 		for (i = 0; i < 8; i++)
-			wlr_scene_buffer_set_buffer(c->shadow_part[i], image);
-		c->shadow_range = r;
+			wlr_scene_buffer_set_buffer(c->shadow_part[i], &shadow_image->base);
 	}
 	for (i = 0; i < 8; i++) {
 		struct wlr_box box = { parts[i].x, parts[i].y, parts[i].w, parts[i].h }, cut = box;

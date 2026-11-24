@@ -69,6 +69,10 @@ static const int shadows                   = ShadowsNone;
 /* How far a shadow reaches past its window, in pixels, up to 100 */
 static const int shadow_blur_radius        = 8;
 
+/* A shadow's color at its darkest, by the window, as 0xRRGGBBAA; an alpha
+ * of 0 casts none. Without it, black at 0x44 (effects.h). */
+#define SHADOW_COLOR                         0x00000044
+
 static const Rule rules[] = {
 	/* app_id             title       workspace     isfloating   monitor */
 	{ "Gimp_EXAMPLE",     NULL,       NULL,         1,           -1 }, /* Start on the current workspace, floating, not tiled */

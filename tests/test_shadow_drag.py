@@ -208,6 +208,18 @@ class FloatingNoRangeTest(ZoneTest):
         self.assertEqual(self.box(window), (x, y, w + 50, h))
 
 
+class FloatingNoColorTest(ZoneTest):
+    CONFIG = "shadows floating\nshadow_blur_radius 20\nshadow_color #00000000\n" + FLOAT + NO_BORDER
+
+    def test_with_a_shadow_that_cant_be_seen_the_zone_is_8_px(self):
+        window = self.open("test.float", "300x200")
+        x, y, w, h = self.box(window)
+        self.drag(x + w + 15, y + h // 2, x + w + 15 + 50)
+        self.assertEqual(self.box(window), (x, y, w, h))
+        self.drag(x + w + 7, y + h // 2, x + w + 7 + 50)
+        self.assertEqual(self.box(window), (x, y, w + 50, h))
+
+
 class ActiveTileTest(ZoneTest):
     CONFIG = "shadows active\nshadow_blur_radius 20\n" + NO_BORDER
 
@@ -346,6 +358,18 @@ class NoRangeTilesTest(ZoneTest):
         master, stack = self.windows_in("tile", 2, 0.5)
         edge = x + w // 2
         self.assert_still([master, stack], edge + 4, y + h // 2, edge + 100)
+        self.drag(edge + 3, y + h // 2, edge + 3 + 64)
+        self.assertEqual(self.box(master)[2], w // 2 + 64)
+
+
+class NoColorTilesTest(ZoneTest):
+    CONFIG = "shadows all\nshadow_blur_radius 20\nshadow_color #ffffff00\n" + NO_BORDER
+
+    def test_a_shadow_that_cant_be_seen_leaves_only_the_grab(self):
+        x, y, w, h = self.area()
+        master, stack = self.windows_in("tile", 2, 0.5)
+        edge = x + w // 2
+        self.assert_still([master, stack], edge + 15, y + h // 2, edge + 100)
         self.drag(edge + 3, y + h // 2, edge + 3 + 64)
         self.assertEqual(self.box(master)[2], w // 2 + 64)
 

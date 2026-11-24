@@ -1,15 +1,15 @@
 """Effects (effects.h, docs/config.md): a window fades in as it opens, and
 the dim fades as focus moves, each over fade_duration, at once without
 it; shadows says which windows cast a soft shadow, each floating one, the
-focused one, or all, and shadow_blur_radius how far it reaches. A
-fade_duration of an hour keeps a fade near its start for as long as a test
+focused one, or all, shadow_blur_radius how far it reaches, and
+shadow_color its color, black at 0x44 without the line. A fade_duration of an hour keeps a fade near its start for as long as a test
 looks."""
 
 import os
 import subprocess
 import unittest
 
-from harness import EVENT_WINDOW, GET_OUTPUTS, ROOT, RUN_COMMAND, TIMEOUT, TidewmTest
+from harness import EVENT_WINDOW, GET_CONFIG, GET_OUTPUTS, ROOT, RUN_COMMAND, TIMEOUT, TidewmTest
 
 CAPTURE = os.path.join(ROOT, "tests", "capture")
 FLOAT = 'for_window [app_id="^test.float$"] floating enable\n'
@@ -147,6 +147,61 @@ class ShadowTest(EffectsHelpers):
         self.assertEqual(self.pixels((x - 2, y + h // 2)), [BACKGROUND])
 
 
+class ShadowColorTest(EffectsHelpers):
+    CONFIG = "shadows enable\n" + FLOAT
+
+    def reload(self, lines):
+        self.wm.write_config(lines + "shadows enable\n" + FLOAT)
+        result, = self.connect().request(RUN_COMMAND, "reload")
+        self.assertTrue(result["success"], result)
+
+    def near(self, window):
+        x, y, w, h = self.rect(window)
+        color, = self.pixels((x - 2, y + h // 2))
+        return color
+
+    def casts(self, window):
+        return self.windows()[window]["shadow"]
+
+    def test_a_reload_with_a_new_color_redraws_the_shadow(self):
+        window = self.open("test.float", size="300x200")
+        black = self.near(window)
+        self.assertTrue(all(c < b for c, b in zip(black, BACKGROUND)), f"{black} isn't shadowed")
+        self.reload("shadow_color #ffffff80\n")
+        glow = self.near(window)
+        self.assertTrue(all(c > b for c, b in zip(glow, BACKGROUND)), f"{glow} isn't lit")
+        self.reload("shadow_color #ff0000\n")
+        red = self.near(window)
+        self.assertGreater(red[0], BACKGROUND[0], f"{red} isn't red")
+        self.assertLess(red[1], BACKGROUND[1], f"{red} isn't red")
+        self.reload("shadow_color #00000044\n")
+        self.assertEqual(self.near(window), black, "#00000044 is the default")
+        self.reload("")
+        self.assertEqual(self.near(window), black, "without the line, the default")
+
+    def test_a_color_with_no_alpha_casts_none(self):
+        window = self.open("test.float", size="300x200")
+        self.reload("shadow_color #ffffff00\n")
+        self.assertFalse(self.casts(window))
+        self.assertEqual(self.near(window), BACKGROUND)
+        self.reload("shadow_color #ffffff01\n")
+        self.assertTrue(self.casts(window))
+
+
+class BadShadowColorAtStartTest(EffectsHelpers):
+    CONFIG = "shadow_color glow\nshadows enable\n" + FLOAT
+
+    def test_tidewm_starts_without_the_bad_line_and_says_why(self):
+        config = self.connect().request(GET_CONFIG)
+        self.assertEqual(config["errors"], [f"{self.wm.config_path}:1: shadow_color takes "
+                                            "a color as #RRGGBB or #RRGGBBAA"])
+        window = self.open("test.float", size="300x200")
+        x, y, w, h = self.rect(window)
+        near, = self.pixels((x - 2, y + h // 2))
+        self.assertTrue(all(c < b for c, b in zip(near, BACKGROUND)),
+                        f"{near} isn't shadowed in the default color")
+
+
 class NoShadowTest(EffectsHelpers):
     CONFIG = FLOAT
 
@@ -175,11 +230,17 @@ class EffectsConfigTest(EffectsHelpers):
                      "shadow_blur_radius wide\n", "shadow_blur_radius\n",
                      "shadow_blur_radius 8 9\n"):
             self.assertIn("shadow_blur_radius takes pixels, from 0 to 100", self.fails(line))
+        for line in ("shadow_color\n", "shadow_color glow\n", "shadow_color #fff\n",
+                     "shadow_color #1234567\n", "shadow_color #12345678 #12345678\n",
+                     "shadow_color #gggggg\n", "shadow_color ##123456\n"):
+            self.assertIn("shadow_color takes a color as #RRGGBB or #RRGGBBAA", self.fails(line))
 
     def test_a_shadow_line_cant_be_in_a_mode(self):
         self.assertIn("shadows can't be in a mode", self.fails("mode m {\nshadows all\n}\n"))
         self.assertIn("shadow_blur_radius can't be in a mode",
                       self.fails("mode m {\nshadow_blur_radius 8\n}\n"))
+        self.assertIn("shadow_color can't be in a mode",
+                      self.fails("mode m {\nshadow_color #000000\n}\n"))
 
 
 NO_BORDER = "default_border none\n"  # so a window's edge is its own color

@@ -81,8 +81,8 @@ startup and again on `reload`, with no restart.
   (`default_layout`, `ultrawide_aspect`, `layout_defaults`,
   `layout_cycle`, `single_window`, `new_window`);
 - dimming inactive windows, fades, shadows and borders (`dim_inactive`,
-  `fade_duration`, `shadows`, `shadow_blur_radius`, `default_border`,
-  `client.focused` and the other classes);
+  `fade_duration`, `shadows`, `shadow_blur_radius`, `shadow_color`,
+  `default_border`, `client.focused` and the other classes);
 - X11 at a fractional scale (`xwayland_scaling`) and
   [the focus guard](docs/config.md#the-focus-guard) (`focus_guard`);
 - variables, and other files it includes, such as a shell's own settings
@@ -233,7 +233,8 @@ one is dimmed, as tide's SPEC §6.2 has it
 With `fade_duration 300` and `shadows active` in the config file, a window
 fades in as it opens, and the focused one casts a soft shadow, as in
 tide's `tidewm/tide.conf` ([`docs/config.md`](docs/config.md),
-`fade_duration` and `shadows`).
+`fade_duration` and `shadows`). `shadow_color #ededf155` makes the shadow
+a light glow, as on a dark desktop.
 
 ### Border colors
 

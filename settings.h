@@ -227,6 +227,8 @@ typedef struct {
 	int fade_duration; /* fade_duration MILLISECONDS; -1: not given */
 	int shadows; /* shadows disable|floating|active|all: a Shadows...; -1: not given */
 	int shadow_blur_radius; /* shadow_blur_radius PIXELS; -1: not given */
+	float shadow_color[4]; /* shadow_color #RRGGBB|#RRGGBBAA, premultiplied */
+	int has_shadow_color; /* whether the file has the line */
 	int resize_grab; /* resize_grab PIXELS; -1: not given */
 	int border; /* default_border none|pixel [N]: its width; -1: not given */
 	float colors[BorderClasses][4]; /* client.CLASS lines' border colors, premultiplied */
@@ -1885,6 +1887,21 @@ settings_color(const char *arg, float rgba[static 4])
 	return 1;
 }
 
+/* A shadow_color line: the shadow's color, as #RRGGBB or #RRGGBBAA, as
+ * tidesway's; an alpha of 0 casts none (effects.h) */
+static int
+settings_shadow_color(Settings *s, char *rest, unsigned int line,
+		struct json_object *errors)
+{
+	char *word = settings_arg(&rest);
+	if (!word || *rest || !settings_color(word, s->shadow_color)) {
+		settings_error(errors, line, "shadow_color takes a color as #RRGGBB or #RRGGBBAA");
+		return 0;
+	}
+	s->has_shadow_color = 1;
+	return 1;
+}
+
 /* A client.CLASS line, as sway's: border, background and text colors,
  * then an indicator and a child_border if you like. tidewm draws only a
  * border round the window, sway's child_border, which is the background
@@ -2278,6 +2295,13 @@ settings_parse_text(Settings *s, char *text, SettingsVar **vars, size_t *nvars, 
 				ok = 0;
 			} else {
 				ok &= settings_shadow_blur_radius(s, p, line, errors);
+			}
+		} else if (!strcasecmp(word, "shadow_color")) {
+			if (mode) {
+				settings_error(errors, line, "shadow_color can't be in a mode");
+				ok = 0;
+			} else {
+				ok &= settings_shadow_color(s, p, line, errors);
 			}
 		} else if (!strcasecmp(word, "default_border")) {
 			if (mode) {

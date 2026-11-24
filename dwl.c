@@ -212,7 +212,7 @@ typedef struct {
 	int64_t fade_start; /* when it started */
 	struct wlr_scene_tree *shadow; /* effects.h's, under it, or over or under the tiles */
 	struct wlr_scene_buffer *shadow_part[8];
-	int shadow_range; /* the shadow_blur_radius its parts' image is drawn for, or 0 */
+	void *shadow_image; /* the image its parts show (effects.h), or NULL */
 	int nodim; /* the dim command's or a rule's: it never dims */
 	int wantsfullscreen; /* asked for fullscreen while held, so waits for focus */
 	struct wlr_box unmaximized; /* its place before it was maximized; none if it opened so */
